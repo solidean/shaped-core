@@ -507,6 +507,14 @@ void rendering_scope::set_scissor(tg::aabb2i const& rect)
 {
     _cmd.raster_set_scissor(rect);
 }
+void rendering_scope::set_viewports(cc::span<viewport const> viewports)
+{
+    _cmd.raster_set_viewports(viewports);
+}
+void rendering_scope::set_scissors(cc::span<tg::aabb2i const> rects)
+{
+    _cmd.raster_set_scissors(rects);
+}
 void rendering_scope::set_stencil_reference(u32 reference)
 {
     _cmd.raster_set_stencil_reference(reference);
@@ -614,6 +622,14 @@ void command_list_raster_scope::set_scissor(tg::aabb2i const& rect)
 {
     _cmd.raster_set_scissor(rect);
 }
+void command_list_raster_scope::set_viewports(cc::span<viewport const> viewports)
+{
+    _cmd.raster_set_viewports(viewports);
+}
+void command_list_raster_scope::set_scissors(cc::span<tg::aabb2i const> rects)
+{
+    _cmd.raster_set_scissors(rects);
+}
 void command_list_raster_scope::set_stencil_reference(u32 reference)
 {
     _cmd.raster_set_stencil_reference(reference);
@@ -706,6 +722,14 @@ void command_list_raster_manual_scope::set_viewport(viewport const& vp)
 void command_list_raster_manual_scope::set_scissor(tg::aabb2i const& rect)
 {
     _cmd.raster_set_scissor(rect);
+}
+void command_list_raster_manual_scope::set_viewports(cc::span<viewport const> viewports)
+{
+    _cmd.raster_set_viewports(viewports);
+}
+void command_list_raster_manual_scope::set_scissors(cc::span<tg::aabb2i const> rects)
+{
+    _cmd.raster_set_scissors(rects);
 }
 void command_list_raster_manual_scope::set_stencil_reference(u32 reference)
 {

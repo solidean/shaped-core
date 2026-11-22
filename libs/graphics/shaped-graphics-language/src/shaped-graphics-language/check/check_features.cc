@@ -98,6 +98,22 @@ void checker::judge_entry_features(symbol_id id)
         for (auto const& parameter : out.at(info.parameters))
             if (parameter.input == stage_input::none && has_layer(parameter.type))
                 needed.set(feature::vertex_layer_output);
+    // CHK-534: likewise the viewport, which the device must have more than one of
+    auto const has_viewport = [&](type_id type)
+    {
+        if (!is_valid(type) || out.at(type).kind != type_kind::structure)
+            return false;
+        for (auto const& m : out.at(out.at(type).members))
+            if (m.is_viewport_index)
+                return true;
+        return false;
+    };
+    if (info.entry_stage == stage::vertex && has_viewport(info.result))
+        needed.set(feature::multi_viewport);
+    if (info.entry_stage == stage::pixel)
+        for (auto const& parameter : out.at(info.parameters))
+            if (parameter.input == stage_input::none && has_viewport(parameter.type))
+                needed.set(feature::multi_viewport);
     // CHK-274: a pixel stage that takes a member per sample runs per sample, which vulkan gives only with a feature
     if (info.entry_stage == stage::pixel)
         for (auto const& parameter : out.at(info.parameters))

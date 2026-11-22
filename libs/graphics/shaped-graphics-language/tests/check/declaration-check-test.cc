@@ -644,3 +644,33 @@ TEST("sgl check - a vertex stage's @layer is one uint the rasterizer reads, and 
                       "@vertex fun vs(v: vin) -> layered_out:\n    return { p = hpos4(0.0, 0.0, 0.0, 1.0) }\n")
               .contains("reaches no rasterizer, so @layer means nothing on it"));
 }
+
+TEST("sgl check - a vertex stage's @viewport_index is one uint the rasterizer reads, and needs multi_viewport")
+{
+    // CHK-534
+    auto const placed = [](cc::string_view fields, cc::string_view require = "require multi_viewport\n\n")
+    {
+        return reports_for(cc::format("{}struct placed_out:\n    @position p: hpos4\n{}\n"
+                                      "@vertex fun vs(@instance_index i: int) -> placed_out:\n"
+                                      "    return {{ p = hpos4(0.0, 0.0, 0.0, 1.0), vp = i as uint }}\n",
+                                      require, fields));
+    };
+    CHECK(placed("    @viewport_index vp: uint\n") == "");
+    CHECK(placed("    @viewport_index vp: uint\n", "").contains("feature-not-declared user:[vs] vs needs multi_viewport"));
+    CHECK(placed("    @viewport_index vp: int\n").contains("the @viewport_index field 'vp' of a @vertex fun is a uint"));
+    CHECK(placed("    @viewport_index @interpolate(.flat) vp: uint\n")
+              .contains("the @viewport_index member 'vp' is the rasterizer's, and is no interpolated value"));
+    CHECK(placed("    @viewport_index vp: uint\n    @viewport_index other: uint\n")
+              .contains("at most one @viewport_index field"));
+    // beside a layer, each is its own output
+    CHECK(reports_for("require multi_viewport, vertex_layer_output\n\nstruct both_out:\n    @position p: hpos4\n"
+                      "    @viewport_index vp: uint\n    @layer layer: uint\n\n"
+                      "@vertex fun vs(@instance_index i: int) -> both_out:\n"
+                      "    return { p = hpos4(0.0, 0.0, 0.0, 1.0), vp = i as uint, layer = 0u }\n")
+          == "");
+    // a struct no rasterizer reads has no viewport to pick
+    CHECK(reports_for("@vertex struct vin:\n    @viewport_index vp: uint\n\nstruct placed_out:\n    @position p: "
+                      "hpos4\n\n"
+                      "@vertex fun vs(v: vin) -> placed_out:\n    return { p = hpos4(0.0, 0.0, 0.0, 1.0) }\n")
+              .contains("reaches no rasterizer, so @viewport_index means nothing on it"));
+}

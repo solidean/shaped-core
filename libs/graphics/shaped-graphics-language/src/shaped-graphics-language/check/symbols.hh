@@ -412,6 +412,8 @@ struct sgl::check::member_info
     bool is_position = false;
     /// Carries `@layer`: the layer of a layered render target the vertex stage sends its primitive to (CHK-419).
     bool is_layer = false;
+    /// Carries `@viewport_index`: the viewport the vertex stage sends its primitive to (CHK-534).
+    bool is_viewport_index = false;
     /// `@interpolate(…)`, or the default: perspective at the pixel centre.
     interpolation interpolate;
     /// Carries `@interpolate` at all, which a member that is no stage link must not.

@@ -923,6 +923,10 @@ fun f() -> float:
   The rasterizer reads it, so it takes no location and no `@interpolate`, and a pixel stage that takes the struct reads the layer its primitive went to.
   Each stage whose struct holds one needs `vertex_layer_output`, which WebGPU has on no device, so its WGSL is `target-lacks-feature`.
   A layer past the target's last layers draws nothing.
+* **CHK-534** A field of that struct may carry `@viewport_index` likewise, at most one, a `uint`: the viewport its primitive draws into, and the scissor that clips it.
+  It takes no location and no `@interpolate`, and a pixel stage that takes the struct reads it as `@layer` is read.
+  Each stage whose struct holds one needs `multi_viewport`, which WebGPU has on no device, so its WGSL is `target-lacks-feature`.
+  A host sets the viewports with `set_viewports`; an index past the last one set is the API's to define, and SGL does not.
   The struct that reaches the rasterizer carries exactly one, which CHK-307 asks of the pipeline.
 * **CHK-437** `@view_index` is which view of a draw of several the invocation renders, from 0, and the pipeline's `view_count` says how many.
   View `i` renders into layer `i` of every target, so a stereo frame is one draw into a two-layer array, and the shader picks each eye's camera by it.

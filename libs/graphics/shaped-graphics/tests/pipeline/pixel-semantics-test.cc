@@ -457,6 +457,62 @@ ASYNC_INVOCABLE_TEST("sg - a pixel stage returns one color without a struct, or 
         CHECK(got[i] == 8u).context(cc::format("slot {}", i));
 }
 
+ASYNC_INVOCABLE_TEST("sg - a vertex stage sends each instance to its own viewport, each with its own scissor (CHK-534)",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::multi_viewport))
+        SKIP("this context has one viewport alone");
+
+    // One rect over the whole of clip space, drawn twice: instance 0 into the left half of an 8 x 4 target, instance 1 into the right half.
+    // Each instance raises its tag by 10, and one viewport alone would leave the right half clear.
+    auto vertices = cc::vector<corner>();
+    push_rect(vertices, tg::vec4f(-1, -1, 1, 1), 0.5f, 3);
+    auto const buffer = ctx->persistent.create_buffer_from_data(cc::move(vertices), sg::buffer_usage::vertex_buffer);
+    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::pixel_semantics::placed_tags);
+
+    sg::viewport const halves[] = {
+        {.offset = tg::pos2f(0, 0), .size = tg::vec2f(4, 4)},
+        {.offset = tg::pos2f(4, 0), .size = tg::vec2f(4, 4)},
+    };
+    auto const pixels = co_await sg_test::draw_offscreen(
+        *ctx,
+        {.width = 8, .height = 4, .colors = {sg::pixel_format::rgba32_float}, .clear_color = tg::vec4f(-1, -1, -1, -1)},
+        [&](sg::rendering_scope& scope)
+        {
+            scope.bind_pipeline(*pipeline);
+            scope.set_viewports(halves);
+            scope.bind_vertex_buffer(buffer.as_vertex_buffer());
+            scope.draw({.vertex_range = {.offset = 0, .size = 6}, .instance_range = {.offset = 0, .size = 2}});
+        });
+    for (auto y = 0; y < 4; ++y)
+        for (auto x = 0; x < 8; ++x)
+        {
+            auto const expected = x < 4 ? tg::vec4f(3, 0, 0, 1) : tg::vec4f(13, 1, 0, 1);
+            CHECK(pixels[0].rgba_float(x, y) == expected).context(cc::format("pixel ({}, {})", x, y));
+        }
+
+    // a scissor per viewport: the right one cut to its top row alone
+    tg::aabb2i const cuts[]
+        = {tg::aabb2i(tg::pos2i(0, 0), tg::pos2i(4, 4)), tg::aabb2i(tg::pos2i(4, 0), tg::pos2i(8, 1))};
+    auto const cut = co_await sg_test::draw_offscreen(
+        *ctx,
+        {.width = 8, .height = 4, .colors = {sg::pixel_format::rgba32_float}, .clear_color = tg::vec4f(-1, -1, -1, -1)},
+        [&](sg::rendering_scope& scope)
+        {
+            scope.bind_pipeline(*pipeline);
+            scope.set_viewports(halves);
+            scope.set_scissors(cuts);
+            scope.bind_vertex_buffer(buffer.as_vertex_buffer());
+            scope.draw({.vertex_range = {.offset = 0, .size = 6}, .instance_range = {.offset = 0, .size = 2}});
+        });
+    CHECK(cut[0].rgba_float(5, 0) == tg::vec4f(13, 1, 0, 1));
+    CHECK(cut[0].rgba_float(5, 2) == tg::vec4f(-1, -1, -1, -1));
+    CHECK(cut[0].rgba_float(1, 2) == tg::vec4f(3, 0, 0, 1));
+}
+
 ASYNC_INVOCABLE_TEST("sg - a vertex stage sends each instance to its own layer of an array target",
                      (sg::context_handle const& ctx))
 {

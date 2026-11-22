@@ -311,3 +311,27 @@ pipeline quad_votes:
     pixel = quad_vote_ps
     cull = .none
     format = .rgba32_float
+
+struct placed:
+    @position position: hpos4
+    @viewport_index viewport: uint
+    @interpolate(.flat) tag: int
+
+// One draw of two instances, each sent to the viewport its instance names (CHK-534).
+@vertex fun placed_vs(v: tagged_corner, @instance_index i: int) -> placed:
+    require multi_viewport
+    return {
+        position = hpos4(v.position.x, v.position.y, v.depth, 1.0)
+        viewport = i as uint
+        tag = v.tag + 10 * i
+    }
+
+@pixel fun placed_ps(p: placed) -> float4:
+    require multi_viewport
+    return float4(p.tag as float, p.viewport as float, 0.0, 1.0)
+
+pipeline placed_tags:
+    vertex = placed_vs
+    pixel = placed_ps
+    cull = .none
+    format = .rgba32_float

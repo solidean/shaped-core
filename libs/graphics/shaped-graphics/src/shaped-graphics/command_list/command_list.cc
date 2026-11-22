@@ -13,6 +13,20 @@ command_list::~command_list()
     end_array_declarations(false);
 }
 
+void command_list::raster_set_viewports(cc::span<viewport const> viewports)
+{
+    CC_ASSERTF(viewports.size() == 1,
+               "{} viewports set on a context without sg::feature::multi_viewport, which takes one", viewports.size());
+    raster_set_viewport(viewports[0]);
+}
+
+void command_list::raster_set_scissors(cc::span<tg::aabb2i const> rects)
+{
+    CC_ASSERTF(rects.size() == 1, "{} scissors set on a context without sg::feature::multi_viewport, which takes one",
+               rects.size());
+    raster_set_scissor(rects[0]);
+}
+
 array_access_declaration command_list::adopt_array_declaration(u32 id, bool raster)
 {
     auto link = std::make_shared<impl::array_declaration_link>(impl::array_declaration_link{

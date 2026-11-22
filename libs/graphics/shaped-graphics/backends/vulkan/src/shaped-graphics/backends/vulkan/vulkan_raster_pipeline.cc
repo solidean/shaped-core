@@ -208,11 +208,9 @@ cc::result<vulkan_raster_pipeline_handle> vulkan_raster_pipeline::create(vulkan_
                                                                                      "1..32");
     }
 
-    // Counts only: the viewport and scissor themselves are dynamic, which is what makes them commands at the sg level.
+    // Nothing at all: the viewports and scissors and their counts are dynamic, which makes them commands at the sg level.
     auto const viewport_state = VkPipelineViewportStateCreateInfo{
         .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
-        .viewportCount = 1,
-        .scissorCount = 1,
     };
 
     auto const& rs = desc.rasterization;
@@ -287,8 +285,8 @@ cc::result<vulkan_raster_pipeline_handle> vulkan_raster_pipeline::create(vulkan_
     };
 
     VkDynamicState const dynamic_states[] = {
-        VK_DYNAMIC_STATE_VIEWPORT,
-        VK_DYNAMIC_STATE_SCISSOR,
+        VK_DYNAMIC_STATE_VIEWPORT_WITH_COUNT,
+        VK_DYNAMIC_STATE_SCISSOR_WITH_COUNT,
         VK_DYNAMIC_STATE_STENCIL_REFERENCE,
         VK_DYNAMIC_STATE_BLEND_CONSTANTS,
     };

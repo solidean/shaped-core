@@ -192,6 +192,11 @@ public:
     /// Overrides the rendering scope's viewport / scissor for subsequent draws.
     void set_viewport(viewport const& vp);
     void set_scissor(tg::aabb2i const& rect);
+    /// Viewport `i` takes the primitives a vertex stage sends to SGL's `@viewport_index` `i`, clipped by scissor `i`.
+    /// More than one needs sg::feature::multi_viewport, and at most `max_viewports`; each one's scissor becomes its own rect.
+    void set_viewports(cc::span<viewport const> viewports);
+    /// One scissor per viewport `set_viewports` set, as many as it set.
+    void set_scissors(cc::span<tg::aabb2i const> rects);
     /// Sets the stencil reference the depth-stencil state's stencil test compares against.
     void set_stencil_reference(u32 reference);
     /// Sets the constant RGBA blend factor that referencing factors use.
@@ -276,6 +281,8 @@ public:
                                                                         cc::span<array_texture_access const> elements);
     void set_viewport(viewport const& vp);
     void set_scissor(tg::aabb2i const& rect);
+    void set_viewports(cc::span<viewport const> viewports);
+    void set_scissors(cc::span<tg::aabb2i const> rects);
     void set_stencil_reference(u32 reference);
     void set_blend_constants(tg::vec4f constants);
     void set_inline_constants(cc::span<byte const> data, cc::optional<isize> offset = {});
@@ -346,6 +353,8 @@ public:
                                                                         cc::span<array_texture_access const> elements);
     void set_viewport(viewport const& vp);
     void set_scissor(tg::aabb2i const& rect);
+    void set_viewports(cc::span<viewport const> viewports);
+    void set_scissors(cc::span<tg::aabb2i const> rects);
     void set_stencil_reference(u32 reference);
     void set_blend_constants(tg::vec4f constants);
     void set_inline_constants(cc::span<byte const> data, cc::optional<isize> offset = {});

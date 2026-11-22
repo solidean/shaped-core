@@ -271,6 +271,8 @@ enum capability : u32
     UniformAndStorageBuffer16BitAccess = 4434,
     StoragePushConstant16 = 4435,
     ShaderLayer = 69,
+    ShaderViewportIndex = 70,
+    MultiViewport = 57,
     DrawParameters = 4427,
     MultiView = 4439,
     DenormPreserve = 4464,

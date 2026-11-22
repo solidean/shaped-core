@@ -85,6 +85,8 @@ enum class sgl::check::feature : sgl::u8
     /// `quad_any` and `quad_all`, whose result every invocation of a quad agrees on, helpers included (CHK-533).
     /// dx12 reads them across the quad, vulkan through VK_KHR_shader_quad_control; WebGPU's helpers may sit out.
     quad_control,
+    /// A `@viewport_index` member (CHK-534): the vertex stage picks the viewport, which WebGPU has on no device.
+    multi_viewport,
 };
 
 CC_FLAG_ENUM_INDEXED(sgl::check, feature, u64);
@@ -129,6 +131,7 @@ inline constexpr cc::string_view k_feature_names[] = {
     "shader_int64_min_max_atomics", //
     "clustered_geometry",           //
     "quad_control",                 //
+    "multi_viewport",               //
 };
 inline constexpr isize k_feature_count = isize(sizeof(k_feature_names) / sizeof(k_feature_names[0]));
 
