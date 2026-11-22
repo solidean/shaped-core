@@ -989,7 +989,7 @@ A feature is what a device may lack, so using one makes a shader non-portable on
   A vulkan entry point at `@float(.specials)` or above adds `float_specials`, and at `.ieee` `float_denormals`, which no program needs to name (EMIT-185).
   What `has` asks rather than a `require` needs adds `float_atomic_add` and `shader_execution_reordering` (CHK-426).
   The stages and stage inputs a device may lack add `primitive_index`, `sample_rate_shading`, `geometry_shader` and `tessellation_shader`.
-  An atomic in a vertex, geometry or tessellation stage adds `vertex_pipeline_stores` (CHK-531).
+  A write through a binding in a vertex, geometry or tessellation stage adds `vertex_pipeline_stores` (CHK-531).
   Any other name is the normal error `unknown-feature`, and its detail lists the names.
 * **CHK-259** A `require` at file scope grants its features to everything in the file ([why](why/checking.md#chk-259)).
 * **CHK-260** A `require` in a binding grants its features to that binding's members.
@@ -1242,8 +1242,10 @@ A `require` in a test's body that nothing in it uses is `unused-require`, and a 
   The payload, the decision's result and its locals it writes freely, since they are how it answers.
   A decision is an `@any_hit` or an `@intersection` entry point, and a function an inline trace calls as one: a parameter that takes a candidate or a box makes it so, in any stage.
   The other ray-tracing stages take every atomic of a `mut buffer` and of an `@atomic` image; none of them lists workgroup memory (CHK-294).
-* **CHK-531** An atomic in a vertex, geometry or tessellation stage needs `vertex_pipeline_stores`, as a call that needs a feature does (CHK-322) ([why](why/checking.md#chk-531)).
-  It is an atomic of a `mut buffer` or of an `@atomic` image, `load()` and `store(v)` among them, and every other stage takes it with no feature.
+* **CHK-531** A write through a binding in a vertex, geometry or tessellation stage needs `vertex_pipeline_stores`, as a call that needs a feature does (CHK-322) ([why](why/checking.md#chk-531)).
+  A write is CHK-404's: an atomic of a `mut buffer` or of an `@atomic` image, `load()` among them, an image store, a `mut bytes` store, and an assignment to an element of a `mut buffer`.
+  It needs it wherever an entry point of those stages reaches it, through a function or a resource parameter too, and a branch that `has(.vertex_pipeline_stores)` takes declares it (CHK-426).
+  Every other stage takes such a write with no feature, and a local is no binding.
   D3D12 and Metal grant it on every device, Vulkan with `vertexPipelineStoresAndAtomics`, and WebGPU on none, so `wgsl` refuses such a vertex stage (EMIT-109).
   A polyfilled geometry or tessellation stage runs as a compute or a mesh entry point, which writes storage on every device, so that form needs none of it (CHK-525, CHK-527).
 * **CHK-297** An expression of an atomic's type stands only as a builtin's argument or a `mut` parameter's; anywhere else, and as the place of an assignment, it is `wrong-kind-of-name`.

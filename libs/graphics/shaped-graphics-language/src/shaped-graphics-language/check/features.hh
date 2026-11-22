@@ -63,7 +63,7 @@ enum class sgl::check::feature : sgl::u8
     /// No program names it: `keep_view` asks for it with `has`, on a device whose driver needs the pixel stage to read the view.
     pixel_view_read_workaround,
     /// A vertex, geometry or tessellation stage writes a storage buffer, which vulkan asks of the device.
-    /// A program names it for an atomic in those stages (CHK-531); a `print` there is written where the device has it,
+    /// A program names it for a store or an atomic in those stages (CHK-531); a `print` there is written where the device has it,
     /// and dropped elsewhere (EMIT-183).
     vertex_pipeline_stores,
     /// `long`, `ulong` and their vectors (CHK-451), which WebGPU has on no device.

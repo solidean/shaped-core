@@ -845,14 +845,17 @@ Both would come back as a relaxation that breaks no program, the second better s
 
 ## CHK-531
 
-The stages left out of the atomics were left out for WebGPU, whose vertex stage writes no storage, and what WebGPU lacks there is the feature sg already had for `print`.
-Vulkan asks the device for the same feature for a vertex, a geometry and a tessellation stage alike, so one feature covers all four, and D3D12 and Metal ask for nothing.
-WebGPU and Metal draw a geometry or a tessellation stage as a compute pass or a mesh stage, where an atomic is free, so the feature costs only a native stage that needs it.
+The stages left out of the atomics and the image stores were left out for WebGPU, whose vertex stage writes no storage, and what WebGPU lacks there is the feature sg already had for `print`.
+Vulkan asks the device for the same feature for a vertex, a geometry and a tessellation stage alike, and for a store as for an atomic, so one feature covers all of it.
+D3D12 and Metal ask for nothing.
+A plain buffer store was taken in those stages with no feature at all, so it needs the feature as the rest does.
+Before, it wrote WGSL that WebGPU refuses, and a vulkan pipeline that a device without the feature refuses.
+WebGPU and Metal draw a geometry or a tessellation stage as a compute pass or a mesh stage, where a write is free, so the feature costs only a native stage that needs it.
 How often those stages run is another matter, which the feature leaves to the program.
-A geometry stage runs once per primitive and instance, and SGL's control stage once per patch, so a counter there counts them.
-A vertex and an evaluation stage run at least once per vertex, and a device may run one again, so a count there is no number a spec defines, as CHK-404 says of a decision.
-An update that means the same however often it runs, a `max` or a store of what the invocation was given, is what those two stages are for.
-They are not refused for a count, since a vertex stage's count is still what a device ran, which is what a profiling counter wants.
+Vulkan runs each of them at least once per vertex, output point or primitive, never exactly once, and names the vertex and the evaluation stage as ones whose count of writing invocations is undefined.
+So a counter in any of them holds a number no spec defines, as CHK-404 says of a decision, and only a polyfill, a compute pass of one thread each, counts exactly.
+An update that means the same however often it runs, a `max` or a store of what the invocation was given, is what these stages are for.
+They are not refused for a count, since a count is still what a device ran, which is what a profiling counter wants, and an append through a counter still records every primitive.
 
 ## CHK-522
 

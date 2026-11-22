@@ -155,3 +155,86 @@ TEST("sgl emit - a polyfilled geometry or tessellation stage is a compute pass, 
     CHECK(wgsl.value().text.contains("atomicMax(&trace_count[1]")).dump("text", wgsl.value().text);
     CHECK(wgsl.value().text.contains("atomicAdd(&trace_count[0], 1u)")).dump("text", wgsl.value().text);
 }
+
+namespace
+{
+constexpr auto k_stores = cc::string_view(R"(require geometry_shader, vertex_pipeline_stores
+
+binding written:
+    values: mut buffer[uint]
+    raw: mut bytes
+    marks: out image_2d[.rgba8_unorm]
+
+@vertex struct corner_in:
+    position: float2
+
+struct staged:
+    @position position: hpos4
+
+@vertex fun storing_vs(v: corner_in, @vertex_index i: int){written} -> staged:
+    written.values[i] = 1u
+    written.raw.store((i as uint) * 4u, 2u)
+    written.marks.store(int2(i, 0), float4(1.0))
+    return {position = hpos4(v.position.x, v.position.y, 0.5, 1.0)}
+
+@vertex fun plain_vs(v: corner_in) -> staged:
+    return {position = hpos4(v.position.x, v.position.y, 0.5, 1.0)}
+
+@geometry(max_vertices = 3)
+fun storing_gs(tri: staged[3], @primitive_id primitive: int, stream: mut triangle_stream[staged]){written}:
+    written.values[primitive] = 3u
+    for i in 0 ..< 3:
+        stream.emit(tri[i])
+)");
+
+[[nodiscard]] cc::result<sgl::emitted_source, cc::string> stored(cc::string_view entry,
+                                                                 target t,
+                                                                 mesh_form form = mesh_form::native,
+                                                                 cc::string_view vertex = "",
+                                                                 sgl::emit::native_route native
+                                                                 = sgl::emit::native_route::text)
+{
+    return sgl::compile_to_text({.source = k_stores,
+                                 .entry_point = entry,
+                                 .target = t,
+                                 .device_features = sgl::check::feature_set(feature::vertex_pipeline_stores),
+                                 .native = native,
+                                 .mesh = form,
+                                 .polyfill_vertex = vertex});
+}
+} // namespace
+
+TEST("sgl emit - a buffer, bytes and image store in a vertex or geometry stage need vertex_pipeline_stores (CHK-531)")
+{
+    for (auto const t : {target::hlsl_dx12, target::hlsl_vulkan})
+        for (auto const entry : {"storing_vs", "storing_gs"})
+        {
+            auto const e = stored(entry, t);
+            REQUIRE(e.has_value()).dump("entry", entry).dump("error", e.has_error() ? e.error() : cc::string());
+            CHECK(e.value().features.has(feature::vertex_pipeline_stores)).dump("entry", entry);
+            auto const native = stored(entry, t, mesh_form::native, "", sgl::emit::native_route::require);
+            REQUIRE(native.has_value()).dump("entry", entry).dump("error", native.has_error() ? native.error() : "");
+        }
+    auto const hlsl = stored("storing_vs", target::hlsl_dx12).value().text;
+    CHECK(hlsl.contains("written_values[i] = 1u;")).dump("text", hlsl);
+    CHECK(hlsl.contains("written_raw.Store(")).dump("text", hlsl);
+
+    auto const msl = stored("storing_vs", target::msl);
+    REQUIRE(msl.has_value()).dump("error", msl.has_error() ? msl.error() : cc::string());
+    CHECK(msl.value().text.contains("written_values[i] = 1u;")).dump("text", msl.value().text);
+
+    // WebGPU's vertex stage writes no storage, and says which feature it lacks
+    auto const wgsl = stored("storing_vs", target::wgsl);
+    REQUIRE(wgsl.has_error());
+    CHECK(wgsl.error().contains("storing_vs needs vertex_pipeline_stores, which WebGPU does not have"))
+        .dump("error", wgsl.error());
+    CHECK(!stored("plain_vs", target::wgsl).value().features.has(feature::vertex_pipeline_stores));
+
+    // a polyfilled geometry stage's compute half stores as any compute stage does
+    for (auto const t : {target::wgsl, target::msl})
+    {
+        auto const half = stored("storing_gs", t, mesh_form::compute, "storing_vs");
+        REQUIRE(half.has_value()).dump("error", half.has_error() ? half.error() : cc::string());
+        CHECK(!half.value().features.has(feature::vertex_pipeline_stores));
+    }
+}
