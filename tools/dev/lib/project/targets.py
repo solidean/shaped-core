@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from collections.abc import Callable
 from pathlib import Path
 
@@ -102,7 +103,20 @@ def load_target_models(build_dir: Path, build_type: str) -> dict[str, dict]:
     The authoritative per-target description: compile groups, link fragments, sources, artifacts.
     `discover_targets` is the summarized view on top of it, and a caller needing the full detail — flag inspection, say — takes the raw dict.
     First definition wins on a duplicate name, matching discovery.
+    A configure from another process replaces the reply set while it is read, deleting the files an older index names,
+    so a vanished file rereads from the newest index rather than failing.
     """
+    for attempt in range(5):
+        try:
+            return _load_target_models_once(build_dir, build_type)
+        except FileNotFoundError:
+            if attempt == 4:
+                raise
+            time.sleep(0.2 * (attempt + 1))
+    raise AssertionError("unreachable")
+
+
+def _load_target_models_once(build_dir: Path, build_type: str) -> dict[str, dict]:
     index = _load_index(build_dir)
     codemodel_path = _codemodel_file(build_dir, index)
     codemodel = _read_json(codemodel_path)
