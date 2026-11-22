@@ -60,7 +60,8 @@ The planned scope:
 - **scalar** — a `scalar_traits<T>` seam so custom scalars slot in (exact/symbolic
   numbers, intervals, autodiff), plus `angle<T>` and constants.
 - **linalg** — `vec` / `pos` / `comp` with affine rules, oriented `bivec` (+
-  `cross`/`dual`/`undual`), column-major `mat`, and `quat`.
+  `cross`/`dual`/`undual`), column-major `mat`, `quat`, and `dual_quat` for
+  rigid motions that blend.
 - **transform** — semantic transform types (rigid / similarity / affine /
   projective), kept distinct from raw `mat` data.
 - **geometry** — primitives (`aabb`, `triangle`, `segment`, `ray`, `line`,

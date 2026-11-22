@@ -33,6 +33,10 @@ struct mat;
 template <class T>
 struct quat;
 
+/// dual quaternion `real + ε dual`: a rigid motion in the form that blends.
+template <class T>
+struct dual_quat;
+
 //
 // Dimensional aliases
 //
@@ -130,5 +134,7 @@ using mat4i = mat<4, 4, i32>;
 // alpha char, so the suffix is separated; pos3f etc. end in a digit and attach directly).
 using quat_f = quat<f32>;
 using quat_d = quat<f64>;
+using dual_quat_f = dual_quat<f32>;
+using dual_quat_d = dual_quat<f64>;
 
 } // namespace tg

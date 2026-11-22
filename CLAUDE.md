@@ -43,7 +43,7 @@ One-liner per library:
   **nexus is a leaf**: nothing in shaped-core links it except test binaries, so it sits ON TOP of the libraries it tests despite living in `base/`, and it is added LAST in the root `CMakeLists.txt`.
   It takes `babel-data` rather than all of babel for a reason of its own: every `*-test` binary links nexus, so a nexus dependency is a repo-wide tax and only externals-free libraries belong there.
 * **`libs/base/typed-geometry`** — strongly-typed C++23 math & geometry.
-  The `scalar_traits` seam, `vec`/`pos`/`comp`/`bivec`/`mat`/`quat` and the first `geometry/` primitives exist.
+  The `scalar_traits` seam, `vec`/`pos`/`comp`/`bivec`/`mat`/`quat`/`dual_quat` and the first `geometry/` primitives exist.
   So does `tg::fixed_int<Bits>` (`fi128`, `fi192`, …): wrapping two's-complement integers for exact predicates, with `tg::mul<fi192>(a, b)`-style arithmetic across widths.
   Up to 256 bits that arithmetic is loop-free, from a committed generator.
   So is `tg::f16` (`half_float`): IEEE binary16 with explicit conversions, and arithmetic correctly rounded once per operation.

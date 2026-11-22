@@ -207,6 +207,27 @@ public:
                     aw * bw - ax * bx - ay * by - az * bz);
     }
 
+    /// the sum, component by component: the algebra a blend of rotations is made of, not a composition.
+    /// A sum of unit quaternions is not one, so normalized() comes after it.
+    [[nodiscard]] friend constexpr quat operator+(quat const& a, quat const& b)
+    {
+        return quat(a.data[0] + b.data[0], a.data[1] + b.data[1], a.data[2] + b.data[2], a.data[3] + b.data[3]);
+    }
+    [[nodiscard]] friend constexpr quat operator-(quat const& a, quat const& b)
+    {
+        return quat(a.data[0] - b.data[0], a.data[1] - b.data[1], a.data[2] - b.data[2], a.data[3] - b.data[3]);
+    }
+    /// the negation: the same rotation, from the other side of the 4D sphere.
+    [[nodiscard]] friend constexpr quat operator-(quat const& a)
+    {
+        return quat(-a.data[0], -a.data[1], -a.data[2], -a.data[3]);
+    }
+    [[nodiscard]] friend constexpr quat operator*(quat const& a, T s)
+    {
+        return quat(a.data[0] * s, a.data[1] * s, a.data[2] * s, a.data[3] * s);
+    }
+    [[nodiscard]] friend constexpr quat operator*(T s, quat const& a) { return a * s; }
+
     /// rotates a vector by this quaternion (assumed unit).
     [[nodiscard]] friend constexpr vec<3, T> operator*(quat const& q, vec<3, T> const& v)
     {
@@ -224,5 +245,12 @@ template <class T>
 inline quat<T> const quat<T>::zero = quat<T>{};
 template <class T>
 inline quat<T> const quat<T>::identity = quat<T>::make_identity();
+
+/// the 4D dot product: negative when `a` and `b` are on opposite sides, so a blend of the two passes near zero.
+template <class T>
+[[nodiscard]] constexpr T dot(quat<T> const& a, quat<T> const& b)
+{
+    return a.data[0] * b.data[0] + a.data[1] * b.data[1] + a.data[2] * b.data[2] + a.data[3] * b.data[3];
+}
 
 } // namespace tg
