@@ -2,6 +2,8 @@
 created: 2026-11-22
 priority: next
 tags: [porting-feedback]
+closed: 2026-11-22
+resolution: fixed
 ---
 
 # A let binds a texture or a buffer, as a call's parameter does
