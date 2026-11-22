@@ -198,7 +198,9 @@ TEST("sgl check - a texture, an image or a sampler is handed to a builtin and is
                                        "    work.dst.store(int2(0, 0), c + work.ro.load(int2(0, 0)))\n"))
           == "");
 
-    CHECK(reports_for(listing(members, "    let t = work.src\n")).contains("texture_2d[float4] as a value"));
+    // CHK-536: a let names the member, which every use of it reads
+    CHECK(reports_for(listing(members, "    let t = work.src\n    let c = t.load(int2(0, 0))\n")) == "");
+    CHECK(reports_for(listing(members, "    let c = [work.src]\n")).contains("texture_2d[float4] as a value"));
     // CHK-207: a read-only image cannot be stored to, and a write-only one cannot be loaded.
     CHECK(reports_for(listing(members, "    work.ro.store(int2(0, 0), float4(1.0, 1.0, 1.0, 1.0))\n"))
               .contains("no-matching-overload"));
@@ -215,7 +217,9 @@ TEST("sgl check - a file-scope sampler is handed to a builtin, and filters as a 
     constexpr auto texture = "    t: texture_2d[float4]\n";
 
     CHECK(with(file_sampler, texture, "    let c = work.t.sample(float2(0.5, 0.5), edge, level = 0.0)\n") == "");
-    CHECK(with(file_sampler, texture, "    let s = edge\n").contains("unsupported-yet user:[edge] a sampler as a value"));
+    CHECK(with(file_sampler, texture, "    let s = edge\n    let c = work.t.sample(float2(0.5, 0.5), s, level = 0.0)\n")
+          == "");
+    CHECK(with(file_sampler, texture, "    let c = [edge]\n").contains("unsupported-yet user:[edge] a sampler as a value"));
     // CHK-210: nearest in every filter is a sampler an @unfilterable texture takes, and a linear one is refused
     constexpr auto unfilterable = "    @unfilterable t: texture_2d[float4]\n";
     CHECK(with(file_sampler, unfilterable, "    let c = work.t.sample(float2(0.5, 0.5), edge, level = 0.0)\n") == "");
@@ -279,11 +283,15 @@ TEST("sgl check - a buffer is a resource and never a value")
     constexpr auto members = "    src: buffer[float]\n    dst: mut buffer[float]\n";
     constexpr auto value = "a buffer as a value";
 
-    // Read through a subscript, or handed to a parameter that stands for it (CHK-366): not bound to a local, not returned.
-    CHECK(reports_for(listing(members, "    let b = work.src\n")).contains(value));
+    // Read through a subscript, handed to a parameter that stands for it (CHK-366) or named by a let (CHK-536).
+    CHECK(reports_for(listing(members, "    let b = work.src\n    work.dst[0] = b[0]\n")) == "");
+    CHECK(reports_for(listing(members, "    let b = if work.src[0] > 0.0 => work.src else work.src\n"))
+              .contains("buffer[float] chosen at run time, where a let names one binding member"));
+    CHECK(reports_for(listing(members, "    let b = work.src\n    b = work.src\n")).contains("not-assignable"));
+    CHECK(reports_for(listing(members, "    let b = [work.src]\n")).contains(value));
     CHECK(!reports_for(cc::string("fun first(b: buffer[float]) -> float => b[0]\n\n") + listing(members)).contains(value));
     CHECK(reports_for(cc::string("fun pass(x: float) -> buffer[float] => x\n\n") + listing(members)).contains(value));
-    CHECK(reports_for(listing(members, "    let b : buffer[float] = work.src\n")).contains(value));
+    CHECK(reports_for(listing(members, "    let b : buffer[float] = work.src\n    work.dst[0] = b[0]\n")) == "");
 
     // Nor a field of a struct, which no target can hold; relaxing that needs a rule for hoisting it (the spec's bindings file).
     CHECK(reports_for(cc::string("struct view:\n    items: buffer[float]\n\n") + listing(members)).contains(value));

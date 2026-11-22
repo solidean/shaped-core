@@ -802,8 +802,24 @@ void sgl::check::impl::flattener::flatten_stmt(ast::stmt_id id)
     auto const at = cursor_scope(*this, from);
     if (auto const* const let = s.node.try_as<ast::let_stmt>())
     {
+        auto const is_discarded = ast::is_valid(let->pattern) && ast().at(let->pattern).node.is<ast::wildcard>();
+        // CHK-536: a let of a resource names it as a parameter would, so no local holds it, and `let _` evaluates
+        // the index of the element it would name
+        if (auto const type = ast::is_valid(let->value) ? tables().type_at(let->value) : type_id::none;
+            !let->is_mut && type != type_id::none && is_resource(c.out.at(type).kind))
+        {
+            auto const stand_in = resource_stand_in(flatten_expr(let->value));
+            if (!is_valid(stand_in))
+            {
+                mark_failed();
+                return;
+            }
+            if (!is_discarded)
+                current()->bound.push_back({.where = {.kind = target_kind::local, .index = i32(id)}, .literal = stand_in});
+            return;
+        }
         // CHK-55: `let _ = v` is `v` as a statement of its own
-        if (ast::is_valid(let->pattern) && ast::is_valid(let->value) && ast().at(let->pattern).node.is<ast::wildcard>())
+        if (is_discarded && ast::is_valid(let->value))
             return flatten_expr_stmt(from, let->value);
         auto const* const name = ast::is_valid(let->pattern) ? ast().at(let->pattern).node.try_as<ast::name>() : nullptr;
         if (name == nullptr)

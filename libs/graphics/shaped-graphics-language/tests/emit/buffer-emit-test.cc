@@ -288,3 +288,43 @@ TEST("sgl emit - a shadowing local is a local of its own in the text")
     CHECK(wgsl.contains("    let x_1: f32 = x * 2.0;\n"));
     CHECK(wgsl.contains("vec4f(x_1, x_1, x_1, 1.0)"));
 }
+
+TEST("sgl emit - a let of a buffer reads the binding wherever its name is read")
+{
+    constexpr auto source = "binding io:\n"
+                            "    pts: buffer[float4]\n"
+                            "    dst: mut buffer[float4]\n"
+                            "\n"
+                            "@compute(64) fun port(@thread_id id: int3){io}:\n"
+                            "    let src = io.pts\n"
+                            "    let dst = io.dst\n"
+                            "    dst[id.x] = src[id.x] + src[id.x + 1]\n";
+    // CHK-536: no local holds a resource, so the name is the member at every use
+    auto const hlsl = text_of(source, target::hlsl_dx12);
+    CHECK(hlsl.contains("    io_dst[id.x] = io_pts[id.x] + io_pts[id.x + 1];\n"));
+    CHECK(!hlsl.contains(" src"));
+    CHECK(!hlsl.contains(" dst"));
+    CHECK(text_of(source, target::wgsl).contains("    io_dst[id.x] = io_pts[id.x] + io_pts[id.x + 1];\n"));
+}
+
+TEST("sgl emit - a let of a binding array's element evaluates its index once, and keeps its mark")
+{
+    constexpr auto source = "require binding_arrays\n"
+                            "\n"
+                            "binding textures:\n"
+                            "    maps: texture_2d[float4][16]\n"
+                            "    picks: buffer[int]\n"
+                            "    results: mut buffer[float4]\n"
+                            "\n"
+                            "@compute(64) fun pick(@thread_id id: int3){textures}:\n"
+                            "    let t = textures.maps[nonuniform (textures.picks[id.x] % 16)]\n"
+                            "    textures.results[id.x] = t.load(int2(0, 0)) + t.load(int2(1, 0))\n";
+    auto const hlsl = text_of(source, target::hlsl_dx12);
+    CHECK(hlsl.contains("    const int at = textures_picks[id.x] % 16;\n"));
+    CHECK(hlsl.contains("textures_maps[NonUniformResourceIndex(at)].Load(int3(int2(0, 0), 0)) + "
+                        "textures_maps[NonUniformResourceIndex(at)].Load(int3(int2(1, 0), 0))"));
+    // the buffer the index reads is read once
+    auto const read = hlsl.find("textures_picks[");
+    CHECK(read >= 0);
+    CHECK(hlsl.find("textures_picks[", read + 1) < 0);
+}

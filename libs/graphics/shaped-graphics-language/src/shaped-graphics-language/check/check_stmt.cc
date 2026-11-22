@@ -274,10 +274,14 @@ void checker::check_let(function_scope& scope, ast::stmt_id id, ast::let_stmt co
         unsupported(file, where, "a let without a value that is no `let mut`, which nothing could assign");
     else if (!ast::is_valid(let.value) && !ast::is_valid(let.type))
         unsupported(file, where, "a let without a value or a written type: `let mut x: float`");
+    // CHK-536: the value is handed to the let as an argument is to a parameter, and so is what each arm of a choice gives
+    auto const handed_before = handed.size();
+    if (ast::is_valid(let.value))
+        hand_arm_values(file, let.value);
     // CHK-82: a written type is expected of the value, which a literal converts to
     if (ast::is_valid(let.type))
     {
-        type = resolve_value_type(file, let.type, &scope);
+        type = resolve_value_type(file, let.type, &scope, true);
         // CHK-341: the prelude's `undefined()` has the type written of the `let mut` it stands in
         auto const* const call = ast::is_valid(let.value) ? ast.at(let.value).node.try_as<ast::call>() : nullptr;
         if (call != nullptr && let.is_mut && is_prelude_file(file) && is_named(file, call->callee, "undefined")
@@ -288,6 +292,39 @@ void checker::check_let(function_scope& scope, ast::stmt_id id, ast::let_stmt co
     }
     else if (ast::is_valid(let.value))
         type = check_expr(scope, let.value);
+    while (handed.size() > handed_before)
+        handed.remove_back();
+
+    // CHK-297: handed over, an atomic passed its judgment, and no let holds one
+    if (type != error_type && out.at(type).kind == type_kind::atomic && ast::is_valid(let.value))
+    {
+        report(diagnostic_kind::wrong_kind_of_name, file, span_of(file, let.value),
+               "an atomic is read by `.load()` and written by `.store(v)` or one of its updates, and is never a value");
+        type = error_type;
+    }
+    // CHK-536: every use of a resource's let must be one binding member, or one element of a binding array
+    if (type != error_type && is_resource(out.at(type).kind))
+    {
+        auto const* const value = ast::is_valid(let.value) ? &ast.at(let.value).node : nullptr;
+        auto const is_one
+            = value == nullptr || value->is<ast::name>() || value->is<ast::member>() || value->is<ast::index>();
+        if (let.is_mut)
+        {
+            report(diagnostic_kind::wrong_kind_of_name, file, where,
+                   cc::format("a `let mut` of {}, which could be assigned another: a let names one resource, so write "
+                              "`let`",
+                              out.name_of(type)));
+            type = error_type;
+        }
+        else if (!is_one)
+        {
+            report(diagnostic_kind::wrong_kind_of_name, file, span_of(file, let.value),
+                   cc::format("{} chosen at run time, where a let names one binding member or one element of a binding "
+                              "array; branch around its uses instead",
+                              out.name_of(type)));
+            type = error_type;
+        }
+    }
 
     if (!ast::is_valid(let.pattern))
         return;
@@ -333,6 +370,23 @@ void checker::check_let(function_scope& scope, ast::stmt_id id, ast::let_stmt co
     judge_shadowing(file, text_of(file, n->where), n->where);
     // only now: the value of `let x = x` does not see the `x` it declares
     declare_local(scope, {.name = text_of(file, n->where), .where = self, .type = type, .is_mut = let.is_mut});
+}
+
+void checker::hand_arm_values(i32 file, ast::expr_id value)
+{
+    handed.push_back(value);
+    auto const& ast = ast_of(file);
+    auto const hand = [&](ast::body const& b)
+    {
+        if (ast::is_valid(b.value))
+            hand_arm_values(file, b.value);
+    };
+    if (auto const* const chain = ast.at(value).node.try_as<ast::if_expr>())
+        for (auto const& branch : ast.at(chain->branches))
+            hand(branch.then);
+    if (auto const* const choice = ast.at(value).node.try_as<ast::case_expr>())
+        for (auto const& arm : ast.at(choice->arms))
+            hand(arm.result);
 }
 
 bool checker::judge_place(function_scope& scope, ast::expr_id expr, cc::string_view what, cc::string* quiet_why)
@@ -500,6 +554,17 @@ void checker::check_assign(function_scope& scope, ast::stmt_id id, ast::assign_s
     auto const file = scope.file;
     auto const& ast = ast_of(file);
     auto const where = span_of(file, id);
+
+    // CHK-536: a name of a resource stands for one binding member, which no assignment makes another
+    if (auto const* const n = ast::is_valid(assign.target) ? ast.at(assign.target).node.try_as<ast::name>() : nullptr)
+        if (auto const* const local = scope.find_local(text_of(file, n->where));
+            local != nullptr && local->type != error_type && is_resource(out.at(local->type).kind))
+        {
+            report(diagnostic_kind::not_assignable, file, span_of(file, assign.target),
+                   cc::format("{} names {}, the one resource it was given, and no assignment gives it another",
+                              text_of(file, n->where), out.name_of(local->type)));
+            return;
+        }
 
     auto const is_plain = sgl::is_valid(assign.op) && text_of(file, file_of(file).at(assign.op).where) == "=";
     // CHK-367: a texel as the place is a `store`, which `check_texel` leaves for the value to complete

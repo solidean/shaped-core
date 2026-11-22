@@ -854,7 +854,9 @@ ops[i](mut v)                                            // raygen, miss, closes
   Unmarked, a proven varying index is `non-uniform-index` and an unproven one `unproven-index`; `uniform` on a proven varying one is `uniform-index-varies` (CHK-399, CHK-400).
 - **A function takes any resource as a parameter, `b: mut buffer[float]`, of exactly its member's type** (CHK-366): `mut` is the access, never a caller's place.
   Inlining substitutes the member, so the footprint and an element's index stay the caller's; `buffer[float]` is no argument of `mut buffer[float]`, nor the reverse.
-  A buffer parameter is subscripted, measured or handed on; `let u = b` and a resource result stay `unsupported-yet`.
+  A buffer parameter is subscripted, measured or handed on; a resource result stays `unsupported-yet`.
+- **`let src = io.pts` names a resource as a parameter does** (CHK-536): every use is the member, and `let t = maps[nonuniform i]` evaluates `i` once.
+  A resource chosen at run time and a `let mut` of one are `wrong-kind-of-name`; assigning the name is `not-assignable`.
   A helper's index is judged per call: one it reaches both ways is `mixed-index`, split in two or marked `nonuniform` (CHK-401); a needless `nonuniform` is a warning.
   A stage-link member marked `@per_draw` crosses flat and is uniform in the pixel stage; the vertex stage must return it uniform, or it is `non-uniform-per-draw` (CHK-393).
 - **The uniformity pass judges the inlined entry point** (CHK-282 to CHK-284) by WGSL's rules, so no target refuses what SGL accepts.

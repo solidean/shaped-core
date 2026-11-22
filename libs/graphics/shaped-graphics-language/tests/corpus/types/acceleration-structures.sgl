@@ -9,10 +9,10 @@ binding scenes:
 
 fun probe_ray() => ray(origin = pos3(0.0, 0.0, -1.0), direction = vec3(0.0, 0.0, 1.0), t_max = 100.0)
 
-@expect(error = "unsupported-yet")
+// a let names the member, so a trace through it is a trace of the member (CHK-536)
 test {scenes}:
     let w = scenes.world
-    true
+    not w.trace(probe_ray()).is_hit
 
 @expect(error = "unsupported-yet")
 test {scenes}:

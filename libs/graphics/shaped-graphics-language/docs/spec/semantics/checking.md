@@ -564,7 +564,13 @@ fun shade(k: float) -> float:
   `mut` on a buffer, `bytes` or an image is its access, as on a binding member, and never a caller's place (CHK-315).
   The parameter stands for its argument wherever it is named, so the member's access, its `@sampler` and its footprint are the parameter's, and the function lists no binding for it.
   A buffer or `bytes` parameter is subscripted, its `length` read, or handed to a call; a texture, an image or a sampler is handed to a call.
-  A local, a field and a result of a resource type stay `unsupported-yet`.
+  A `let` of a resource is CHK-536; a `let mut`, a field and a result of a resource type stay refused.
+* **CHK-536** `let t = v` of a resource names it as a parameter does (CHK-366): `v` is handed to the `let` as an argument is, and the name stands for it wherever it is read.
+  So `v` is a binding member, an element of a binding array, a file-scope sampler, or a name that stands for one, and no local holds it on any target.
+  An element's index is evaluated once, where the `let` stands, and keeps its `nonuniform` or `uniform` mark at every use.
+  A resource chosen at run time, `if c => a.x else a.y` or a `case` of them, is `wrong-kind-of-name`, since no one member is what each use reads.
+  So is a `let mut` of a resource, which could be assigned another, and an assignment to a name of a resource is `not-assignable`.
+  A test names what it lists the same way (CHK-333).
 * **CHK-367** `img[xy]` is a texel of an image member: a read of it is `img.load(xy)`, and an assignment to it is `img.store(xy, v)` ([why](why/checking.md#chk-367)).
   The subscript takes the arguments `load` takes, so an array's layer is named, `img[xy, layer = 2]`.
   It is judged as the call it stands for, so a read of an `out` image is `no-matching-overload`, and `img[xy] += v` reads and writes a `mut` one.
@@ -1956,7 +1962,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `unknown-module`, `use-of-own-module` | CHK-347 |
 | `module-cycle` | CHK-349 |
 | `unknown-name` | CHK-24, CHK-62, CHK-245, CHK-330 |
-| `wrong-kind-of-name` | CHK-24, CHK-54, CHK-79, CHK-237, CHK-247, CHK-199, CHK-200, CHK-202, CHK-203, CHK-205, CHK-279, CHK-285, CHK-286, CHK-292, CHK-296, CHK-297, CHK-299, CHK-300, CHK-315, CHK-317, CHK-320, CHK-338, CHK-339, CHK-347, CHK-368, CHK-372, CHK-373, CHK-374, CHK-390 |
+| `wrong-kind-of-name` | CHK-24, CHK-54, CHK-79, CHK-237, CHK-247, CHK-199, CHK-200, CHK-202, CHK-203, CHK-205, CHK-279, CHK-285, CHK-286, CHK-292, CHK-296, CHK-297, CHK-299, CHK-300, CHK-315, CHK-317, CHK-320, CHK-338, CHK-339, CHK-347, CHK-368, CHK-372, CHK-373, CHK-374, CHK-390, CHK-536 |
 | `padding-not-stated` | CHK-532 |
 | `unexpected-keyword` | CHK-315 |
 | `default-not-allowed-here` | CHK-316 |
@@ -1968,7 +1974,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `binding-not-listed` | CHK-45, CHK-131, CHK-228 |
 | `as-precedence` | CHK-411 |
 | `type-mismatch` | CHK-52, CHK-56, CHK-77, CHK-112 to CHK-118, CHK-121, CHK-167, CHK-210, CHK-214, CHK-219, CHK-236, CHK-243, CHK-275, CHK-276, CHK-279, CHK-281, CHK-287, CHK-329, CHK-344, CHK-362, CHK-375, CHK-392, CHK-429, CHK-433, CHK-434 |
-| `not-assignable` | CHK-112, CHK-236, CHK-316, CHK-352, CHK-367, CHK-514 |
+| `not-assignable` | CHK-112, CHK-236, CHK-316, CHK-352, CHK-367, CHK-514, CHK-536 |
 | `read-before-assignment` | CHK-55 |
 | `missing-return` | CHK-125, CHK-236 |
 | `unreachable-code` | CHK-126, CHK-162, CHK-430 |

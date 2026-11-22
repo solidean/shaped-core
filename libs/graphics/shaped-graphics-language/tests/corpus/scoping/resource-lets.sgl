@@ -1,0 +1,93 @@
+// a `let` of a resource names it as a parameter would, and every use is the binding member or element it stands for (CHK-536)
+
+require binding_arrays
+
+binding io:
+    pts: buffer[float4]
+    dst: mut buffer[float4]
+    weights: buffer[float]
+    alt: buffer[float4]
+
+binding post:
+    source: texture_2d[float4]
+    target: out image_2d[.rgba8_unorm]
+    sampler bilinear:
+        filter = .linear
+        address = .clamp_edge
+
+binding textures:
+    maps: texture_2d[float4][16]
+    s: sampler
+
+binding work:
+    picks: buffer[int]
+    results: mut buffer[float4]
+
+sampler nearest:
+    filter = .nearest
+
+fun moved(p: float4) => p + float4(1.0, 0.0, 0.0, 0.0)
+
+// a test reaches what is no resource alone
+test moved(float4(0.0, 0.0, 0.0, 0.0)) == float4(1.0, 0.0, 0.0, 0.0)
+
+// a buffer, read and written through the names a let gave it, several times
+@compute(64) fun copy_points(@thread_id id: int3){io}:
+    let src = io.pts
+    let dst = io.dst
+    let i = id.x
+    dst[i] = moved(src[i]) + src[(i + 1) % 64] * io.weights[i]
+    dst[i + 64] = src[i]
+    // `let _` names nothing, and leaves nothing behind
+    let _ = io.alt
+
+// a let of a let names the same member, and a call is handed it as it would be the member
+fun total(values: buffer[float4], i: int) => values[i] + values[i + 1]
+
+@compute(64) fun handed_on(@thread_id id: int3){io}:
+    let src = io.pts
+    let again = src
+    io.dst[id.x] = total(again, id.x) + total(src, id.x + 2)
+
+// a texture, a sampler member and a file-scope sampler, each used more than once
+@compute(8, 8) fun blur(@thread_id id: int3){post}:
+    let t = post.source
+    let s = post.bilinear
+    let n = nearest
+    let target = post.target
+    let uv = (id.xy as float2) / 64.0
+    let c = t.sample(uv, s, level = 0.0) + t.sample(uv.yx, s, level = 0.0) + t.sample(uv, n, level = 0.0)
+    target.store(id.xy, c * 0.25 + t.load(id.xy))
+
+// an element of a binding array at a runtime index, the index evaluated once where the let stands
+@compute(64) fun pick_map(@thread_id id: int3){textures, work}:
+    let t = textures.maps[nonuniform (work.picks[id.x] % 16)]
+    let uv = float2(0.5, 0.5)
+    work.results[id.x] = t.load(int2(0, 0)) + t.sample(uv, textures.s, level = 0.0) + t.load(int2(1, 0))
+
+// a test names what it lists as a function does, and a let of it is the member again
+test {post}:
+    let t = post.source
+    let s = post.bilinear
+    t.test_texel(int2(0, 0), float4(2.0, 0.0, 0.0, 1.0))
+    t.load(int2(0, 0)) == post.source.load(int2(0, 0))
+    t.sample(float2(0.5, 0.5), s, level = 0.0) == float4(2.0, 0.0, 0.0, 1.0)
+
+// a resource chosen at run time is no one member, so no inlining could undo the let
+@expect(error = "wrong-kind-of-name")
+test {io}:
+    let src = if io.weights[0] > 0.5 => io.pts else io.alt
+    src[0] == io.pts[0]
+
+// a `let mut` of a resource could be assigned another, which no member is
+@expect(error = "wrong-kind-of-name")
+test {io}:
+    let mut src = io.pts
+    src[0] == io.pts[0]
+
+// and neither is a let assigned
+@expect(error = "not-assignable")
+test {io}:
+    let src = io.pts
+    src = io.alt
+    src[0] == io.pts[0]

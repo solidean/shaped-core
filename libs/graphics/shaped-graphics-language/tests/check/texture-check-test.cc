@@ -146,9 +146,10 @@ TEST("sgl check - a function of the program takes a texture, an image or a sampl
                "    let c = twice(work.t, work.s)\n    bump(work.img)\n")
           == "");
 
-    // the parameter stands where its member would, and a member is no value of a local or a result
-    CHECK(with("fun keep(t: texture_2d[float4]):\n    let u = t\n", "")
-              .contains("unsupported-yet user:[t] texture_2d[float4] as a value"));
+    // the parameter stands where its member would, so a let names it again (CHK-536), and no result is one
+    CHECK(with("fun keep(t: texture_2d[float4]) -> float4:\n    let u = t\n    return u.load(int2(0, 0))\n", "") == "");
+    CHECK(with("fun keep(t: texture_2d[float4]):\n    let mut u = t\n", "")
+              .contains("a `let mut` of texture_2d[float4], which could be assigned another"));
     CHECK(with("fun pass(t: texture_2d[float4]) -> texture_2d[float4] => t\n", "").contains("unsupported-yet"));
     // an entry point is handed values
     CHECK(reports_for("@pixel struct target:\n    color: float4\n"
@@ -179,9 +180,10 @@ TEST("sgl check - a function of the program takes a buffer or bytes, subscripted
                "    copied(work.values, work.sums)\n    tally(work.counts)\n    stamp(work.raw)\n")
           == "");
 
-    // the parameter stands where its member would: subscripted, measured or handed, and no value of a local or a result
-    CHECK(with("fun keep(b: buffer[float]):\n    let u = b\n", "")
-              .contains("unsupported-yet user:[b] buffer[float] as a value"));
+    // the parameter stands where its member would: subscripted, measured, handed or named by a let, and no result
+    CHECK(with("fun keep(b: buffer[float]) -> float:\n    let u = b\n    return u[0]\n", "") == "");
+    CHECK(with("fun keep(b: buffer[float]):\n    b = b\n", "")
+              .contains("b names buffer[float], the one resource it was given, and no assignment gives it another"));
     CHECK(with("fun pass(b: buffer[float]) -> buffer[float] => b\n", "").contains("unsupported-yet"));
 
     // the access is the type's: a read-only buffer is no `mut` argument, and a `mut` one no read-only one

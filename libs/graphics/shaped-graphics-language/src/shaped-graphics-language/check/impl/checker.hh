@@ -1365,6 +1365,9 @@ struct checker
     [[nodiscard]] flow check_nested(function_scope& scope, ast::body const& body);
     [[nodiscard]] flow check_stmt(function_scope& scope, ast::stmt_id stmt);
     void check_let(function_scope& scope, ast::stmt_id id, ast::let_stmt const& let);
+    /// Hands `value` over as an argument is, and the value each arrow arm of an `if` or a `case` it is gives, so a
+    /// resource chosen among them is refused as one, not as a resource standing as a value (CHK-536).
+    void hand_arm_values(i32 file, ast::expr_id value);
     void check_assign(function_scope& scope, ast::stmt_id id, ast::assign_stmt const& assign);
     [[nodiscard]] flow check_if(function_scope& scope, ast::if_stmt const& chain);
     void check_for(function_scope& scope, ast::stmt_id id, ast::for_stmt const& loop);
