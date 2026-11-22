@@ -865,6 +865,10 @@ value_ref lowering::subgroup_call(flat_call const& c, builtins::function_record 
         return with(subgroup::quad_swap, uint_constant(2));
     case subgroup_op::quad_broadcast:
         return with(subgroup::quad_broadcast, expr(arguments[1]));
+    case subgroup_op::quad_any:
+        return add(op::subgroup, result, {value}, u8(subgroup::quad_any));
+    case subgroup_op::quad_all:
+        return add(op::subgroup, result, {value}, u8(subgroup::quad_all));
     }
     return value_ref::none;
 }

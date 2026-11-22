@@ -859,6 +859,8 @@ ops[i](mut v)                                            // raygen, miss, closes
   A stage-link member marked `@per_draw` crosses flat and is uniform in the pixel stage; the vertex stage must return it uniform, or it is `non-uniform-per-draw` (CHK-393).
 - **The uniformity pass judges the inlined entry point** (CHK-282 to CHK-284) by WGSL's rules, so no target refuses what SGL accepts.
   A barrier, or a call that takes derivatives implicitly (`sample` without `level`, `ddx`), in non-uniform control flow is `non-uniform-control-flow`.
+  A branch on `quad_any(b)` or `quad_all(b)` reaches each quad whole, helpers included, so a derivative stands under it (CHK-533); `subgroup_any` does not.
+  The votes need `require subgroups, quad_control`, which WebGPU lacks.
 - **`@sampler(name)` on a texture member names a sampler of the same binding, or a file-scope one** (CHK-279), which a method call then leaves out: `material.albedo.sample(uv)`.
   A member of that name hides a file-scope sampler of it.
   A call without a sampler on a texture without one is `missing-sampler`.

@@ -231,3 +231,71 @@ TEST("sgl check - a compute stage forms its quads along one axis, four invocatio
     // the rest of the family takes the subgroup whole, whatever the workgroup's shape
     CHECK(shaped("(8, 8)", "subgroup_add(li as float)") == "");
 }
+
+TEST("sgl check - a branch on quad_any or quad_all keeps a derivative in uniform control flow, and nothing more "
+     "(CHK-533)")
+{
+    auto const pixel = [](cc::string_view body, cc::string_view require = "require subgroups, quad_control\n\n")
+    {
+        return cc::format("{}"
+                          "binding res:\n"
+                          "    t: texture_2d[float4]\n"
+                          "    smp: sampler\n"
+                          "\n"
+                          "struct vary:\n"
+                          "    @position position: hpos4\n"
+                          "    uv: float2\n"
+                          "\n"
+                          "@pixel struct target:\n"
+                          "    color: float4\n"
+                          "\n"
+                          "@pixel fun ps(v: vary){{res}} -> target:\n"
+                          "{}"
+                          "    return {{color = float4(0.0)}}\n",
+                          require, body);
+    };
+
+    // every invocation of the quad goes one way, so the quad reaches the sample whole
+    CHECK(reports_for(pixel("    if quad_any(v.uv.x > 0.5):\n"
+                            "        return {color = res.t.sample(v.uv, res.smp)}\n"))
+          == "");
+    CHECK(reports_for(pixel("    let near = quad_all(v.uv.y < 0.25)\n"
+                            "    if near:\n"
+                            "        return {color = float4(ddx(v.uv.x)) + float4(quad_swap_x(v.uv.y))}\n"))
+          == "");
+    // a value set under such a branch, and one that joins a quad vote with a uniform value, stays the quad's
+    CHECK(reports_for(pixel("    let mut level = 0.0\n"
+                            "    if quad_any(v.uv.x > 0.5):\n"
+                            "        level = 1.0\n"
+                            "    if level > 0.5 and quad_all(v.uv.y >= 0.0):\n"
+                            "        return {color = res.t.sample(v.uv, res.smp)}\n"))
+          == "");
+
+    // a subgroup's vote leaves a helper free to go the other way, as WGSL's spec says it may
+    CHECK(reports_for(pixel("    if subgroup_any(v.uv.x > 0.5):\n"
+                            "        return {color = res.t.sample(v.uv, res.smp)}\n"))
+              .contains(non_uniform));
+    // a quad's agreement is no subgroup's, so a subgroup operation under it still diverges
+    CHECK(reports_for(pixel("    if quad_any(v.uv.x > 0.5):\n"
+                            "        return {color = float4(subgroup_add(v.uv.x))}\n"))
+              .contains(non_uniform));
+    // a value that differs within the quad, joined with a quad vote, differs within the quad
+    CHECK(reports_for(pixel("    if quad_any(v.uv.x > 0.5) and v.uv.y > 0.5:\n"
+                            "        return {color = res.t.sample(v.uv, res.smp)}\n"))
+              .contains(non_uniform));
+    // and a quad vote in control flow that differs within the quad reaches part of it
+    CHECK(reports_for(pixel("    if v.uv.y > 0.5:\n"
+                            "        if quad_any(v.uv.x > 0.5):\n"
+                            "            return {color = res.t.sample(v.uv, res.smp)}\n"))
+              .contains(non_uniform));
+
+    // the votes are their feature's, which WebGPU has on no device
+    CHECK(reports_for(pixel("    if quad_any(v.uv.x > 0.5):\n"
+                            "        return {color = float4(1.0)}\n",
+                            "require subgroups\n\n"))
+              .contains("needs quad_control"));
+    // and a pixel stage's: a compute stage's quads have no helpers to agree with
+    CHECK(reports_for(compute("    work.output[id.x] = if quad_any(work.input[id.x] > 0.0) => 1.0 else 0.0\n",
+                              "require subgroups, quad_control\n\n"))
+              .contains("stage-not-allowed"));
+}

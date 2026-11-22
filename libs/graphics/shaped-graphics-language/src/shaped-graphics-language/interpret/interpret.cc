@@ -862,6 +862,16 @@ struct machine
         case subgroup_op::quad_broadcast:
             from_lane((lane & ~3) | named);
             break;
+        // CHK-533: the four lanes of this one's quad, helpers among them
+        case subgroup_op::quad_any:
+        case subgroup_op::quad_all:
+        {
+            auto is = op == subgroup_op::quad_all;
+            for (auto l = lane & ~3; l < (lane & ~3) + 4 && l < n; ++l)
+                is = op == subgroup_op::quad_all ? is && offers[l][0].as_bool() : is || offers[l][0].as_bool();
+            result.leaves.push_back(scalar::of(is));
+            break;
+        }
         default:
             for (auto k = isize(0); k < width; ++k)
             {

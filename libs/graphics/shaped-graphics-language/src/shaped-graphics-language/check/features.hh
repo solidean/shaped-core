@@ -82,6 +82,9 @@ enum class sgl::check::feature : sgl::u8
     /// A hit's cluster, which `cluster_id` reads where the device builds a BLAS from clusters, and is -1 elsewhere.
     /// No program names it: the prelude asks it with `has`, so a device without it needs no capability of it.
     clustered_geometry,
+    /// `quad_any` and `quad_all`, whose result every invocation of a quad agrees on, helpers included (CHK-533).
+    /// dx12 reads them across the quad, vulkan through VK_KHR_shader_quad_control; WebGPU's helpers may sit out.
+    quad_control,
 };
 
 CC_FLAG_ENUM_INDEXED(sgl::check, feature, u64);
@@ -125,6 +128,7 @@ inline constexpr cc::string_view k_feature_names[] = {
     "shader_shared_int64_atomics",  //
     "shader_int64_min_max_atomics", //
     "clustered_geometry",           //
+    "quad_control",                 //
 };
 inline constexpr isize k_feature_count = isize(sizeof(k_feature_names) / sizeof(k_feature_names[0]));
 

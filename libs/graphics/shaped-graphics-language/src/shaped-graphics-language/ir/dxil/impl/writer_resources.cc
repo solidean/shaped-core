@@ -793,6 +793,20 @@ void writer::subgroup_op(u32 index, instruction const& i)
         }
         return define(index);
     }
+    // CHK-533: the vote's bit and its three neighbours' over `quadOp`, which D3D's helpers take part in, at 6.6
+    case subgroup::quad_any:
+    case subgroup::quad_all:
+    {
+        auto const bit = _m.cast(cast_op::zext, leaf_at(value), _m.int_type());
+        auto const combine = what == subgroup::quad_any ? binary_op::bit_or : binary_op::bit_and;
+        auto folded = bit;
+        for (auto axis = u32(0); axis < 3; ++axis)
+        {
+            ll_value const args[] = {number(dx_op::quad_op), bit, _m.constant_i8(axis)};
+            folded = _m.binary(combine, folded, call(dx_op::quad_op, _m.int_type(), args));
+        }
+        return define_one(index, _m.compare(predicate::i_ne, folded, _m.constant_i32(0)));
+    }
     case subgroup::quad_swap:
     {
         // `QuadOpKind`: 0 across x, 1 across y, 2 across the diagonal, which lowering states as a constant

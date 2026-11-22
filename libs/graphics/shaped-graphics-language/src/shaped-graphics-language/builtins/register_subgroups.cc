@@ -99,6 +99,10 @@ constexpr subgroup_info k_operations[] = {
      "quadSwapDiagonal", "quad_shuffle_xor", "/// `x` of the quad's diagonal neighbour."},
     {subgroup_op::quad_broadcast, "quad_broadcast", operand::number_and_int, "lane", "QuadReadLaneAt", "quadBroadcast",
      "quad_broadcast", "/// `x` of the quad's invocation `lane`, a constant from 0 to 3 (CHK-378)."},
+    {subgroup_op::quad_any, "quad_any", operand::vote, "", "QuadAny", "", "quad_any",
+     "/// Whether `b` holds in any invocation of the quad, its helpers included (CHK-533)."},
+    {subgroup_op::quad_all, "quad_all", operand::vote, "", "QuadAll", "", "quad_all",
+     "/// Whether `b` holds in every invocation of the quad, its helpers included (CHK-533)."},
 };
 
 // Every name the writers below spell, by target: a name of the program spelled alike would hide it (EMIT-15).
@@ -123,6 +127,10 @@ constexpr cc::string_view k_hlsl_names[] = {
     "QuadReadAcrossY",
     "QuadReadAcrossDiagonal",
     "QuadReadLaneAt",
+    "QuadAny",
+    "QuadAll",
+    "sgl_quad_any",
+    "sgl_quad_all",
     "sgl_subgroup_inclusive_add",
     "sgl_subgroup_inclusive_mul",
 };
@@ -176,6 +184,8 @@ constexpr cc::string_view k_msl_names[] = {
     "simd_shuffle_down",
     "quad_shuffle_xor",
     "quad_broadcast",
+    "quad_any",
+    "quad_all",
 };
 
 /// The unsigned integer type of the width and component count of the signed one `language` spells `type`; empty where
@@ -229,6 +239,11 @@ written write_subgroup(call_context const& ctx)
     auto const& info = k_operations[ctx.data];
     auto const& x = ctx.arguments[0].text;
     auto const name = ctx.target == language::hlsl ? info.hlsl : ctx.target == language::wgsl ? info.wgsl : info.msl;
+    // CHK-533: dx12 reads the vote across the quad at Shader Model 6.6, as DXC's own fallback for QuadAny does;
+    // vulkan's QuadAny is what makes DXC state QuadDerivativesKHR
+    if (ctx.target == language::hlsl && !ctx.is_vulkan
+        && (info.op == subgroup_op::quad_any || info.op == subgroup_op::quad_all))
+        return {.text = cc::format("{}({})", info.op == subgroup_op::quad_any ? "sgl_quad_any" : "sgl_quad_all", x)};
     if (info.takes != operand::number_and_int)
     {
         // MSL has one quad shuffle, by the lane's bits that differ
@@ -278,6 +293,18 @@ cc::string subgroup_helper(helper_context const& c)
                           c.argument_types[0], info.hlsl,
                           info.op == subgroup_op::inclusive_add ? "WavePrefixSum" : "WavePrefixProduct",
                           info.op == subgroup_op::inclusive_add ? "+" : "*");
+    if (c.target == language::hlsl && !c.is_vulkan
+        && (info.op == subgroup_op::quad_any || info.op == subgroup_op::quad_all))
+    {
+        auto const is_any = info.op == subgroup_op::quad_any;
+        return cc::format("bool {0}(bool b)\n"
+                          "{{\n"
+                          "    const uint v = uint(b);\n"
+                          "    return (v {1} QuadReadAcrossX(v) {1} QuadReadAcrossY(v) {1} QuadReadAcrossDiagonal(v)) "
+                          "!= 0u;\n"
+                          "}}\n",
+                          is_any ? "sgl_quad_any" : "sgl_quad_all", is_any ? "|" : "&");
+    }
     if (c.target == language::msl && info.op == subgroup_op::ballot)
         return "uint4 sgl_subgroup_ballot(bool b)\n"
                "{\n"
@@ -310,17 +337,21 @@ void sgl::builtins::register_subgroups(registry& r)
                                                           : cc::span<cc::string_view const>(numbers);
         for (auto const type : types)
         {
-            auto const result = info.op == subgroup_op::ballot                             ? cc::string_view("uint4")
-                              : info.op == subgroup_op::all || info.op == subgroup_op::any ? cc::string_view("bool")
-                                                                                           : type;
+            auto const is_quad_vote = info.op == subgroup_op::quad_any || info.op == subgroup_op::quad_all;
+            auto const result = info.op == subgroup_op::ballot ? cc::string_view("uint4")
+                              : info.op == subgroup_op::all || info.op == subgroup_op::any || is_quad_vote
+                                  ? cc::string_view("bool")
+                                  : type;
             auto const parameters = info.takes == operand::vote ? cc::format("b: {}", type)
                                   : info.takes == operand::number_and_int
                                       ? cc::format("x: {}, {}: int", type, info.second)
                                       : cc::format("x: {}", type);
             auto const has_helper = info.op == subgroup_op::inclusive_add || info.op == subgroup_op::inclusive_mul
-                                 || info.op == subgroup_op::ballot;
+                                 || info.op == subgroup_op::ballot || info.op == subgroup_op::quad_any
+                                 || info.op == subgroup_op::quad_all;
             r.add(function_record{
-                .signature = cc::format("@stages(.pixel, .compute) fun {}({}) -> {}", info.name, parameters, result),
+                .signature = cc::format("@stages({}) fun {}({}) -> {}", is_quad_vote ? ".pixel" : ".pixel, .compute",
+                                        info.name, parameters, result),
                 .doc = info.doc,
                 .evaluate = no_subgroup,
                 .write = {.kind = spelling_kind::custom,
@@ -333,12 +364,14 @@ void sgl::builtins::register_subgroups(registry& r)
                 .is_subgroup_operation = true,
                 .agrees_in_subgroup = is_agreeing(info.op),
                 .is_quad_operation = info.name.starts_with("quad_"),
+                .agrees_in_quad = is_quad_vote,
                 .constant_lane_below = info.op == subgroup_op::broadcast || info.op == subgroup_op::shuffle_xor
                                             || info.op == subgroup_op::shuffle_up || info.op == subgroup_op::shuffle_down
                                          ? 128
                                      : info.op == subgroup_op::quad_broadcast ? 4
                                                                               : 0,
-                .features = check::feature_set(check::feature::subgroups),
+                .features = is_quad_vote ? check::feature_set(check::feature::subgroups) | check::feature::quad_control
+                                         : check::feature_set(check::feature::subgroups),
             });
         }
     }

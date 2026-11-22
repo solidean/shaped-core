@@ -321,6 +321,7 @@ An entry point must declare each of those itself: by its file, by a binding it l
 | a store or an atomic through a binding in a vertex, geometry or tessellation stage ([Atomics](#atomics)) | `sg::feature::vertex_pipeline_stores`, which WebGPU lacks; a polyfilled stage needs none (CHK-531) |
 | a `@layer` field of a vertex stage's result ([CHK-419](semantics/checking.md#entry-points)) | `sg::feature::vertex_layer_output`, which WebGPU lacks |
 | `@view_index` in a vertex or pixel stage ([CHK-437](semantics/checking.md#entry-points)) | `sg::feature::view_instancing`, which WebGPU lacks |
+| `quad_any` or `quad_all` ([CHK-533](semantics/checking.md#subgroups)) | `sg::feature::quad_control`, which WebGPU lacks |
 
 `ray_query` and `raytracing_pipeline` are the two halves of ray tracing, and [raytracing.md](raytracing.md) says what each grants.
 A device may have either without the other, which is why they are two features.

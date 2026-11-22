@@ -104,6 +104,8 @@ constexpr u32 k_model_task = 5364;
 constexpr u32 k_model_mesh = 5365;
 constexpr u32 k_mode_origin_upper_left = 7;
 constexpr u32 k_mode_depth_replacing = 12;
+constexpr u32 k_mode_quad_derivatives = 5088;
+constexpr u32 k_mode_maximally_reconverges = 6023;
 constexpr u32 k_mode_depth_greater = 14;
 constexpr u32 k_mode_depth_less = 15;
 constexpr u32 k_mode_local_size = 17;
@@ -694,6 +696,13 @@ void writer::write_entry()
     if (_p.stage == check::stage::pixel)
     {
         emit(_modes, spv::ExecutionMode, {_function, k_mode_origin_upper_left});
+        // CHK-533: as DXC states it for HLSL's QuadAny and QuadAll
+        if (_uses_quad_control)
+        {
+            require_extension("SPV_KHR_maximal_reconvergence");
+            emit(_modes, spv::ExecutionMode, {_function, k_mode_quad_derivatives});
+            emit(_modes, spv::ExecutionMode, {_function, k_mode_maximally_reconverges});
+        }
         for (auto const& e : _p.stage_elements)
         {
             if (e.system == built_in::depth || e.system == built_in::depth_greater_equal

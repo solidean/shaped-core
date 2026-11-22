@@ -264,6 +264,13 @@ enum class sg::feature
     /// Vulkan grants it with `VK_NV_cluster_acceleration_structure`, and a shader reads a hit's cluster as `cluster_id`.
     /// D3D12 grants it only on the preview Agility SDK, with `ClustersAndPTLASSupported`; metal and WebGPU have none.
     clustered_geometry,
+
+    /// SGL's `quad_any` and `quad_all`, which every invocation of a quad agrees on, helpers included, so a derivative may
+    /// stand under a branch on one (SGL's CHK-533).
+    /// D3D12 grants it with wave operations, on the Shader Model 6.8 every device here runs; vulkan with
+    /// `VK_KHR_shader_quad_control` and `VK_KHR_shader_maximal_reconvergence`.
+    /// WebGPU has none, since its helpers may sit out a quad operation; metal waits on a run on Apple hardware.
+    quad_control,
 };
 
 CC_FLAG_ENUM_INDEXED(sg, feature, cc::u64);
@@ -319,8 +326,9 @@ inline constexpr feature k_all_features[] = {
     feature::ray_tracing_motion_blur,
     feature::partitioned_tlas,
     feature::clustered_geometry,
+    feature::quad_control,
 };
-static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize(feature::clustered_geometry) + 1,
+static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize(feature::quad_control) + 1,
               "k_all_features lists every feature");
 
 /// The enumerator's name, `ray_query`, which is also what SGL's `require` spells it as.
@@ -416,6 +424,8 @@ static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize
         return "partitioned_tlas";
     case feature::clustered_geometry:
         return "clustered_geometry";
+    case feature::quad_control:
+        return "quad_control";
     }
     return "";
 }

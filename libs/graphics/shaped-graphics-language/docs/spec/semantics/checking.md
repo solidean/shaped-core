@@ -1366,6 +1366,11 @@ The stage inputs `@subgroup_size` and `@subgroup_invocation_id` (CHK-271) are it
 * **CHK-380** A compute entry point whose inlined body reaches a quad operation has a workgroup of one row, `(x, 1, 1)` with `x` a multiple of 4 ([why](why/checking.md#chk-380)).
   Any other workgroup makes each such call `invalid-entry-point`.
   That is the one shape whose quads HLSL forms of four consecutive invocations, as WGSL and MSL form every compute stage's.
+* **CHK-533** `quad_any(b)` and `quad_all(b)` are the **quad votes**: whether `b` holds in any or in every invocation of the quad, its helpers included.
+  Each needs `quad_control` beside `subgroups`, and is `@stages(.pixel)`, since only a pixel stage's quads have helpers to agree with.
+  A quad vote differs between quads alone, so control flow that branches on one, and on nothing else that differs, reaches each quad whole.
+  There a derivative and a quad operation stand as in uniform control flow (CHK-282); a barrier and any other subgroup operation do not.
+  A `subgroup_any` gives no such thing: on WebGPU a helper may sit out a subgroup operation, which is why `quad_control` is a feature WebGPU lacks.
 
 | operation | gives |
 |---|---|
@@ -1380,6 +1385,7 @@ The stage inputs `@subgroup_size` and `@subgroup_invocation_id` (CHK-271) are it
 | `subgroup_shuffle_xor(x, mask)`, `subgroup_shuffle_up(x, delta)`, `subgroup_shuffle_down(x, delta)` | `x` of the invocation `id ^ mask`, `id - delta` or `id + delta`, for this invocation's `id` |
 | `quad_swap_x(x)`, `quad_swap_y(x)`, `quad_swap_diagonal(x)` | `x` of the quad's horizontal, vertical or diagonal neighbour |
 | `quad_broadcast(x, lane)` | `x` of the quad's invocation `lane` |
+| `quad_any(b)`, `quad_all(b)` | whether the `bool` `b` holds in any or every invocation of the quad, helpers included (CHK-533) |
 
 ```sgl sketch
 require subgroups

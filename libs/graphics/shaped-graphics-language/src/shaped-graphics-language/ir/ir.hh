@@ -273,6 +273,8 @@ enum class sgl::ir::subgroup : sgl::u8
     bit_xor,
     quad_broadcast,
     quad_swap,
+    quad_any,
+    quad_all,
 };
 
 /// How a subgroup reduction folds: over the subgroup, up to and including this invocation, or up to it alone.

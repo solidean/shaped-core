@@ -109,6 +109,45 @@ ASYNC_INVOCABLE_TEST("sg - a discarded pixel still takes part in its quad's deri
     }
 }
 
+ASYNC_INVOCABLE_TEST("sg - a quad vote is its whole quad's, so a derivative under a branch on one is its quad's "
+                     "(CHK-533)",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::quad_control))
+        SKIP("this context has no quad votes its helpers take part in");
+
+    // An 8 x 4 target, four quads wide and two high: only pixel (5, 2) asks, so only its quad takes the derivative.
+    auto vertices = cc::vector<corner>();
+    push_rect(vertices, tg::vec4f(-1, -1, 1, 1), 0.5f, 0);
+    auto const buffer = ctx->persistent.create_buffer_from_data(cc::move(vertices), sg::buffer_usage::vertex_buffer);
+    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::pixel_semantics::quad_votes);
+
+    auto const pixels = co_await sg_test::draw_offscreen(*ctx,
+                                                         {.width = 8,
+                                                          .height = 4,
+                                                          .colors = {sg::pixel_format::rgba32_float},
+                                                          .target_set = shaders::pixel_semantics::tag_target::name,
+                                                          .clear_color = tg::vec4f(-1, -1, -1, -1)},
+                                                         [&](sg::rendering_scope& scope)
+                                                         {
+                                                             scope.bind_pipeline(*pipeline);
+                                                             scope.bind_vertex_buffer(buffer.as_vertex_buffer());
+                                                             scope.draw({.vertex_range = {.offset = 0, .size = 6}});
+                                                         });
+
+    for (auto y = 0; y < 4; ++y)
+        for (auto x = 0; x < 8; ++x)
+        {
+            auto const in_asking_quad = x / 2 == 2 && y / 2 == 1;
+            auto const got = pixels[0].rgba_float(x, y);
+            CHECK(got[0] == (in_asking_quad ? 1.0f : 0.0f)).context(cc::format("quad_any at ({}, {})", x, y));
+            CHECK(got[1] == (x < 4 ? 1.0f : 0.0f)).context(cc::format("quad_all at ({}, {})", x, y));
+        }
+}
+
 ASYNC_INVOCABLE_TEST("sg - a coarse derivative is one per quad and a fine one per pixel, at every float level",
                      (sg::context_handle const& ctx))
 {

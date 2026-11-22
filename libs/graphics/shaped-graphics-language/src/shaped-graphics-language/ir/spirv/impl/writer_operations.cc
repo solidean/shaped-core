@@ -223,6 +223,8 @@ enum class group_form : u8
     with_id,
     /// A `group_fold` before the value.
     folded,
+    /// The quad votes of SPV_KHR_quad_control, which take the predicate alone, with no scope.
+    quad_vote,
 };
 
 struct group_rule
@@ -258,8 +260,10 @@ constexpr group_rule k_groups[] = {
     {spv::GroupNonUniformBitwiseXor, group_form::folded, spv::GroupNonUniformArithmetic},        // bit_xor
     {spv::GroupNonUniformQuadBroadcast, group_form::with_id, spv::GroupNonUniformQuad},          // quad_broadcast
     {spv::GroupNonUniformQuadSwap, group_form::with_id, spv::GroupNonUniformQuad},               // quad_swap
+    {spv::GroupNonUniformQuadAnyKHR, group_form::quad_vote, spv::QuadControlKHR},                // quad_any
+    {spv::GroupNonUniformQuadAllKHR, group_form::quad_vote, spv::QuadControlKHR},                // quad_all
 };
-static_assert(sizeof(k_groups) / sizeof(k_groups[0]) == sizeof(char[isize(subgroup::quad_swap) + 1]));
+static_assert(sizeof(k_groups) / sizeof(k_groups[0]) == sizeof(char[isize(subgroup::quad_all) + 1]));
 } // namespace
 
 void writer::ext_inst(instruction const& i, u32 id)
@@ -318,6 +322,11 @@ void writer::group(instruction const& i, u32 id)
     require(rule.capability);
     switch (rule.form)
     {
+    case group_form::quad_vote:
+        // CHK-533: the entry point states that its derivatives are its quads', which a quad vote keeps uniform
+        require_extension("SPV_KHR_quad_control");
+        _uses_quad_control = true;
+        return emit(_code, rule.opcode, {type, id, value});
     case group_form::plain:
         return emit(_code, rule.opcode, {type, id, scope, value});
     case group_form::with_id:

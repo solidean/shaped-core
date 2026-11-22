@@ -290,3 +290,24 @@ pipeline viewed_tags:
     cull = .none
     format = .rgba32_float
     view_count = 2
+
+// A quad vote is its quad's whole answer, helpers included, so a derivative stands under a branch on one (CHK-533).
+// Pixel (5, 2) alone asks, so its quad, columns 4 and 5 of rows 2 and 3, takes ddx of x, 1 in each of its pixels.
+// `quad_all` of x < 5 holds in the quads left of column 4, and in no quad that holds column 5.
+@pixel fun quad_vote_ps(p: tagged) -> tag_target:
+    require subgroups, quad_control
+    let x = p.position.x
+    let y = p.position.y
+    let asked = x > 5.0 and x < 6.0 and y > 2.0 and y < 3.0
+    let mut slope = 0.0
+    if quad_any(asked):
+        slope = ddx(x)
+    return {
+        value = float4(slope, if quad_all(x < 5.0) => 1.0 else 0.0, p.tag as float, 1.0)
+    }
+
+pipeline quad_votes:
+    vertex = tagged_vs
+    pixel = quad_vote_ps
+    cull = .none
+    format = .rgba32_float

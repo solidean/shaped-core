@@ -119,6 +119,8 @@ ctx.supports(sg::feature::ray_query)               // bool — THE capability qu
                                                    //     compare-exchange in a pixel stage needs it; false on webgpu)
                                                    //   | vertex_layer_output (a vertex stage picks the layer of an array target,
                                                    //     SGL's @layer; dx12 and vulkan ask the device, true on metal, false on webgpu)
+                                                   //   | quad_control (SGL's quad_any / quad_all, helpers included; dx12 with wave ops,
+                                                   //     vulkan with VK_KHR_shader_quad_control; false on metal until verified, and on webgpu)
                                                    //   | view_instancing (one draw renders view_count views, view i into layer i;
                                                    //   | pixel_view_read_workaround (no capability: Intel dx12 needs a pixel stage to read the view; SGL's keep_view asks for it)
                                                    //     SGL's @view_index; dx12's ViewInstancingTier, vulkan's multiview,
