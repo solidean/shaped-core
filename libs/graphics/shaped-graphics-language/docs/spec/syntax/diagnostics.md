@@ -287,6 +287,7 @@ An example of an AST kind is an `sgl sketch`, since examples are checked through
 | `stray-else` | an `else` or an `else if` that pairs with no `if` |
 | `mixed-struct-type` | a curly paren literal that holds both `name: type` and `name = value` elements |
 | `misplaced-splat` | a splat that is not a whole element of a paren group |
+| `splat-of-an-operation` | a splat as the left operand of an operation in a paren group's element, `(..a + b, 1.0)`, which is written `(..(a + b), 1.0)` |
 | `misplaced-attribute-on-expression` | an attribute on an expression that stands in no type position |
 | `statement-in-expression` | an assignment, a `let`, an `if` without an `else` or a declaration where a value is expected |
 | `unexpected-keyword` | keywords that head nothing together, such as `mut` without `let` |
@@ -344,6 +345,12 @@ binding frame:
 
 ```sgl sketch
 let sum = 1 + ..rest
+```
+
+`splat-of-an-operation`: the splat takes `a` alone, and `float4(..(a + b), 1.0)` splats the sum.
+
+```sgl sketch
+let lit = float4(..a + b, 1.0)
 ```
 
 `statement-in-expression`: a `let` where an argument is expected.

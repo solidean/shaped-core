@@ -164,6 +164,15 @@ TEST("sgl ast - a splat anywhere else is misplaced")
     CHECK(expr_of("f ..n") == "(call:juxt f (invalid \"..n\")) !! misplaced-splat @12+3\n");
     CHECK(expr_of("(1 + ..n, 0)") == "(tuple (call:infix + num:1 (invalid \"..n\")) num:0) !! misplaced-splat @15+3\n");
 
+    // a splat of an element's left operand says how to splat the whole operation instead
+    CHECK(expr_of("(..a + b, 1)") == "(tuple (call:infix + (invalid \"..a\") b) num:1) !! splat-of-an-operation @11+3\n");
+    CHECK(expr_of("f(..a * 2 + b)")
+          == "(call:paren f (call:infix + (call:infix * (invalid \"..a\") num:2) b)) !! splat-of-an-operation @12+3\n");
+    // the operation's right operand is the plain misplacement, and a parenthesized operation is a splat
+    CHECK(expr_of("(b + ..a, 1)").contains("misplaced-splat"));
+    CHECK(expr_of("(g(..a + b), 1)").contains("splat-of-an-operation"));
+    CHECK(expr_of("(..(a + b), 1)") == "(tuple ..(call:infix + a b) num:1)");
+
     // The postfix spelling stays reserved, which the form parser has said already.
     CHECK(expr_of("(n.., 0)") == "(tuple (invalid \"n..\") num:0) !!syntax reserved-operator @12+2\n");
 }

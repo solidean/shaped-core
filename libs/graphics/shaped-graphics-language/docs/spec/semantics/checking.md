@@ -626,7 +626,8 @@ fun shade(k: float) -> float:
   Its one argument is `false` or `true`, on any declaration it stands on, and anything else is `invalid-attribute-arguments`.
 * **CHK-266** Every type of `builtins.sgl` is `@shadowable(false)`, and the types of `core.sgl` are not.
   A program's own `int` would be a second type that reads like the first, while a literal stays of the prelude's, so `level: int = 0` would read `expected int, got int`.
-* **CHK-55** A pattern in a `let` is `unsupported-yet`; `let mut` is CHK-111.
+* **CHK-55** `let _ = v` evaluates `v` and binds nothing, which says a value is dropped on purpose; `let mut _` and a `let _` with no value are `wrong-kind-of-name`.
+  Any other pattern in a `let` is `unsupported-yet`; `let mut` is CHK-111.
   A `let mut` with a written type may stand without a value, `let mut v: float`, and holds nothing until it is assigned.
   Every read of it must come after an assignment of it whole on every path to the read, or it is the normal error `read-before-assignment`.
   A `while` or a `for` may run its body no time, so what only the body assigns counts nowhere after it; after a `loop:` it counts on the paths through each `break`.

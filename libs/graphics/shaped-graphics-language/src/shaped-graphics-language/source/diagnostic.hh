@@ -77,6 +77,8 @@ enum class sgl::diagnostic_kind : sgl::u8
     stray_else,
     mixed_struct_type,
     misplaced_splat,
+    /// A splat as the left operand of an operation in a list element: `..a + b`, meaning `..(a + b)`.
+    splat_of_an_operation,
     misplaced_attribute_on_expression,
     /// An assignment, a `let`, an `if` or a declaration where a value was expected.
     statement_in_expression,
