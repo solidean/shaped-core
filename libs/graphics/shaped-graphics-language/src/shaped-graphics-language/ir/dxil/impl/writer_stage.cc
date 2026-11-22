@@ -73,6 +73,7 @@ constexpr system_rule k_systems[] = {
     {8, 2},   // SV_InstanceID
     {64, 16}, // SV_Target
     {4, 4},   // SV_RenderTargetArrayIndex
+    {5, 5},   // SV_ViewportArrayIndex
     {7, 10},  // SV_PrimitiveID
     {9, 13},  // SV_IsFrontFace
     {10, 12}, // SV_SampleIndex
@@ -746,7 +747,8 @@ void writer::write_entry_metadata()
 
     if (_p.stage == check::stage::vertex || _p.stage == check::stage::tessellation_evaluation)
         for (auto const& e : _summary.signature)
-            _uses.layer_output = _uses.layer_output || (e.table == signature_table::output && e.system_value == 4);
+            _uses.layer_output = _uses.layer_output
+                              || (e.table == signature_table::output && (e.system_value == 4 || e.system_value == 5));
     auto metadata_flags = k_native_low_precision;
     for (auto const& b : _bindings)
         if (b.cls == 1 && model_minor >= 7)

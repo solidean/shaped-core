@@ -51,6 +51,7 @@ constexpr built_in_number k_built_ins[] = {
     {built_in::primitive_id, 7},
     {built_in::view_index, 4440},
     {built_in::layer, 9},
+    {built_in::viewport_index, 10},
     {built_in::depth, 22},
     {built_in::depth_greater_equal, 22},
     {built_in::depth_less_equal, 22},
@@ -475,6 +476,10 @@ void writer::write_stage_elements()
                 if (e.system == built_in::layer && _p.stage != check::stage::mesh)
                     require(_p.stage == check::stage::pixel || _p.stage == check::stage::geometry ? spv::Geometry
                                                                                                   : spv::ShaderLayer);
+                if (e.system == built_in::viewport_index && _p.stage != check::stage::mesh)
+                    require(_p.stage == check::stage::pixel || _p.stage == check::stage::geometry
+                                ? spv::MultiViewport
+                                : spv::ShaderViewportIndex);
             }
         if (e.system == built_in::none && e.location >= 0)
             emit(_annotations, spv::Decorate, {id, spv::Location, u32(e.location)});

@@ -5336,6 +5336,7 @@ enum feature:
     shader_int64_min_max_atomics
     clustered_geometry
     quad_control
+    multi_viewport
 
 /// The API this compile writes for, known once a body is inlined; no const holds it.
 const target_api: graphics_api = .none

@@ -434,6 +434,8 @@ public:
             return _float_atomic_add;
         case sg::feature::quad_control:
             return _quad_control;
+        case sg::feature::multi_viewport:
+            return _multi_viewport;
         case sg::feature::shader_execution_reordering:
             return _shader_execution_reordering;
         case sg::feature::float_specials:
@@ -1059,6 +1061,8 @@ public:
     bool _float_atomic_add = false;
     /// `VK_KHR_shader_quad_control` with `VK_KHR_shader_maximal_reconvergence`, both enabled.
     bool _quad_control = false;
+    /// `multiViewport` with `shaderOutputViewportIndex`, both enabled.
+    bool _multi_viewport = false;
     /// `VK_EXT_ray_tracing_invocation_reorder`, enabled where the device reorders rather than only accepting the calls.
     bool _shader_execution_reordering = false;
     /// `VK_NV_partitioned_acceleration_structure`, enabled with its entry points loaded.

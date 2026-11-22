@@ -652,6 +652,8 @@ enum class sgl::ir::built_in : sgl::u8
     position,
     /// `@layer`.
     layer,
+    /// `@viewport_index`.
+    viewport_index,
     vertex_index,
     instance_index,
     first_instance,

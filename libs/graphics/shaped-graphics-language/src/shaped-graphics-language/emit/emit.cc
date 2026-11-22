@@ -379,7 +379,7 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
             | check::feature::unbounded_binding_arrays | check::feature::shader_int64 | check::feature::shader_f64
             | check::feature::shader_int64_atomics | check::feature::shader_shared_int64_atomics
             | check::feature::shader_int64_min_max_atomics | check::feature::vertex_pipeline_stores
-            | check::feature::quad_control;
+            | check::feature::quad_control | check::feature::multi_viewport;
         for (auto i = isize(0); i < check::k_feature_count; ++i)
             if (e.features.has(check::feature(i)) && never.has(check::feature(i)))
                 result.errors.push_back({.kind = error_kind::target_lacks_feature,

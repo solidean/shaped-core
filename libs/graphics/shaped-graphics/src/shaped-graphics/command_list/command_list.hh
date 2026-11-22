@@ -203,6 +203,9 @@ protected:
                                                                   cc::span<array_texture_access const> elements) = 0;
     virtual void raster_set_viewport(viewport const& vp) = 0;
     virtual void raster_set_scissor(tg::aabb2i const& rect) = 0;
+    /// A backend without sg::feature::multi_viewport keeps this one, which takes a single viewport.
+    virtual void raster_set_viewports(cc::span<viewport const> viewports);
+    virtual void raster_set_scissors(cc::span<tg::aabb2i const> rects);
     virtual void raster_set_stencil_reference(u32 reference) = 0;
     virtual void raster_set_blend_constants(tg::vec4f constants) = 0;
     virtual void raster_set_inline_constants(cc::span<byte const> data, cc::optional<isize> offset) = 0;

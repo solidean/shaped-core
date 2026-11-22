@@ -478,6 +478,8 @@ inline constexpr int reserved_binding_group = max_binding_groups;
 /// 8 is the DX12 (`D3D12_SIMULTANEOUS_RENDER_TARGET_COUNT`) and WebGPU (`maxColorAttachments`) limit.
 /// Vulkan guarantees at least 4, and is 8 on essentially all desktop adapters.
 inline constexpr int max_color_targets = 8;
+/// The most viewports `set_viewports` takes: what D3D12 has, and what vulkan guarantees with `multiViewport`.
+inline constexpr int max_viewports = 16;
 
 /// Hard cap on vertex-buffer input slots bound for a draw.
 /// 8 is WebGPU's `maxVertexBuffers`; DX12 allows 32 (`D3D12_IA_VERTEX_INPUT_RESOURCE_SLOT_COUNT`) and Vulkan at least 16.

@@ -365,11 +365,13 @@ u32 vulkan_command_list::raster_declare_array_texture_access(cc::string_view bin
     return id;
 }
 
-void vulkan_command_list::raster_set_viewport(sg::viewport const& vp)
+namespace
 {
-    // Negative height flips the Y axis, which is what makes a shader written for D3D12's top-left origin render the
-    // same way here — the one place sg's viewport does not translate field for field.
-    auto const v = VkViewport{
+/// Negative height flips the Y axis, which is what makes a shader written for D3D12's top-left origin render the same
+/// way here — the one place sg's viewport does not translate field for field.
+VkViewport vulkan_viewport(sg::viewport const& vp)
+{
+    return VkViewport{
         .x = vp.offset[0],
         .y = vp.offset[1] + vp.size[1],
         .width = vp.size[0],
@@ -377,21 +379,60 @@ void vulkan_command_list::raster_set_viewport(sg::viewport const& vp)
         .minDepth = vp.min_depth,
         .maxDepth = vp.max_depth,
     };
-    vkCmdSetViewport(_buffer, 0, 1, &v);
 }
 
-void vulkan_command_list::raster_set_scissor(tg::aabb2i const& rect)
+/// Vulkan's validation refuses a negative offset, though it clips an extent past the target, and sg allows both.
+VkRect2D vulkan_scissor(tg::aabb2i const& rect)
 {
-    // Vulkan's validation refuses a negative offset, though it clips an extent past the target, and sg allows both.
     auto const x0 = cc::max(rect.min[0], 0);
     auto const y0 = cc::max(rect.min[1], 0);
     auto const x1 = cc::max(rect.max[0], x0);
     auto const y1 = cc::max(rect.max[1], y0);
-    auto const r = VkRect2D{
+    return VkRect2D{
         .offset = {x0, y0},
         .extent = {u32(x1 - x0), u32(y1 - y0)},
     };
-    vkCmdSetScissor(_buffer, 0, 1, &r);
+}
+} // namespace
+
+// The counts are dynamic too (VK_DYNAMIC_STATE_VIEWPORT_WITH_COUNT), so one pipeline draws into one viewport or many.
+void vulkan_command_list::raster_set_viewport(sg::viewport const& vp)
+{
+    auto const v = vulkan_viewport(vp);
+    vkCmdSetViewportWithCount(_buffer, 1, &v);
+}
+
+void vulkan_command_list::raster_set_scissor(tg::aabb2i const& rect)
+{
+    auto const r = vulkan_scissor(rect);
+    vkCmdSetScissorWithCount(_buffer, 1, &r);
+}
+
+void vulkan_command_list::raster_set_viewports(cc::span<sg::viewport const> viewports)
+{
+    CC_ASSERT(!viewports.empty() && viewports.size() <= sg::max_viewports, "set_viewports takes 1 to max_viewports "
+                                                                           "viewports");
+    VkViewport v[sg::max_viewports] = {};
+    VkRect2D r[sg::max_viewports] = {};
+    for (auto i = isize(0); i < viewports.size(); ++i)
+    {
+        v[i] = vulkan_viewport(viewports[i]);
+        auto const& vp = viewports[i];
+        r[i] = vulkan_scissor(tg::aabb2i(tg::pos2i(int(vp.offset[0]), int(vp.offset[1])),
+                                         tg::pos2i(int(vp.offset[0] + vp.size[0]), int(vp.offset[1] + vp.size[1]))));
+    }
+    // the scissor count must match the viewport count, so each viewport takes its own rect as dx12 does
+    vkCmdSetViewportWithCount(_buffer, u32(viewports.size()), v);
+    vkCmdSetScissorWithCount(_buffer, u32(viewports.size()), r);
+}
+
+void vulkan_command_list::raster_set_scissors(cc::span<tg::aabb2i const> rects)
+{
+    CC_ASSERT(!rects.empty() && rects.size() <= sg::max_viewports, "set_scissors takes 1 to max_viewports rects");
+    VkRect2D r[sg::max_viewports] = {};
+    for (auto i = isize(0); i < rects.size(); ++i)
+        r[i] = vulkan_scissor(rects[i]);
+    vkCmdSetScissorWithCount(_buffer, u32(rects.size()), r);
 }
 
 void vulkan_command_list::raster_set_stencil_reference(u32 reference)

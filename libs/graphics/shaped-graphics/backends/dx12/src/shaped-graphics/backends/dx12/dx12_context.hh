@@ -297,6 +297,9 @@ public:
         case sg::feature::subgroups:
         case sg::feature::quad_control:
             return _wave_ops;
+        // every D3D12 device has 16 viewports, and SV_ViewportArrayIndex from a vertex stage beside the layer
+        case sg::feature::multi_viewport:
+            return _vertex_layer_output;
         case sg::feature::shader_int64:
             return _int64_shader_ops;
         case sg::feature::shader_f64:

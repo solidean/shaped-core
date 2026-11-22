@@ -519,6 +519,8 @@ struct optional_shader_features
     VkBool32 subgroup_size_control = VK_FALSE;
     /// SPIR-V's `Layer` written by a vertex shader, which DXC declares as `ShaderLayer`.
     VkBool32 shader_output_layer = VK_FALSE;
+    /// SPIR-V's `ViewportIndex` written by a vertex shader, which DXC declares as `ShaderViewportIndex`.
+    VkBool32 shader_output_viewport_index = VK_FALSE;
     /// One draw rendering several views through a rendering's view mask, and SPIR-V's `ViewIndex` that reads which.
     VkBool32 multiview = VK_FALSE;
     /// DXC writes a compute stage's quad operations in a derivative group, linear along one axis or of 2x2 threads.
@@ -596,6 +598,7 @@ optional_shader_features query_optional_shader_features(VkPhysicalDevice dev)
         .subgroup_extended_types = vk12.shaderSubgroupExtendedTypes,
         .subgroup_size_control = vk13.subgroupSizeControl,
         .shader_output_layer = vk12.shaderOutputLayer,
+        .shader_output_viewport_index = vk12.shaderOutputViewportIndex,
         .multiview = vk11.multiview,
         .has_compute_derivatives = has_compute_derivatives,
         .compute_derivative_group_linear = linear,
@@ -1130,6 +1133,7 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
         .hostQueryReset = VK_TRUE,
         .timelineSemaphore = VK_TRUE,
         .bufferDeviceAddress = VK_TRUE,
+        .shaderOutputViewportIndex = shader_features.shader_output_viewport_index,
         .shaderOutputLayer = shader_features.shader_output_layer,
     };
     // One create-info per family: the graphics one always, plus the transfer family when it is a different one.
@@ -1189,6 +1193,7 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
         .features = {.imageCubeArray = supported.imageCubeArray,
                      .independentBlend = supported.independentBlend,
                      .geometryShader = supported.geometryShader,
+                     .multiViewport = supported.multiViewport,
                      .tessellationShader = supported.tessellationShader,
                      .sampleRateShading = supported.sampleRateShading,
                      .drawIndirectFirstInstance = supported.drawIndirectFirstInstance,
@@ -1405,6 +1410,7 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     ctx->_unbounded_binding_arrays = shader_features.variable_descriptor_count == VK_TRUE;
     ctx->_subgroups = shader_features.subgroups;
     ctx->_vertex_layer_output = shader_features.shader_output_layer == VK_TRUE;
+    ctx->_multi_viewport = supported.multiViewport == VK_TRUE && shader_features.shader_output_viewport_index == VK_TRUE;
     ctx->_view_instancing = shader_features.multiview == VK_TRUE;
     ctx->_vertex_pipeline_stores = supported.vertexPipelineStoresAndAtomics == VK_TRUE;
     ctx->_float_atomic_add = float_atomic_add_supported;
