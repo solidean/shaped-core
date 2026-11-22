@@ -479,7 +479,7 @@ TEST("sgl emit - a mutable array that starts filled is the one array the loop fi
                                         "    dst: mut buffer[float]\n"
                                         "\n"
                                         "@compute(64) fun main(@thread_id id: int3){work}:\n"
-                                        "    let mut arr = float[8].filled(0.0)\n"
+                                        "    @indexed(.memory) let mut arr = float[8].filled(0.0)\n"
                                         "    arr[id.x % 8] = 1.0\n"
                                         "    work.dst[id.x] = arr[3]\n");
     auto const hlsl = text_of(source, target::hlsl_dx12);
@@ -501,7 +501,7 @@ TEST("sgl emit - a fill past 64 elements in all is a loop per level, and a small
                                   "    dst: mut buffer[float]\n"
                                   "\n"
                                   "@compute(64) fun main(@thread_id id: int3){{work}}:\n"
-                                  "    let mut arr = {}\n"
+                                  "    @indexed(.memory) let mut arr = {}\n"
                                   "    arr[id.x % 4][id.y % 4] = 1.0\n"
                                   "    work.dst[id.x] = arr[1][2]\n",
                                   declaration),
@@ -522,10 +522,10 @@ TEST("sgl emit - only a let array of constants is static const, never a var or o
                                         "\n"
                                         "@compute(64) fun main(@thread_id id: int3){work}:\n"
                                         "    let k = [float2(1.0, 2.0), float2(3.0, 4.0)]\n"
-                                        "    let mut m = [1.0, 2.0]\n"
+                                        "    @indexed(.memory) let mut m = [1.0, 2.0]\n"
                                         "    m[id.x % 2] = 5.0\n"
                                         "    let f = id.y as float\n"
-                                        "    let v = [f, 1.0]\n"
+                                        "    @indexed(.memory) let v = [f, 1.0]\n"
                                         "    work.dst[id.x] = k[id.x % 2].y + m[id.y % 2] + v[id.z % 2]\n");
     auto const hlsl = text_of(source, target::hlsl_vulkan);
     CHECK(hlsl.contains("static const float2 k[2] = {float2(1.0, 2.0), float2(3.0, 4.0)};\n"));

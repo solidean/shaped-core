@@ -857,6 +857,14 @@ struct checker
     [[nodiscard]] i32 preferred_subgroup_size_of(i32 file, ast::attribute const* a, bool is_compute);
     /// `@padding(.none)` on a binding or a buffer member; anything else reports and leaves the natural padding.
     [[nodiscard]] padding_kind padding_of(i32 file, ast::attribute const* a);
+    /// CHK-538: `@indexed(.select)` or `@indexed(.memory)` on a let; `unstated` without one, and after a bad one.
+    [[nodiscard]] local_indexing indexing_of(i32 file, ast::attribute const* a) const;
+    /// CHK-538: whether `@indexed(.select)` keeps an element of `type`: a scalar, a vector, a matrix, an enum, or a
+    /// struct whose members are each one of those.
+    [[nodiscard]] bool is_selectable_element(type_id type) const;
+    /// CHK-538: reports an `@indexed` whose argument is no way of holding an array, on a let of no array, or a
+    /// `.select` of an array it cannot lower.
+    void judge_indexed(i32 file, ast::attribute const& a, type_id type);
     /// CHK-435: `@float(.specials)` and the other levels; `fast` without the attribute, and after a bad one, which it reports.
     [[nodiscard]] float_level float_level_of(i32 file, ast::attribute const* a);
     /// `@geometry(max_vertices = N)`'s `N`, from 1 to 256; 1 after a bad argument, which it reports (CHK-301).
@@ -1085,6 +1093,9 @@ struct checker
     /// CHK-55: every read of a `let mut` declared without a value, on a path where nothing assigned it, is
     /// `read-before-assignment` (check_assignments.cc).
     void judge_assignments(flat_entry_point const& structured);
+    /// CHK-538: every index into a local array that is no constant and built of no loop counter, where the array's
+    /// let states no `@indexed`; first, each copy of an annotated array takes its annotation.
+    void judge_local_indices(flat_entry_point& structured);
     /// The prelude symbol that declares `id`; `none` for a record no declaration names.
     [[nodiscard]] symbol_id symbol_declaring(builtin_id id) const;
     /// A literal, an enum case, a `const`, or a construction of those: what a target takes where it takes no value.

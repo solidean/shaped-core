@@ -161,3 +161,127 @@ TEST("sgl check - an array in a struct stands in a buffer, and in a block where 
     // workgroup memory is laid out by each target alone, so an array there stays fine
     CHECK(reports_for("@workgroup binding tile:\n    rows: poly[4]\nstruct poly:\n    corners: float2[3]\n") == "");
 }
+
+namespace
+{
+/// A compute entry point over a buffer of subsets, with `body` as its statements and `head` above it at file scope.
+cc::string over_subsets(cc::string_view body, cc::string_view head = "")
+{
+    return cc::format("binding work:\n"
+                      "    subsets: buffer[int]\n"
+                      "    totals: mut buffer[float]\n"
+                      "\n"
+                      "{}"
+                      "@compute(64) fun cs(@thread_id id: int3){{work}}:\n"
+                      "{}",
+                      head, body);
+}
+
+constexpr auto k_unstated = "indexing-not-stated";
+} // namespace
+
+TEST("sgl check - an index into a local array computed from data states how the array is held (CHK-538)")
+{
+    // read from a buffer, unstated: refused at the index, naming the array and both fixes
+    auto const refused = reports_for(over_subsets("    let mut ep = [0.0, 1.0, 2.0]\n"
+                                                  "    let s = work.subsets[id.x]\n"
+                                                  "    ep[s] = 4.0\n"
+                                                  "    work.totals[id.x] = ep[0]\n"));
+    CHECK(refused.contains(k_unstated));
+    CHECK(refused.contains("`s` indexes the local array `ep` by a value computed from data"));
+    CHECK(refused.contains("`@indexed(.select)` keeps one value per element"));
+    CHECK(refused.contains("`@indexed(.memory)` keeps the array"));
+    CHECK(refused.contains("`ep` is declared here"));
+
+    // either statement settles it
+    for (auto const how : {"select", "memory"})
+        CHECK(reports_for(over_subsets(cc::format("    @indexed(.{}) let mut ep = [0.0, 1.0, 2.0]\n"
+                                                  "    ep[work.subsets[id.x]] = 4.0\n"
+                                                  "    work.totals[id.x] = ep[work.subsets[id.x + 1]]\n",
+                                                  how)))
+              == "");
+
+    // a constant, a loop counter, a const and arithmetic over them are stated
+    CHECK(reports_for(over_subsets("    let mut ep = [0.0, 1.0, 2.0]\n"
+                                   "    for k in 0 ..< 3:\n"
+                                   "        ep[2 - k] = work.totals[k]\n"
+                                   "        ep[min(k + last, 2)] += 1.0\n"
+                                   "    work.totals[id.x] = ep[1] + ep[last]\n",
+                                   "const last = 2\n\n"))
+          == "");
+
+    // a local whose every value is stated is stated, and one assigned under a branch on data is not
+    CHECK(reports_for(over_subsets("    let mut ep = [0.0, 1.0, 2.0]\n"
+                                   "    let mut j = 0\n"
+                                   "    for k in 0 ..< 2:\n"
+                                   "        j = j + 1\n"
+                                   "    work.totals[id.x] = ep[j]\n"))
+          == "");
+    CHECK(reports_for(over_subsets("    let mut ep = [0.0, 1.0, 2.0]\n"
+                                   "    let mut j = 0\n"
+                                   "    if work.subsets[id.x] > 0:\n"
+                                   "        j = 2\n"
+                                   "    work.totals[id.x] = ep[j]\n"))
+              .contains(k_unstated));
+
+    // a table of constants is constant data, which any index reads at no cost per invocation (EMIT-230)
+    CHECK(reports_for(over_subsets("    let table = [0.5, 1.0, 2.0]\n"
+                                   "    work.totals[id.x] = table[work.subsets[id.x]]\n"))
+          == "");
+}
+
+TEST("sgl check - an index a helper derives from its parameter is judged where each call passes it (CHK-538)")
+{
+    constexpr auto helper = "fun pick(i: int) -> float:\n"
+                            "    let mut ep = [0.0, 1.0, 2.0]\n"
+                            "    ep[1] = 3.0\n"
+                            "    return ep[i]\n"
+                            "\n";
+    // bound to a loop counter, the parameter is a loop counter
+    CHECK(reports_for(over_subsets("    let mut sum = 0.0\n"
+                                   "    for k in 0 ..< 3:\n"
+                                   "        sum += pick(k)\n"
+                                   "    work.totals[id.x] = sum\n",
+                                   helper))
+          == "");
+    // bound to a buffer read, it is data
+    auto const refused = reports_for(over_subsets("    work.totals[id.x] = pick(work.subsets[id.x])\n", helper));
+    CHECK(refused.contains(k_unstated));
+    CHECK(refused.contains("`i` indexes the local array `ep`"));
+
+    // an array parameter bound to an annotated local is held as that local
+    CHECK(reports_for(over_subsets("    @indexed(.select) let ep = [0.0, 1.0, 2.0]\n"
+                                   "    work.totals[id.x] = at(ep, work.subsets[id.x])\n",
+                                   "fun at(values: float[3], i: int) -> float => values[i]\n\n"))
+          == "");
+}
+
+TEST("sgl check - @indexed takes .select or .memory on a let of an array, and .select up to 8 elements (CHK-538)")
+{
+    auto const with_let = [](cc::string_view let)
+    {
+        return reports_for(over_subsets(cc::format("    {}\n"
+                                                   "    work.totals[id.x] = 0.0\n",
+                                                   let)));
+    };
+    CHECK(with_let("@indexed(.select) let ep = float[8].filled(0.0)") == "");
+    CHECK(with_let("@indexed(.memory) let ep = float[64].filled(0.0)") == "");
+    struct pair_case
+    {
+        cc::string_view let;
+        cc::string_view says;
+    };
+    for (auto const& c : {
+             pair_case{"@indexed(.select) let ep = float[9].filled(0.0)", "@indexed(.select) chooses among at most 8 "
+                                                                          "elements, and float[9] has 9: keep it "
+                                                                          "`@indexed(.memory)`"},
+             pair_case{"@indexed(.select) let ep = float[2, 2].filled(0.0)", "is an array of arrays"},
+             pair_case{"@indexed(.registers) let ep = float[2].filled(0.0)", "@indexed states how a local array "
+                                                                             "indexed at run time is held"},
+             pair_case{"@indexed let ep = float[2].filled(0.0)", "@indexed states how a local array indexed at run "
+                                                                 "time is held"},
+             pair_case{"@indexed(.memory) let x = 1.0", "@indexed states how a local array is held, and this let holds "
+                                                        "float"},
+         })
+        CHECK(with_let(c.let).contains(c.says)).dump("let", c.let);
+}

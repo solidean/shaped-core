@@ -369,7 +369,7 @@ fun encode_two_subsets(px: float4[16], mode: int, p: int, error: mut float) -> u
     let mask = partition_mask(p)
     let anchor = anchor_of_subset_1(p)
 
-    let mut idx = int[16].filled(0)
+    @indexed(.memory) let mut idx = int[16].filled(0)
     let mut fit0 = fit_subset(px, mask, 0u, bits, pmode, index_bits, alpha, mut idx)
     let mut fit1 = fit_subset(px, mask, 1u, bits, pmode, index_bits, alpha, mut idx)
     error = fit0.error + fit1.error

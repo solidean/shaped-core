@@ -295,6 +295,7 @@ struct origin;
 struct call_site;
 struct name_mint;
 enum class local_kind : u8;
+enum class local_indexing : u8;
 struct flat_local;
 struct flat_label;
 struct flat_invalid;

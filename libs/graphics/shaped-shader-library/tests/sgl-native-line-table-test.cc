@@ -184,7 +184,8 @@ TEST("slib - SGL's DXIL with its variables passes the validator, and DXC reads e
                                                        "    values: mut buffer[float]\n"
                                                        "\n"
                                                        "@compute(1) fun run(@thread_id id: int3){work}:\n"
-                                                       "    let mut table = [work.values[0], work.values[1], 2.0]\n"
+                                                       "    @indexed(.memory) let mut table = [work.values[0], "
+                                                       "work.values[1], 2.0]\n"
                                                        "    table[id.x % 3] = 5.0\n"
                                                        "    work.values[3] = table[(id.x + 1) % 3]\n",
                                              .source_name = "table.sgl",

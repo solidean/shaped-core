@@ -103,6 +103,7 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/check/check.cc
     src/shaped-graphics-language/check/check_driver.cc
     src/shaped-graphics-language/check/check_arrays.cc
+    src/shaped-graphics-language/check/check_local_indices.cc
     src/shaped-graphics-language/check/check_case.cc
     src/shaped-graphics-language/check/check_assignments.cc
     src/shaped-graphics-language/check/check_constants.cc
@@ -150,6 +151,7 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/legalize/legalize_task.cc
     src/shaped-graphics-language/legalize/legalize_polyfill.cc
     src/shaped-graphics-language/legalize/legalize_lengths.cc
+    src/shaped-graphics-language/legalize/legalize_selects.cc
     src/shaped-graphics-language/legalize/legalize_erase.cc
     src/shaped-graphics-language/legalize/legalize_lets.cc
     src/shaped-graphics-language/legalize/legalize_onces.cc
@@ -524,6 +526,7 @@ if(SC_BUILD_TESTS)
         tests/legalize/differential-test.cc
         tests/legalize/legalize-rules-test.cc
         tests/legalize/guard-test.cc
+        tests/legalize/selected-array-test.cc
         tests/legalize/buffer-guard-test.cc
         tests/legalize/workgroup-guard-test.cc
 
@@ -531,6 +534,7 @@ if(SC_BUILD_TESTS)
         tests/emit/core-emit-test.cc
         tests/emit/cube-emit-test.cc
         tests/emit/emit-test.cc
+        tests/emit/indexed-array-emit-test.cc
         tests/emit/array-emit-test.cc
         tests/emit/unroll-emit-test.cc
         tests/emit/primitive-stage-emit-test.cc

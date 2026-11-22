@@ -181,6 +181,23 @@ enum class sgl::check::local_kind : sgl::u8
     temporary,
 };
 
+/// How a local array indexed at run time is held, as its `let` states it (CHK-538).
+enum class sgl::check::local_indexing : sgl::u8
+{
+    /// Stated nowhere: an index into it must be a constant or built of loop counters, constants and options.
+    unstated,
+    /// `@indexed(.select)`: one local per element, an index a choice among them (LEGAL-72).
+    select,
+    /// `@indexed(.memory)`: an array, which a target may keep in scratch memory.
+    memory,
+};
+
+namespace sgl::check
+{
+/// CHK-538: the most elements `@indexed(.select)` chooses among, since each read of it is a choice over all of them.
+inline constexpr i32 k_max_selected_elements = 8;
+} // namespace sgl::check
+
 struct sgl::check::flat_local
 {
     local_kind kind = local_kind::let;
@@ -202,6 +219,8 @@ struct sgl::check::flat_local
     bool is_undefined = false;
     /// LEGAL-68: declared with no value, and reading as a zero of its type.
     bool is_zeroed = false;
+    /// CHK-538: how the array is held where it is indexed at run time; a copy of an annotated local takes its annotation.
+    local_indexing indexing = local_indexing::unstated;
 
     bool operator==(flat_local const&) const = default;
 };

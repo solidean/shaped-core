@@ -1000,8 +1000,8 @@ fun hit_object.reorder(self, hint: uint, bits: int) => hit_object_reorder_by_hin
     // A pool's trees are balanced and share its 2^23 units, two a node, so the two depths sum to at most 42.
     // So the stack holds at most 46 entries, and the guards on each push are never false.
     // Only what `top` covers is ever read, so neither array is filled.
-    let mut nodes: uint[64] = undefined()
-    let mut owners: int[64] = undefined()
+    @indexed(.memory) let mut nodes: uint[64] = undefined()
+    @indexed(.memory) let mut owners: int[64] = undefined()
     nodes[0] = 0
     owners[0] = -1
     let mut top = 1

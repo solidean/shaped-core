@@ -826,6 +826,11 @@ ops[i](mut v)                                            // raygen, miss, closes
   Metal refuses it, since a Metal buffer carries no length (EMIT-195).
   The robustness profiles bound every buffer index and `bytes` access by it, except on metal (LEGAL-66).
   `T[N].filled(v)` and a square literal `[a, b, c]` build one; `T[]` is a binding member's alone.
+- **A local array indexed by data states how it is held** (CHK-538): `@indexed(.select) let mut ep = …` or `@indexed(.memory) let mut ep = …`, else `indexing-not-stated` at the index.
+  A constant, a loop counter, a `const`, an `@option` and arithmetic over them need neither; a `let` of literals is constant data (EMIT-230).
+  `.memory` is an array, scratch on many GPUs; `.select` is a local per element and a choice per access (LEGAL-72), at most 8 elements of scalars, vectors or small structs.
+  It is judged after inlining, so a helper's parameter is what its call passes, and a copy of an annotated array, a bound parameter included, takes its annotation.
+  `check/check_local_indices.cc` judges it, `legalize/legalize_selects.cc` lowers `.select` after the guards, so an index outside does what the profile says.
 - **`discard` is a jump, and only a `@pixel fun` may reach it** (CHK-277): anywhere else it is `stage-not-allowed` at the `discard`.
   A path that ends in one needs no value, and the uniformity pass does not count it as an exit (CHK-284).
 - **A `@workgroup binding` is memory one workgroup shares** (CHK-292 to CHK-295): listed like a binding, in no group, and left out of describe.

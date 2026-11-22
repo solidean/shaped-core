@@ -122,10 +122,14 @@ flow checker::check_stmt(function_scope& scope, ast::stmt_id stmt)
     // CHK-389: a `for` may be unrolled, CHK-528: a `for` and a `while` may be bounded, and no other statement takes one
     cc::string_view const for_attributes[] = {"unroll", "max_iterations"};
     cc::string_view const while_attributes[] = {"max_iterations"};
+    // CHK-538: a let states how the array it holds is indexed
+    cc::string_view const let_attributes[] = {"indexed"};
     if (s.node.is<ast::for_stmt>())
         judge_attributes(file, s.attributes, for_attributes, "a for");
     else if (s.node.is<ast::while_stmt>())
         judge_attributes(file, s.attributes, while_attributes, "a while");
+    else if (s.node.is<ast::let_stmt>())
+        judge_attributes(file, s.attributes, let_attributes, "a let");
     else
         judge_attributes(file, s.attributes, {}, "a statement");
     if (auto const* const a = find_attribute(file, s.attributes, "max_iterations");
@@ -326,6 +330,9 @@ void checker::check_let(function_scope& scope, ast::stmt_id id, ast::let_stmt co
         }
     }
 
+    if (auto const* const a = find_attribute(file, ast.at(id).attributes, "indexed"))
+        judge_indexed(file, *a, type);
+
     if (!ast::is_valid(let.pattern))
         return;
     // CHK-55: `let _ = v` evaluates `v` and binds nothing
@@ -370,6 +377,79 @@ void checker::check_let(function_scope& scope, ast::stmt_id id, ast::let_stmt co
     judge_shadowing(file, text_of(file, n->where), n->where);
     // only now: the value of `let x = x` does not see the `x` it declares
     declare_local(scope, {.name = text_of(file, n->where), .where = self, .type = type, .is_mut = let.is_mut});
+}
+
+sgl::check::local_indexing checker::indexing_of(i32 file, ast::attribute const* a) const
+{
+    if (a == nullptr)
+        return local_indexing::unstated;
+    auto const arguments = ast_of(file).at(a->arguments);
+    auto const* const dot = arguments.size() == 1 && arguments[0].name.empty() && !arguments[0].is_splat
+                                 && ast::is_valid(arguments[0].value)
+                              ? ast_of(file).at(arguments[0].value).node.try_as<ast::leading_dot>()
+                              : nullptr;
+    auto const how = dot != nullptr ? text_of(file, dot->name) : cc::string_view();
+    if (how == "select")
+        return local_indexing::select;
+    if (how == "memory")
+        return local_indexing::memory;
+    return local_indexing::unstated;
+}
+
+bool checker::is_selectable_element(type_id type) const
+{
+    auto const& t = out.at(type);
+    if (t.kind == type_kind::enumeration)
+        return true;
+    if (t.kind != type_kind::structure)
+        return false;
+    if (auto const* const builtin = out.builtin_type_of(type))
+        return builtin->leaf_count > 0;
+    for (auto const& member : out.at(t.members))
+    {
+        auto const* const builtin = out.builtin_type_of(member.type);
+        if (out.at(member.type).kind != type_kind::enumeration && (builtin == nullptr || builtin->leaf_count <= 0))
+            return false;
+    }
+    return true;
+}
+
+void checker::judge_indexed(i32 file, ast::attribute const& a, type_id type)
+{
+    auto const how = indexing_of(file, &a);
+    if (how == local_indexing::unstated)
+    {
+        report(diagnostic_kind::invalid_attribute_arguments, file, a.name,
+               "@indexed states how a local array indexed at run time is held: `@indexed(.select)` or "
+               "`@indexed(.memory)`");
+        return;
+    }
+    if (type == error_type)
+        return;
+    auto const& t = out.at(type);
+    if (t.kind != type_kind::array)
+    {
+        report(diagnostic_kind::wrong_kind_of_name, file, a.name,
+               cc::format("@indexed states how a local array is held, and this let holds {}", out.name_of(type)));
+        return;
+    }
+    if (how != local_indexing::select)
+        return;
+    if (out.at(t.element).kind == type_kind::array)
+        report(diagnostic_kind::invalid_attribute_arguments, file, a.name,
+               cc::format("@indexed(.select) keeps one local per element of a one-dimensional array, and {} is an "
+                          "array of arrays: keep it `@indexed(.memory)`",
+                          out.name_of(type)));
+    else if (t.count > k_max_selected_elements)
+        report(diagnostic_kind::invalid_attribute_arguments, file, a.name,
+               cc::format("@indexed(.select) chooses among at most {} elements, and {} has {}: keep it "
+                          "`@indexed(.memory)`",
+                          k_max_selected_elements, out.name_of(type), t.count));
+    else if (!is_selectable_element(t.element))
+        report(diagnostic_kind::invalid_attribute_arguments, file, a.name,
+               cc::format("@indexed(.select) keeps elements that are scalars, vectors, matrices, enums or structs of "
+                          "them, and {} is none: keep it `@indexed(.memory)`",
+                          out.name_of(t.element)));
 }
 
 void checker::hand_arm_values(i32 file, ast::expr_id value)

@@ -676,7 +676,7 @@ namespace
     for (auto const& site : e.check_sites)
         asserts = asserts || site.stops;
     if (is_core(m, e) && !(options.erases_prints && prints) && !(options.lowers_asserts && asserts)
-        && options.guards_undefined == undefined_guard::none)
+        && options.guards_undefined == undefined_guard::none && !has_selected_arrays(m, e))
     {
         auto out = flat_builder::extend(m, e);
         auto const body = ids_of(out.e, out.e.body);
@@ -688,6 +688,7 @@ namespace
     }
     auto out = flat_builder::extend(m, e);
     out.set_body(guard_undefined(out, ids_of(out.e, out.e.body), options));
+    out.set_body(lower_selected_arrays(out, ids_of(out.e, out.e.body)));
     out.set_body(erase_checks(out, ids_of(out.e, out.e.body), options.erases_prints, options.lowers_asserts));
     out.set_body(lower_expressions(out, options));
     out.set_body(lower_cases(out));

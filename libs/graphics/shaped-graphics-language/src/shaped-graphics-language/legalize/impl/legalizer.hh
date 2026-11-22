@@ -58,6 +58,13 @@ void expand_print(flat_builder& out,
 /// With `undefined_guard::none` it is `body` as it is.
 [[nodiscard]] stmt_list guard_undefined(flat_builder& out, stmt_list const& body, legalize_options const& options);
 
+/// LEGAL-72, right after G1: whether `e` holds a local array its let states `@indexed(.select)` (CHK-538).
+[[nodiscard]] bool has_selected_arrays(checked_module const& m, flat_entry_point const& e);
+
+/// LEGAL-72: each such array of `out.e` as one local per element, a read at a run-time index a choice among them and a
+/// store one assignment per element under its test; `body` as it is where there is none.
+[[nodiscard]] stmt_list lower_selected_arrays(flat_builder& out, stmt_list const& body);
+
 /// What ends the invocation of the entry point's stage where an `assert` failed or a guard tripped, appended to `into`.
 /// A stage that returns nothing returns, a pixel stage discards, and a stage with a result returns one that culls what
 /// it is part of; nothing for a stage it does not know how to end.

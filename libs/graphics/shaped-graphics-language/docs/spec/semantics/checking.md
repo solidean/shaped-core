@@ -1168,6 +1168,21 @@ A `require` in a test's body that nothing in it uses is `unused-require`, and a 
 * **CHK-395** `v[i]` is lane `i` of a vector, a `@swizzle` struct whose fields share one type, of that type: one `int` index, judged as CHK-309 judges one against the lane count.
   A lane of a mutable vector is a place, which an assignment writes, and past the last lane at run time is EVAL-90's program error, as past an array's last element is.
   Every target subscripts its vectors as it does its arrays, so the text is `v[i]` on each.
+* **CHK-538** An index into a local array that is no constant and is built of no loop counter states how the array is held, on the array's `let` ([why](why/checking.md#chk-538)).
+  An index is **stated** where it is built only of literals, `const`s, `@option`s, the counters of `for` loops and the locals built of those, through operators and pure builtins that take an argument.
+  A local is built so where every value it is given is, its declaration's and every assignment's, a part's index included, and where no branch around an assignment tests anything else.
+  A `let` is its value where it stands, so a branch around it leaves it as stated as its value.
+  Anything else is data: a binding member, a buffer element, a stage input, a texture read, the result of an impure builtin or of one of no argument, and a local given any of those.
+  It is judged on the tree each entry point and each test inlines, so a helper's parameter is whatever its call passes: a loop counter in one call, data in another.
+  A local array is a `let` or a `let mut` of an array type, an inlined parameter's included, indexed through members and elements down from it; a lane of a vector is not.
+  A `let` of an array of literals nothing writes is constant data (EMIT-230), and any index reads it at no cost per invocation.
+  An index of data into any other local array whose let states nothing is `indexing-not-stated`, at the index, naming the array and offering both statements.
+  `@indexed(.memory)` keeps the array, which a target may hold in scratch memory: what every local array was before the rule.
+  `@indexed(.select)` holds a local per element instead, an index choosing among them (LEGAL-72), so no target holds an array.
+  It takes a one-dimensional array of at most 8 elements, each a scalar, a vector, a matrix, an enum, or a struct of those; any other is `invalid-attribute-arguments`, which names the bound.
+  A copy of an annotated array, a parameter bound to one included, is held as that array is.
+  Any other argument is `invalid-attribute-arguments`, and `@indexed` on a let of no array `wrong-kind-of-name`.
+  A place of a `.select` array handed to a builtin's `mut` parameter is `unsupported-yet`, since its element is a choice and no place; no builtin takes one yet.
 * **CHK-288** `xs.length` is an array's length, an `int` constant, and the one member an array has; it is never assigned.
 * **CHK-460** `values.length` of a buffer is how many elements the bound buffer holds, and of a `bytes` how many bytes, a `uint` the host decides.
   It names the buffer without reading an element, as a subscript does, and is never assigned.
@@ -1964,22 +1979,23 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 
 | kind | reported by |
 |---|---|
-| `unsupported-yet` | CHK-8, CHK-61, CHK-134, CHK-213, CHK-237, CHK-291, CHK-299, CHK-307, CHK-314, CHK-321, CHK-329, CHK-333, CHK-338, CHK-339, CHK-344, CHK-346, CHK-347, CHK-350, CHK-352, CHK-353, CHK-357, CHK-366, CHK-374, CHK-381, CHK-383, CHK-387, CHK-389, CHK-397, CHK-431, CHK-432, CHK-434, CHK-516, CHK-522, CHK-523, CHK-526, CHK-524, CHK-525, CHK-450, CHK-453, CHK-454 |
+| `unsupported-yet` | CHK-8, CHK-61, CHK-134, CHK-213, CHK-237, CHK-291, CHK-299, CHK-307, CHK-314, CHK-321, CHK-329, CHK-333, CHK-338, CHK-339, CHK-344, CHK-346, CHK-347, CHK-350, CHK-352, CHK-353, CHK-357, CHK-366, CHK-374, CHK-381, CHK-383, CHK-387, CHK-389, CHK-397, CHK-431, CHK-432, CHK-434, CHK-516, CHK-522, CHK-523, CHK-526, CHK-524, CHK-525, CHK-450, CHK-453, CHK-454, CHK-538 |
 | `member-not-allowed-here` | CHK-490 |
 | `duplicate-declaration` | CHK-12, CHK-28, CHK-241, CHK-347, CHK-351, CHK-530 |
 | `dependency-cycle` | CHK-18, CHK-136 |
 | `unknown-module`, `use-of-own-module` | CHK-347 |
 | `module-cycle` | CHK-349 |
 | `unknown-name` | CHK-24, CHK-62, CHK-245, CHK-330 |
-| `wrong-kind-of-name` | CHK-24, CHK-54, CHK-79, CHK-237, CHK-247, CHK-199, CHK-200, CHK-202, CHK-203, CHK-205, CHK-279, CHK-285, CHK-286, CHK-292, CHK-296, CHK-297, CHK-299, CHK-300, CHK-315, CHK-317, CHK-320, CHK-338, CHK-339, CHK-347, CHK-368, CHK-372, CHK-373, CHK-374, CHK-390, CHK-536 |
+| `wrong-kind-of-name` | CHK-24, CHK-54, CHK-79, CHK-237, CHK-247, CHK-199, CHK-200, CHK-202, CHK-203, CHK-205, CHK-279, CHK-285, CHK-286, CHK-292, CHK-296, CHK-297, CHK-299, CHK-300, CHK-315, CHK-317, CHK-320, CHK-338, CHK-339, CHK-347, CHK-368, CHK-372, CHK-373, CHK-374, CHK-390, CHK-536, CHK-538 |
 | `padding-not-stated` | CHK-532 |
+| `indexing-not-stated` | CHK-538 |
 | `unexpected-keyword` | CHK-315 |
 | `default-not-allowed-here` | CHK-316 |
 | `missing-type` | CHK-26 |
 | `unknown-builtin` | CHK-31 |
 | `expected-body` | CHK-32, CHK-236 |
 | `opaque-struct-needs-builtin` | CHK-34 |
-| `invalid-attribute-arguments` | CHK-36, CHK-39, CHK-204, CHK-208, CHK-211, CHK-212, CHK-220, CHK-231, CHK-267, CHK-403, CHK-292, CHK-293, CHK-301, CHK-304, CHK-384, CHK-369, CHK-370, CHK-371, CHK-431, CHK-435, CHK-480, CHK-522, CHK-526 |
+| `invalid-attribute-arguments` | CHK-36, CHK-39, CHK-204, CHK-208, CHK-211, CHK-212, CHK-220, CHK-231, CHK-267, CHK-403, CHK-292, CHK-293, CHK-301, CHK-304, CHK-384, CHK-369, CHK-370, CHK-371, CHK-431, CHK-435, CHK-480, CHK-522, CHK-526, CHK-538 |
 | `binding-not-listed` | CHK-45, CHK-131, CHK-228 |
 | `as-precedence` | CHK-411 |
 | `type-mismatch` | CHK-52, CHK-56, CHK-77, CHK-112 to CHK-118, CHK-121, CHK-167, CHK-210, CHK-214, CHK-219, CHK-236, CHK-243, CHK-275, CHK-276, CHK-279, CHK-281, CHK-287, CHK-329, CHK-344, CHK-362, CHK-375, CHK-392, CHK-429, CHK-433, CHK-434 |

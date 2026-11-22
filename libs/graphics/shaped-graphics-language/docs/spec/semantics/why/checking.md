@@ -867,3 +867,14 @@ The shader writes its fields by name, each target lays them out natively, and th
 Nothing translates the records at run time, which is what the GPU-written tier of a build exists to avoid.
 The first branch is the one the check judges, so a field read, a default and a constructor mean one thing on every compile, and only the bytes move.
 It stays in the modules SGL ships, since a program's own struct is one the host writes too, and one layout is what lets the host write it.
+
+## CHK-538
+
+A local array indexed at run time is a memory operation on most GPUs, and nothing in the source said so.
+DXC keeps every such array as an `alloca`, which a driver places in scratch, and a texture encoder ported from HLSL ran 2.4 times slower for per-subset endpoints indexed by a subset read from a table.
+Whether a driver spills cannot be known to the compiler, and whether an index comes from data can, so that is what the rule asks about.
+It follows what CHK-532 follows for padding: a cost that would surprise the author is never implicit.
+A loop counter is stated because the loop is in the source, where a reader sees the trip count; unrolled, every index is a constant.
+`.select` writes what the restructured encoder wrote by hand, separate locals chosen by the index, which keeps the values in registers and measured as fast as the hand-written form.
+It stops at 8 elements, since each read is a choice over all of them, and a larger array costs more in choices than scratch does.
+The annotation stands on the `let`, since that is where the cost is decided: a parameter is whatever its call passes after inlining, so a helper needs no annotation of its own.

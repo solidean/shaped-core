@@ -43,6 +43,6 @@ binding work:
 
 @compute(64) fun gather(@thread_id id: int3){work}:
     let at = work.offsets[id.x]
-    let mut taps = float[4].filled(0.0)
+    @indexed(.memory) let mut taps = float[4].filled(0.0)
     taps[at % 4u] = work.values[at]
     work.totals[at] += taps[at & 3u] + work.values[at + 1u]

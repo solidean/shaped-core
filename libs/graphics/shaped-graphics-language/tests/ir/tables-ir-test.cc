@@ -66,7 +66,7 @@ TEST("sgl ir tables - a let of constants an index reaches at run time is one tab
 TEST("sgl ir tables - a let read at constant indices alone stays values, and a written array stays memory")
 {
     auto const words = spirv_of(with_body("    let fixed = [1.0, 2.0, 3.0]\n"
-                                          "    let mut written = [1.0, 2.0, 3.0]\n"
+                                          "    @indexed(.memory) let mut written = [1.0, 2.0, 3.0]\n"
                                           "    written[id.x % 3] = 4.0\n"
                                           "    io.target[id.x] = fixed[1] + written[id.y % 3]\n"));
     CHECK(variables_of(words, k_private) == 0);
@@ -75,7 +75,7 @@ TEST("sgl ir tables - a let read at constant indices alone stays values, and a w
 
 TEST("sgl ir tables - a let whose value an invocation computes is no table")
 {
-    auto const words = spirv_of(with_body("    let read = [float(id.x), 2.0]\n"
+    auto const words = spirv_of(with_body("    @indexed(.memory) let read = [float(id.x), 2.0]\n"
                                           "    io.target[id.x] = read[id.y % 2] + weight(id.y)\n"));
     CHECK(variables_of(words, k_private) == 1);
     CHECK(variables_of(words, k_function) == 1);

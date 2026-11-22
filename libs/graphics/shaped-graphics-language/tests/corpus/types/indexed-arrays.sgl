@@ -1,0 +1,71 @@
+// an index into a local array is stated, or the array's let says how the array is held (CHK-538)
+// `.select` keeps a local per element and chooses among them, `.memory` keeps the array; both mean the same
+
+struct endpoints:
+    lo: float3
+    hi: float3
+
+// what a texture encoder does per texel: a subset read from a table picks the endpoints the texel widens
+fun widened(subsets: int[4], weights: float[4]) -> float3:
+    @indexed(.select) let mut ep = endpoints[3].filled(endpoints(lo = float3(1.0), hi = float3(0.0)))
+    @indexed(.memory) let mut spread = float[3].filled(0.0)
+    for k in 0 ..< 4:
+        let s = subsets[k]
+        ep[s].lo = min(ep[s].lo, float3(weights[k]))
+        ep[s].hi.x = max(ep[s].hi.x, weights[k])
+        spread[s] += weights[k]
+    return float3(ep[0].hi.x - ep[0].lo.x, ep[1].hi.x + spread[1], ep[2].lo.y + spread[2])
+
+test widened([0, 1, 1, 2], [0.5, 0.25, 0.75, 1.0]) == float3(0.0, 1.75, 2.0)
+
+// the two forms read, write and copy alike
+fun tallied(picks: int[5]) -> int[3]:
+    @indexed(.select) let mut chosen = int[3].filled(0)
+    @indexed(.memory) let mut kept = int[3].filled(0)
+    for k in 0 ..< 5:
+        chosen[picks[k]] += k
+        kept[picks[k]] += k
+    let copy = chosen
+    return [copy[0] - kept[0], chosen[1], kept[2] + copy[2]]
+
+test tallied([2, 0, 1, 2, 1]) == [0, 6, 6]
+
+// a copy of an annotated array, such as a parameter bound to it, is held as the array is
+fun at(values: float[3], i: int) -> float => values[i]
+
+test:
+    @indexed(.select) let picked = [1.0, 2.0, 4.0]
+    let mut sum = 0.0
+    for k in 0 ..< 3:
+        sum += at(picked, 2 - k)
+    sum == 7.0
+
+binding work:
+    subsets: buffer[int]
+    weights: buffer[float]
+    totals: mut buffer[float]
+
+// a subset read from a buffer is data: the array's let states how it is held
+@compute(64) fun encode(@thread_id id: int3){work}:
+    @indexed(.select) let mut lo = float[3].filled(1.0)
+    @indexed(.memory) let mut hi = float[3].filled(0.0)
+    for k in 0 ..< 4:
+        let s = work.subsets[4 * id.x + k]
+        let w = work.weights[4 * id.x + k]
+        lo[s] = min(lo[s], w)
+        hi[s] = max(hi[s], w)
+    work.totals[id.x] = hi[0] - lo[0] + hi[work.subsets[id.x]] - lo[work.subsets[id.x]]
+
+// unstated, it is refused at the index
+@expect(error = "indexing-not-stated")
+@compute(64) fun unstated(@thread_id id: int3){work}:
+    let mut lo = float[3].filled(1.0)
+    lo[work.subsets[id.x]] = 0.0
+    work.totals[id.x] = lo[1]
+
+// an index built of loop counters and constants is stated, and needs nothing
+@compute(64) fun counted(@thread_id id: int3){work}:
+    let mut lo = float[3].filled(1.0)
+    for k in 0 ..< 3:
+        lo[2 - k] = work.weights[k]
+    work.totals[id.x] = lo[1]

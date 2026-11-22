@@ -10,7 +10,7 @@ fun lighter(a: ranked, b: ranked) -> bool => a.key < b.key or (a.key == b.key an
 
 @compute(64) fun sorted_window(@thread_id id: int3){diff_words.io}:
     let i = id.x
-    let mut window = ranked[8].filled(ranked(key = 0u, slot = 0))
+    @indexed(.memory) let mut window = ranked[8].filled(ranked(key = 0u, slot = 0))
     for k in 0 ..< 8:
         window[k] = ranked(key = diff_words.io.input[(i * 5 + k * 3) & 255] >> 20u, slot = k)
 
@@ -23,7 +23,7 @@ fun lighter(a: ranked, b: ranked) -> bool => a.key < b.key or (a.key == b.key an
             j -= 1
         window[j + 1] = held
 
-    let mut histogram = uint[16].filled(0u)
+    @indexed(.memory) let mut histogram = uint[16].filled(0u)
     for k in 0 ..< 8:
         histogram[window[k].key & 15u] += 1u
     diff_words.io.output[4 * i] = window[0].key

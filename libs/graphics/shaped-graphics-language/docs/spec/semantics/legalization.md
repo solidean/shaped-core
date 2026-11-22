@@ -86,6 +86,19 @@ The worked examples are WGSL, since it is the strictest target: no `do … while
   Under `define` it zeroes workgroup memory instead: an array member element by element in that stride, any other member in invocation 0, and an atomic by its store.
   A `workgroup_barrier` follows either, so no mark lands before a clear and no read before the zero.
   A target whose workgroup memory starts at zero, as WebGPU's does, gets no prologue.
+* **LEGAL-72** Right after G1, each local array its let states `@indexed(.select)` (CHK-538) is one local per element, so no target holds an array an index computed at run time reaches.
+  A copy of one takes its annotation, so a parameter bound to it is a local per element too.
+  Its declaration declares each element's local with that element of its value: an argument of an array literal as it stands, or else an element of a `let` bound to the value once.
+  A read at a literal index is that element's local.
+  A read at any other index binds the index once and chooses: `select(i == 0, e0, select(i == 1, e1, e2))`, or for a struct, which no `select` takes, a branch per element.
+  A store, a member's or a lane's included, binds the index, then each index of the place above the element, then the value, as the place evaluates them (EVAL-14).
+  It then stores into each element's local under `if i == k`.
+  A read or a store of the whole array reads or stores every element's local.
+  In both, the last element takes every index the tests before it did not.
+  So the guards of G1, which ran first and left the index in range, decide what one outside the array does.
+  `abort` and `report` end the invocation before any element is chosen, and `define` chooses element 0.
+  Without a profile such an index has no value (EVAL-90), and the last element is what it reads and writes.
+  Every target and both native routes lower the same core tree, so none of them holds the array, and the interpreter runs the structured tree as the array it is.
 * **LEGAL-52** (V1) A core tree holds no `void` local, and no `let`, `var`, assignment, `return` or read of a `void` value: what evaluating one does stays as an `eval`, and the value itself is gone.
   It follows every rule that introduces a local for a result, since a `void` result is one of them; only the let rules come after it.
 

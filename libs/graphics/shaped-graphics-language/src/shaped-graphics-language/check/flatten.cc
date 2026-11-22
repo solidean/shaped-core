@@ -868,6 +868,7 @@ void checker::flatten_test(i32 index)
             f.entry.body = f.root_body();
             judge_constants(f.entry);
             judge_assignments(f.entry);
+            judge_local_indices(f.entry);
             (void)judge_uniformity(f.entry);
         }
         return;
@@ -888,6 +889,7 @@ void checker::flatten_test(i32 index)
     f.entry.body = f.root_body();
     judge_constants(f.entry);
     judge_assignments(f.entry);
+    judge_local_indices(f.entry);
     // CHK-377, CHK-282: its lanes reach each subgroup operation and derivative together, as an entry point's do
     (void)judge_uniformity(f.entry);
     out.tests.own(index).unit = i32(out.test_units.size());
@@ -1413,6 +1415,7 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
     }
     judge_constants(f.entry);
     judge_assignments(f.entry);
+    judge_local_indices(f.entry);
     auto legalized = judge_uniformity(f.entry);
     f.entry.options = options_reached(id, traversal != nullptr ? traversal->any_hit : symbol_id::none);
     // legalizing copies the entry point's own fields, so the copy takes what was set after it

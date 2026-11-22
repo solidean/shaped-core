@@ -71,7 +71,7 @@ fun mark(i: int){written}:
 
 // a local is no binding, and needs nothing
 fun local_mark(i: int) -> uint:
-    let mut xs = [0u, 0u]
+    @indexed(.memory) let mut xs = [0u, 0u]
     xs[i & 1] = 1u
     return xs[1]
 

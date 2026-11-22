@@ -96,14 +96,19 @@ SGL's own DXIL and SPIR-V routes, `--target dxil` and `--target spirv`, round as
 
 ## Performance
 
-**A local array indexed by a run-time value is memory, not registers**, which no compile error flags.
-DXC keeps `float4 lo[3]` indexed by a subset as an `alloca` whether HLSL or SGL wrote it, so such an array costs both languages alike.
-HLSL's matrix is no way around it: DXC keeps a `uint2x4` whose row is chosen at run time, or a `uint4` whose component is, as an `alloca` too.
-Separate locals chosen by branches keep the values in registers, and a texture encoder restructured so ran faster than its HLSL, with byte-identical output.
-Profile any port that indexes local arrays with something other than a loop counter SGL unrolls.
+**A local array indexed by a value computed from data is memory, not registers**, so SGL asks its `let` to say so (CHK-538).
+DXC keeps `float4 lo[3]` indexed by a subset as an `alloca` whether HLSL or SGL wrote it, which many GPUs place in scratch.
+An unstated one is `indexing-not-stated` at the index, and the fix is one of two words on the `let`:
 
+- **`@indexed(.select) let mut lo = …` keeps a local per element**, a read a `select` among them and a write a store under each test (LEGAL-72).
+  It is what a texture encoder restructured by hand into separate locals did, which ran faster than its HLSL with byte-identical output.
+  DXC then holds no `alloca` for it.
+  It takes up to 8 elements of scalars, vectors or small structs, since each access chooses among all of them.
+- **`@indexed(.memory) let mut lo = …` keeps the array**, which is what HLSL's own array costs; profile it.
+- **HLSL's matrix is no way around it**: DXC keeps a `uint2x4` whose row is chosen at run time, or a `uint4` whose component is, as an `alloca` too, and CHK-538 asks nothing of either.
 - **Port `[unroll]` as `@unroll`.**
   A `for` without it is written as a plain HLSL `for`, which DXC leaves rolled at `-O3` just as it does HLSL's own, so an array the counter indexes stays in memory.
+  A loop counter needs no `@indexed`, since the loop in the source states the cost; `@unroll` is what removes it.
 - **A `const` table is constant data, as HLSL's `static const` is**, so a lookup table indexed at run time, such as a partition table, costs no memory per invocation (EMIT-230).
 
 ## Graphics stages

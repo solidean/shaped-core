@@ -180,7 +180,7 @@ fun pt_is_finite(c: float4) => not (any(is_nan(c)) or any(is_inf(c)))
             let q = clamp(p + int2(k % 3 - 1, k / 3 - 1), int2(0), size - int2(1))
             taps[k] = variance_at(q)
         // The median of the nine, by an insertion sort of a copy.
-        let mut sorted = taps
+        @indexed(.memory) let mut sorted = taps
         for i in 1 ..< 9:
             let mut j = i
             while j > 0 and sorted[j - 1] > sorted[j]:
