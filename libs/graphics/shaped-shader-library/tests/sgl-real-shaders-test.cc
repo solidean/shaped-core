@@ -1,12 +1,14 @@
 #include <clean-core/algorithm/sort.hh>
 #include <clean-core/common/macros.hh>
 #include <clean-core/platform/environment.hh>
+#include <clean-core/platform/file_path.hh>
 #include <clean-core/record/log.hh>
 #include <clean-core/streams/file_stream.hh>
 #include <clean-core/string/format.hh>
+#include <clean-core/thread/async_parallel_for.hh>
+#include <nexus/async-test.hh>
 #include <nexus/source_root.hh>
 #include <nexus/test.hh>
-#include <nexus/tests/thorough.hh>
 #include <shaped-graphics-language/driver/compile_to_text.hh>
 #include <shaped-shader-compiler-dxc/compiler.hh>
 
@@ -57,6 +59,61 @@ void write_words(cc::string_view path, cc::span<u32 const> words)
     REQUIRE(stream.flush().has_value());
 }
 
+/// SPIR-V modules spirv-val reads in one process: each is a file in a directory of this process's own.
+/// A process per module was most of these tests' time, and on a loaded machine long enough for the watchdog.
+/// A refused batch is validated again module by module, so a failure still names its file and entry point.
+class spirv_batch
+{
+public:
+    spirv_batch() : _dir(cc::temp_file_path("sgl-spirv-batch"))
+    {
+        std::filesystem::create_directories(_dir.c_str_materialize());
+    }
+    spirv_batch(spirv_batch const&) = delete;
+    spirv_batch& operator=(spirv_batch const&) = delete;
+    ~spirv_batch()
+    {
+        auto ec = std::error_code();
+        std::filesystem::remove_all(_dir.c_str_materialize(), ec);
+    }
+
+    void add(cc::span<u32 const> words, cc::string_view file, cc::string_view entry_point, cc::string_view with = "")
+    {
+        auto const path = cc::format("{}/{}.spv", _dir, _modules.size());
+        write_words(path, words);
+        _modules.push_back(
+            {.path = path, .file = cc::string(file), .entry_point = cc::string(entry_point), .with = cc::string(with)});
+    }
+
+    [[nodiscard]] isize size() const { return _modules.size(); }
+
+    void validate() const
+    {
+        if (_modules.empty() || run(_dir))
+            return;
+        for (auto const& m : _modules)
+            CHECK(run(m.path)).dump("file", m.file).dump("entry", m.entry_point).dump("with", m.with);
+    }
+
+private:
+    struct module
+    {
+        cc::string path;
+        cc::string file;
+        cc::string entry_point;
+        cc::string with;
+    };
+
+    [[nodiscard]] static bool run(cc::string_view path)
+    {
+        auto command = cc::format("spirv-val --target-env vulkan1.3 --scalar-block-layout \"{}\"", path);
+        return std::system(command.c_str_materialize()) == 0;
+    }
+
+    cc::string _dir;
+    cc::vector<module> _modules;
+};
+
 /// The module directories these shaders `use`, read: names and sources stay put, since `files` views them.
 struct module_library
 {
@@ -87,42 +144,64 @@ struct module_library
 }
 } // namespace
 
-TEST("slib - the viewer's tracer and the traced drawings lower on both writers, each past its validator")
+// A task per entry point, since each compiles five times through SGL and that one after another was the binary's critical path.
+ASYNC_TEST("slib - the viewer's tracer and the traced drawings lower on both writers, each past its validator")
 {
     if constexpr (!k_has_validator)
         SKIP("DXC's validator is dxil.dll, which only Windows has");
-    auto compiler = ssc::dxc::compiler::create();
-    if (compiler.has_error())
+    if (ssc::dxc::compiler::create().has_error())
         SKIP("no DXC");
     auto const has_spirv_val = std::system("spirv-val --version > NUL 2>&1") == 0;
-    auto const module_path
-        = cc::format("{}/sgl-real-shaders-test.spv", std::filesystem::temp_directory_path().generic_string().c_str());
-    auto const command = cc::format("spirv-val --target-env vulkan1.3 --scalar-block-layout \"{}\"", module_path);
-    auto command_text = cc::vector<char>::create_copy_of(cc::span<char const>(command.data(), command.size()));
-    command_text.push_back('\0');
 
     auto library = module_library();
     library.read();
-    auto dxil = 0;
-    auto spirv = 0;
-    auto is_tracer_native = false;
-    auto is_slug_native = false;
-    for (auto const& file : real_shaders())
+    auto const files = real_shaders();
+    auto sources = cc::vector<cc::string>();
+    for (auto const& file : files)
+        sources.push_back(read_file(file));
+
+    auto entries = cc::vector<cc::vector<cc::string>>::create_defaulted(files.size());
+    co_await cc::async_parallel_for(files.size(),
+                                    [&](isize f)
+                                    {
+                                        auto const all
+                                            = sgl::compile_all_to_text({.source = sources[f],
+                                                                        .source_name = files[f],
+                                                                        .library = library.files,
+                                                                        .targets = {sgl::emit::target::hlsl_dx12}});
+                                        if (all.has_value())
+                                            for (auto const& entry : all.value())
+                                                entries[f].push_back(entry.entry_point);
+                                    },
+                                    {.grain = 1});
+
+    struct job
     {
-        auto const source = read_file(file);
-        auto const all = sgl::compile_all_to_text(
-            {.source = source, .source_name = file, .library = library.files, .targets = {sgl::emit::target::hlsl_dx12}});
-        if (all.has_error())
-            continue;
-        for (auto const& entry : all.value())
+        isize file = 0;
+        cc::string entry_point;
+        bool dxil = false;
+        bool spirv = false;
+        cc::vector<u32> plain_spirv;
+        cc::vector<u32> lined_spirv;
+    };
+    auto jobs = cc::vector<job>();
+    for (auto f = isize(0); f < files.size(); ++f)
+        for (auto const& entry_point : entries[f])
+            jobs.push_back({.file = f, .entry_point = entry_point});
+
+    co_await cc::async_parallel_for(
+        jobs.size(),
+        [&](isize j)
         {
+            auto& job = jobs[j];
+            auto const& file = files[job.file];
             auto const compile = [&](sgl::emit::target target, bool line_table = false)
             {
                 return sgl::compile_to_text(
-                    {.source = source,
+                    {.source = sources[job.file],
                      .source_name = file,
                      .library = library.files,
-                     .entry_point = entry.entry_point,
+                     .entry_point = job.entry_point,
                      .target = target,
                      .diagnostics = true,
                      .device_features = sgl::check::feature_set(sgl::check::feature::vertex_pipeline_stores),
@@ -132,13 +211,14 @@ TEST("slib - the viewer's tracer and the traced drawings lower on both writers, 
             auto const on_dx12 = compile(sgl::emit::target::hlsl_dx12);
             if (on_dx12.has_value() && !on_dx12.value().dxil.empty())
             {
-                ++dxil;
-                is_tracer_native = is_tracer_native || entry.entry_point == "path_trace";
-                is_slug_native = is_slug_native || entry.entry_point == "cut_surface";
+                job.dxil = true;
+                // a compiler is not thread-safe, so each task takes its own
+                auto compiler = ssc::dxc::compiler::create();
+                REQUIRE(compiler.has_value());
                 auto const refused = compiler.value().validate(on_dx12.value().dxil);
                 CHECK(!refused.has_value())
                     .dump("file", file)
-                    .dump("entry", entry.entry_point)
+                    .dump("entry", job.entry_point)
                     .dump("validator", refused.value_or(cc::string()));
                 // EMIT-257: with its line table too, whose lines a module directory's files reach
                 auto const lined = compile(sgl::emit::target::hlsl_dx12, true);
@@ -146,34 +226,47 @@ TEST("slib - the viewer's tracer and the traced drawings lower on both writers, 
                 auto const lined_refused = compiler.value().validate(lined.value().dxil);
                 CHECK(!lined_refused.has_value())
                     .dump("file", file)
-                    .dump("entry", entry.entry_point)
+                    .dump("entry", job.entry_point)
                     .dump("validator", lined_refused.value_or(cc::string()));
             }
             else if (on_dx12.has_value())
-                CC_LOG_INFO("{}: {}: {}", file, entry.entry_point, on_dx12.value().native_gap);
+                CC_LOG_INFO("{}: {}: {}", file, job.entry_point, on_dx12.value().native_gap);
 
             auto const on_vulkan = compile(sgl::emit::target::hlsl_vulkan);
             if (!on_vulkan.has_value() || on_vulkan.value().spirv.empty())
             {
                 if (on_vulkan.has_value())
-                    CC_LOG_INFO("{}: {}: {}", file, entry.entry_point, on_vulkan.value().native_gap);
-                continue;
+                    CC_LOG_INFO("{}: {}: {}", file, job.entry_point, on_vulkan.value().native_gap);
+                return;
             }
-            ++spirv;
+            job.spirv = true;
             if (has_spirv_val)
             {
-                write_words(module_path, on_vulkan.value().spirv);
-                CHECK(std::system(command_text.data()) == 0).dump("file", file).dump("entry", entry.entry_point);
+                job.plain_spirv = cc::vector<u32>::create_copy_of(on_vulkan.value().spirv);
                 auto const lined = compile(sgl::emit::target::hlsl_vulkan, true);
                 REQUIRE(lined.has_value());
-                write_words(module_path, lined.value().spirv);
-                CHECK(std::system(command_text.data()) == 0)
-                    .dump("file", file)
-                    .dump("entry", entry.entry_point)
-                    .dump("with", "its line table");
+                job.lined_spirv = cc::vector<u32>::create_copy_of(lined.value().spirv);
             }
-        }
+        },
+        {.grain = 1});
+
+    auto spirv_modules = spirv_batch();
+    auto dxil = 0;
+    auto spirv = 0;
+    auto is_tracer_native = false;
+    auto is_slug_native = false;
+    for (auto const& job : jobs)
+    {
+        dxil += job.dxil ? 1 : 0;
+        spirv += job.spirv ? 1 : 0;
+        is_tracer_native = is_tracer_native || (job.dxil && job.entry_point == "path_trace");
+        is_slug_native = is_slug_native || (job.dxil && job.entry_point == "cut_surface");
+        if (!job.plain_spirv.empty())
+            spirv_modules.add(job.plain_spirv, files[job.file], job.entry_point);
+        if (!job.lined_spirv.empty())
+            spirv_modules.add(job.lined_spirv, files[job.file], job.entry_point, "its line table");
     }
+    spirv_modules.validate();
     CC_LOG_INFO("the viewer's and the drawings' shaders: {} through DXIL, {} through SPIR-V", dxil, spirv);
     CHECK(is_tracer_native);
     CHECK(is_slug_native);
@@ -280,23 +373,19 @@ TEST("slib - a query on a device with opacity micromaps says so on both routes, 
     CHECK(states(k_op_capability, k_opacity_micromap));
     if (std::system("spirv-val --version > NUL 2>&1") != 0)
         return;
-    auto const module_path
-        = cc::format("{}/sgl-micromap-test.spv", std::filesystem::temp_directory_path().generic_string().c_str());
-    write_words(module_path, words);
-    auto const command = cc::format("spirv-val --target-env vulkan1.3 --scalar-block-layout \"{}\"", module_path);
-    auto command_text = cc::vector<char>::create_copy_of(cc::span<char const>(command.data(), command.size()));
-    command_text.push_back('\0');
-    CHECK(std::system(command_text.data()) == 0);
+    auto spirv_modules = spirv_batch();
+    spirv_modules.add(words, "a query on a micromapped device", "main");
+    spirv_modules.validate();
 }
 
 // A required-native package hard-errors on a gap, and a feature the test machine lacks hides one.
 // So every fixture is compiled as a device with these would, and what falls to a gap is named here to be seen.
-TEST("slib - a device's micromaps and reordering leave only the named gaps on either route")
+// A task per entry point: every one compiles twice, and the viewer's hybrid pass alone holds seconds of them.
+ASYNC_TEST("slib - a device's micromaps and reordering leave only the named gaps on either route")
 {
     if constexpr (!k_has_validator)
         SKIP("DXC's validator is dxil.dll, which only Windows has");
-    auto compiler = ssc::dxc::compiler::create();
-    if (compiler.has_error())
+    if (ssc::dxc::compiler::create().has_error())
         SKIP("no DXC");
     auto const features = sgl::check::feature_set(sgl::check::feature::opacity_micromap)
                         | sgl::check::feature::shader_execution_reordering | sgl::check::feature::vertex_pipeline_stores;
@@ -307,27 +396,50 @@ TEST("slib - a device's micromaps and reordering leave only the named gaps on ei
     files.push_back_range(files_under(nx::source_path("libs/graphics/shaped-rendering/shaders")));
     files.push_back_range(real_shaders());
     auto const has_spirv_val = std::system("spirv-val --version > NUL 2>&1") == 0;
-    auto const module_path
-        = cc::format("{}/sgl-device-features-test.spv", std::filesystem::temp_directory_path().generic_string().c_str());
-    auto const command = cc::format("spirv-val --target-env vulkan1.3 --scalar-block-layout \"{}\"", module_path);
-    auto command_text = cc::vector<char>::create_copy_of(cc::span<char const>(command.data(), command.size()));
-    command_text.push_back('\0');
-    auto refused_count = 0;
-    auto lowered = 0;
+    auto sources = cc::vector<cc::string>();
     for (auto const& file : files)
+        sources.push_back(read_file(file));
+
+    auto entries = cc::vector<cc::vector<cc::string>>::create_defaulted(files.size());
+    co_await cc::async_parallel_for(files.size(),
+                                    [&](isize f)
+                                    {
+                                        auto const all
+                                            = sgl::compile_all_to_text({.source = sources[f],
+                                                                        .source_name = files[f],
+                                                                        .library = library.files,
+                                                                        .targets = {sgl::emit::target::hlsl_dx12}});
+                                        if (all.has_value())
+                                            for (auto const& entry : all.value())
+                                                entries[f].push_back(entry.entry_point);
+                                    },
+                                    {.grain = 1});
+
+    struct job
     {
-        auto const source = read_file(file);
-        auto const all = sgl::compile_all_to_text(
-            {.source = source, .source_name = file, .library = library.files, .targets = {sgl::emit::target::hlsl_dx12}});
-        if (all.has_error())
-            continue;
-        for (auto const& entry : all.value())
+        isize file = 0;
+        cc::string entry_point;
+        int lowered = 0;
+        int refused = 0;
+        cc::vector<u32> spirv;
+    };
+    auto jobs = cc::vector<job>();
+    for (auto f = isize(0); f < files.size(); ++f)
+        for (auto const& entry_point : entries[f])
+            jobs.push_back({.file = f, .entry_point = entry_point});
+
+    co_await cc::async_parallel_for(
+        jobs.size(),
+        [&](isize j)
+        {
+            auto& job = jobs[j];
+            auto const& file = files[job.file];
             for (auto const target : {sgl::emit::target::hlsl_dx12, sgl::emit::target::hlsl_vulkan})
             {
-                auto const e = sgl::compile_to_text({.source = source,
+                auto const e = sgl::compile_to_text({.source = sources[job.file],
                                                      .source_name = file,
                                                      .library = library.files,
-                                                     .entry_point = entry.entry_point,
+                                                     .entry_point = job.entry_point,
                                                      .target = target,
                                                      .diagnostics = true,
                                                      .device_features = features,
@@ -339,31 +451,43 @@ TEST("slib - a device's micromaps and reordering leave only the named gaps on ei
                     // what a ray-tracing stage leaves is metal's own, so a required-native package meets no other
                     auto const is_metals = e.value().native_gap.contains("only metal");
                     CHECK((e.value().stage < sgl::check::stage::raygen || is_metals))
-                        .dump("entry", entry.entry_point)
+                        .dump("entry", job.entry_point)
                         .dump("gap", e.value().native_gap);
                     CC_LOG_INFO("device gap {}: {}", target == sgl::emit::target::hlsl_dx12 ? "dxil" : "spirv",
                                 e.value().native_gap);
                     continue;
                 }
-                ++lowered;
+                ++job.lowered;
                 if (target != sgl::emit::target::hlsl_dx12)
                 {
-                    // a process per module, so a default run validates every eighth and --thorough takes them all
-                    if (has_spirv_val && (nx::is_thorough() || lowered % 8 == 0))
-                    {
-                        write_words(module_path, e.value().spirv);
-                        CHECK(std::system(command_text.data()) == 0).dump("file", file).dump("entry", entry.entry_point);
-                    }
+                    if (has_spirv_val)
+                        job.spirv = cc::vector<u32>::create_copy_of(e.value().spirv);
                     continue;
                 }
+                // a compiler is not thread-safe, so each task takes its own
+                auto compiler = ssc::dxc::compiler::create();
+                REQUIRE(compiler.has_value());
                 auto const refused = compiler.value().validate(e.value().dxil);
-                refused_count += refused.has_value() ? 1 : 0;
+                job.refused += refused.has_value() ? 1 : 0;
                 CHECK(!refused.has_value())
                     .dump("file", file)
-                    .dump("entry", entry.entry_point)
+                    .dump("entry", job.entry_point)
                     .dump("validator", refused.value_or(cc::string()));
             }
+        },
+        {.grain = 1});
+
+    auto spirv_modules = spirv_batch();
+    auto refused_count = 0;
+    auto lowered = 0;
+    for (auto const& job : jobs)
+    {
+        lowered += job.lowered;
+        refused_count += job.refused;
+        if (!job.spirv.empty())
+            spirv_modules.add(job.spirv, files[job.file], job.entry_point);
     }
+    spirv_modules.validate();
     CC_LOG_INFO("device features: {} lowered, {} refused", lowered, refused_count);
     CHECK(lowered >= 690);
 }

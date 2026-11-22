@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -62,7 +63,15 @@ def main() -> int:
         # The link first, so removing the tree never reaches into the checkout it points at.
         if link.is_junction() or link.is_symlink():
             os.rmdir(link) if sys.platform == "win32" else link.unlink()
-        shutil.rmtree(base, ignore_errors=True)
+        # git writes its objects read-only, which Windows refuses to delete until the bit is cleared.
+        def clear_readonly(func, path, _exc) -> None:
+            os.chmod(path, stat.S_IWRITE)
+            func(path)
+
+        if link.exists():
+            print(f"template-self-test: {link} is still linked to this checkout, so {base} is left for a person to remove")
+        else:
+            shutil.rmtree(base, onexc=clear_readonly)
 
 
 if __name__ == "__main__":
