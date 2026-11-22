@@ -31,7 +31,7 @@ Never on the arch, and never on a hand-rolled `sizeof(void*) == 8`.
 |----------|------|----------------------|------|----------------|
 | Windows | x64 | Clang (`clang-cl`) | 1 | CI |
 | Windows | x64 | MSVC `cl` — VS 2022 (toolset 14.44) | 1 | CI |
-| Windows | x64 | MSVC `cl` — VS 2026 (toolset 14.51) | 1 | CI |
+| Windows | x64 | MSVC `cl` — VS 2026 (toolset 14.52) | 1 | CI |
 | Windows | arm64 | MSVC `cl` — VS 2022 (toolset 14.44) | 1 | CI — `windows-11-arm`, native arm64 |
 | Linux | x64 | Clang | 1 | CI — the deep Debug / RelWithDebInfo / Release matrix |
 | Linux | x64 | GCC 14 (13+) | 1 | CI |

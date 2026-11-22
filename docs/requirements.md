@@ -42,7 +42,7 @@ Configured per platform via presets.
 | Platform | Compiler            | Notes                                                        |
 |----------|---------------------|-------------------------------------------------------------|
 | Windows  | `clang-cl`          | Default (`relwithdebinfo-clang`). The version CI pins is in [guides/ci.md](guides/ci.md#toolchains). |
-| Windows  | `cl` (MSVC)         | VS 2022 (toolset 14.44) and VS 2026 (14.51); `*-msvc-*` presets. |
+| Windows  | `cl` (MSVC)         | VS 2022 (toolset 14.44) and VS 2026 (14.52); `*-msvc-*` presets. |
 | Linux    | `clang++` / `clang` | Default (`relwithdebinfo-linux-clang`).                      |
 | Linux    | `g++` / `gcc`       | `relwithdebinfo-linux-gcc`, the only GCC preset. GCC **13+** for `std::stacktrace`. |
 | macOS    | Homebrew `llvm@22`  | Expects `/opt/homebrew/opt/llvm@22/bin/clang++` (arm64). The formula is versioned so a Homebrew bump cannot move the toolchain under us. Targets macOS 26.0; see [below](#macos-deployment-target-and-sdk). |
