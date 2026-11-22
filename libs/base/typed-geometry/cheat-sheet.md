@@ -177,6 +177,27 @@ q.axis();                                         // vec3 — unit axis (zero ve
 q.angle();                                        // angle — requires has_sqrt + has_trigonometry
 q.conjugate();                                    // inverse rotation for a unit quat
 q.to_rotation_matrix();                           // mat3 — q must be UNIT; a non-unit one folds |q|^2 in
+q1 + q2;  q1 - q2;  -q;  q * s;  s * q;           // component-wise: a blend's algebra, NOT a composition
+tg::dot(q1, q2);                                  // 4D dot — negative: opposite sides, q and -q are one rotation
+```
+
+## dual_quat — rigid motions that blend
+
+```cpp
+#include <typed-geometry/linalg/dual_quat.hh>
+tg::dual_quat_f d;                                // default zero; public quat members `real` and `dual`
+tg::dual_quat_f::zero;  tg::dual_quat_f::identity;
+tg::dual_quat_f::make_rigid(rotation_quat, translation_vec);  // rotate, then translate: a rigid_transform3's parts
+tg::dual_quat_f::make_rotation(q);  ..._translation(v);
+d.rotation();  d.translation();                   // back to the parts — d must be UNIT
+a * b;                                            // composition: applies b first
+d * p;  d * v;                                    // pos: rotated + translated; vec: rotated only — d must be UNIT
+d.inverse();                                      // UNIT only; = quat_conjugate()
+d.quat_conjugate();  d.dual_conjugate();  d.full_conjugate();  // three conjugates, none of them "the" one
+d.normalized();                                   // EXACT: also removes the dual part along the real part
+a + b;  a - b;  -d;  d * s;                       // the algebra a blend is made of, not rigid until normalized()
+tg::blend<float>(span_of_dqs, span_of_weights);   // skinning's blend: signs aligned to the first, then normalized
+tg::sclerp(a, b, t);                              // along the one screw from a to b; both UNIT
 ```
 
 ## transform — one type over a capability lattice

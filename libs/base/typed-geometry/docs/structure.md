@@ -113,7 +113,8 @@ linalg/
   bivec.hh         [done]     + zero; C(D,2) components (3D order {yz, zx, xy})
   cross.hh         [done]     cross, dual, undual (3D; the {yz,zx,xy} order makes dual the identity)
   mat.hh           [done]     col-major, zero/identity, rotations, products, transposed/determinant/adjugate/cofactor/inverse
-  quat.hh          [done]     zero/identity, rotations, products, axis()/angle()
+  quat.hh          [done]     zero/identity, rotations, products, axis()/angle(), blend algebra (+, -, scalar *, dot)
+  dual_quat.hh     [done]     rigid motions that blend: products, three conjugates, normalized(), blend, sclerp
   linalg.hh        [done]
   all.hh           [done]
 

@@ -69,6 +69,7 @@ target_sources(typed-geometry
     src/typed-geometry/linalg/cross.hh
     src/typed-geometry/linalg/mat.hh
     src/typed-geometry/linalg/quat.hh
+    src/typed-geometry/linalg/dual_quat.hh
     src/typed-geometry/linalg/linalg.hh
     src/typed-geometry/linalg/all.hh
 
@@ -224,6 +225,7 @@ if(SC_BUILD_TESTS)
         tests/linalg/bivec-test.cc
         tests/linalg/mat-test.cc
         tests/linalg/quat-test.cc
+        tests/linalg/dual-quat-test.cc
 
         tests/transform/transform-flags-test.cc
         tests/transform/homogeneous-transform-test.cc

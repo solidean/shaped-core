@@ -346,19 +346,20 @@ dev.py enters the environment itself, so configuring through it is always right;
 [ConfigureEnvironment.cmake](../../tools/cmake/ConfigureEnvironment.cmake) is the check, and it holds in a project consuming shaped-core too.
 Such a project includes it before its own `project()`, which also keeps its `.rc` rule paired with the cached compiler; shaped-core's own include then finds it done.
 
-## An optional build server
+## The build server
 
-`build` and `test` can hand their build step, and `test` its test runs, to an optional local build server, which keeps state such as a compile cache and test results between runs.
-It is opt-in and never required: without it, everything builds and tests exactly as before.
+`build` and `test` hand their build step, and `test` its test runs, to a local build server, which keeps state such as a compile cache and test results between runs.
+**It is on wherever ccs is installed**, at `%LOCALAPPDATA%\ccs\bin\ccs.exe` or on PATH, for shaped-core and every project built on it; it is much faster than a plain build.
+It is never required: where it is not installed, everything builds and tests the plain way, without a warning.
 
-- **Opting in**, the first that says either way: `--no-server`, `--server`, `SC_BUILD_SERVER=1` (or `0`), then the project's own default.
+- **On or off**, the first that says either way: `--no-server`, `--server`, `SC_BUILD_SERVER=1` (or `0`), the checkout's `dev.toml`, then whether a client is installed.
   `--no-server` always wins.
 - **Where the client is**: `SC_BUILD_SERVER_CLIENT` names its executable, over the location the project's `Policy.build_server` gives.
 - **A checkout's `dev.toml`** (gitignored, at the repo root) sets the project's half in its `[build_server]` table:
 
   ```toml
   [build_server]
-  enabled = true                      # opt this checkout in; --no-server and SC_BUILD_SERVER=0 still win
+  enabled = false                     # turn this checkout off; true turns it on where no client is found, which warns
   client = "C:/path/to/client.exe"    # the client, over the project's default; SC_BUILD_SERVER_CLIENT wins over it
   # speculative_tests = true          # BuildServer.speculative_tests, below
   # ship_proof = true                 # BuildServer.ship_proof, below
@@ -377,7 +378,7 @@ It is opt-in and never required: without it, everything builds and tests exactly
   to rerun the binaries it tested once the server has rebuilt them on its own after an edit, with the same arguments and environment,
   so the next `test` finds their results stored; off by default, and a request without it withdraws it.
 - **Test runs writing what the server does not keep run without it**: `--sample`, `--rec`, `--profile`, `--no-xml-reports`, and cross-compiled presets.
-- **`check` and `ship` build and test through it too**, under the same opt-in; `check --no-server` and `ship --no-server` keep the whole gate off it.
+- **`check` and `ship` build and test through it too**, under the same rule; `check --no-server` and `ship --no-server` keep the whole gate off it.
   The gate's two single-test steps, `shader-grammar` and `ccrec-reader`, always run the plain way, the latter because it writes a fixture the gate reads next.
 - **`ship` can prove instead of gating, when asked**: with the server opted in and `ship --proof` or the project's `BuildServer.ship_proof`,
   the server's `proof` replaces the gate's build and test steps: a green build of exactly this tree, every test green at least once,

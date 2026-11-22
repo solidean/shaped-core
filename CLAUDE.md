@@ -43,7 +43,7 @@ One-liner per library:
   **nexus is a leaf**: nothing in shaped-core links it except test binaries, so it sits ON TOP of the libraries it tests despite living in `base/`, and it is added LAST in the root `CMakeLists.txt`.
   It takes `babel-data` rather than all of babel for a reason of its own: every `*-test` binary links nexus, so a nexus dependency is a repo-wide tax and only externals-free libraries belong there.
 * **`libs/base/typed-geometry`** — strongly-typed C++23 math & geometry.
-  The `scalar_traits` seam, `vec`/`pos`/`comp`/`bivec`/`mat`/`quat` and the first `geometry/` primitives exist.
+  The `scalar_traits` seam, `vec`/`pos`/`comp`/`bivec`/`mat`/`quat`/`dual_quat` and the first `geometry/` primitives exist.
   So does `tg::fixed_int<Bits>` (`fi128`, `fi192`, …): wrapping two's-complement integers for exact predicates, with `tg::mul<fi192>(a, b)`-style arithmetic across widths.
   Up to 256 bits that arithmetic is loop-free, from a committed generator.
   So is `tg::f16` (`half_float`): IEEE binary16 with explicit conversions, and arithmetic correctly rounded once per operation.
@@ -304,6 +304,7 @@ it refuses uncommitted work, reruns the static gates on top of a merge the remot
 It runs the clang-tidy gates, shaped-linter, clang-format, a full-repo cross-reference check, then the test suite; `--no-test` skips that tail and `--list` shows the registry.
 The order is a correctness property rather than a listing convention, and [Pre-commit checks](docs/guides/building-and-testing.md#pre-commit-checks) says why.
 
+**Builds and tests go through the ccs build server wherever it is installed**, here and in every project built on shaped-core; `--no-server` or a checkout's `dev.toml` turns it off.
 `dev.py` is quiet by default and logs each step under `build/<preset>/run-logs/`.
 The loop is **run `dev.py`, then diagnose with `repo_tools`** — `build_diag` after a build, `test_diag` after a test, using the selector dev.py printed.
 

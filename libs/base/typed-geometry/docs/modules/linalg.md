@@ -4,7 +4,7 @@
 
 ## What this module is
 
-`linalg/` holds the algebraic building blocks — `vec`, `pos`, `comp`, `bivec`, `mat`, `quat` — and their operations.
+`linalg/` holds the algebraic building blocks — `vec`, `pos`, `comp`, `bivec`, `mat`, `quat`, `dual_quat` — and their operations.
 These are the vocabulary types nearly everything above (transforms, geometry, curves, mesh) is phrased in.
 It depends only on `scalar/`.
 
@@ -19,6 +19,7 @@ It depends only on `scalar/`.
 - **Transforms.** A `mat` is linear-algebra data, not a semantic transformation.
   `rigid_transform`, `affine_transform` and the `obj.transformed(t)` machinery live in the [`transform/`](transform.md) module.
   There is intentionally no `mat * pos`, and no `t * p` either.
+  `quat * vec` and `dual_quat * pos` are the exception, and why is a key decision below.
 - Geometry primitives (aabb, ray, triangle, …), acceleration structures, and shape algorithms —
   those are higher modules.
 
@@ -88,6 +89,18 @@ The **only constructor is the default one, and it yields the zero matrix** — t
 `mat` is linear-algebra data only, with no `mat * pos`.
 Rotation factories live here because they *produce* matrices; applying a matrix as a transform is a `transform/` concern.
 
+### `dual_quat` is a number, and the form rigid motions blend in
+
+A unit dual quaternion is the same rigid motion a `rigid_transform3` is, so it adds no transform class: it is the form to **blend** rigid motions in.
+A weighted sum of rotations and translations shears and shrinks, and a weighted sum of dual quaternions, normalized, does not; that is dual-quaternion skinning.
+So it is a number with an algebra, like `quat`: `a * b` composes, `+` and scalar `*` make a blend, and `tg::blend` and `tg::sclerp` are its two uses.
+`quat` carries the same `+`, `-` and scalar `*` for the same reason, and `dot(quat, quat)` tells which side of the 4D sphere a rotation is on.
+
+Applying it, `d * p`, belongs to the algebra rather than to `transform/`: it is the sandwich product, as `q * v` is for a quaternion, not a matrix read as a map.
+It has three conjugates and none is the obvious one, so each is named: `quat_conjugate`, `dual_conjugate`, `full_conjugate`, and `inverse()` for what the first means on a unit one.
+`normalized()` is the exact projection back onto the rigid motions, the dual part's component along the real part removed as well as both divided by |real|;
+dividing alone moves points correctly but leaves `translation()` and `inverse()` wrong.
+
 ### Special values are static constants; factories are `make_*`
 
 Canonical values are static data members — `vec::zero`, `mat::identity`, `quat::identity` — rather than functions, so they read as constants.
@@ -104,4 +117,5 @@ The [coding-guidelines](../coding-guidelines.md) carry the rationale.
 - [coding-guidelines](../coding-guidelines.md) — the cross-cutting rules (storage, qualification, factories, statics, no-assert-normalize) these types follow.
 - [cheat-sheet](../../cheat-sheet.md) — the linalg API at a glance.
 - source: [vec.hh](../../src/typed-geometry/linalg/vec.hh), [pos.hh](../../src/typed-geometry/linalg/pos.hh), [bivec.hh](../../src/typed-geometry/linalg/bivec.hh),
-  [cross.hh](../../src/typed-geometry/linalg/cross.hh), [mat.hh](../../src/typed-geometry/linalg/mat.hh), [quat.hh](../../src/typed-geometry/linalg/quat.hh).
+  [cross.hh](../../src/typed-geometry/linalg/cross.hh), [mat.hh](../../src/typed-geometry/linalg/mat.hh),
+  [quat.hh](../../src/typed-geometry/linalg/quat.hh), [dual_quat.hh](../../src/typed-geometry/linalg/dual_quat.hh).

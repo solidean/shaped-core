@@ -59,10 +59,10 @@ The driver is mechanism under `tools/dev/lib/` plus commands under `tools/dev/cm
 - **Its `check` registry**, `Policy.checks`, since which gates run is project policy.
   `check.standard_registry` runs the standard gates, `STANDARD_CHECKS` in [check.py](../../tools/dev/cmd/check.py): shaped-lint, house-style, format, crossrefs, issues, abspaths and test.
   A project with gates of its own passes a function of the same signature instead, placing them among the standard ones; `check.shaped_core_registry` is the worked case.
-  A gate build passes `server=ctx.build_server(gate=True)`, so the gate follows shaped-core's when the optional build server is turned on for it.
+  A gate build passes `server=ctx.build_server(gate=True)`, so the gate goes through the build server whenever the project's builds do.
 - **The house-style gate** holds the project's copies of `.clang-format` and `.editorconfig` to the submodule's, so a bump that changes the style fails until `check --fix` copies them again.
-- Optionally a **`BuildServer`** in that Policy: where an optional local build server's client is installed, how to install it, and whether the project opts in by default.
-  [Building and testing](building-and-testing.md#an-optional-build-server) is what it changes.
+- A **`BuildServer`** in that Policy, which `dev.build_server_from_dev_toml(ROOT)` makes: on wherever ccs is installed, unless the checkout's `dev.toml` says otherwise.
+  [Building and testing](building-and-testing.md#the-build-server) is what it changes.
 - **A `CMakePresets.json` that includes ours**, `"include": ["extern/shaped-core/CMakePresets.json"]`, and adds only the presets of its own.
   The launcher paths in ours are `${fileDir}`-relative, so they find the submodule's tools wherever it is included from, and the build directories stay the project's.
   dev.py follows the include to resolve preset names.
