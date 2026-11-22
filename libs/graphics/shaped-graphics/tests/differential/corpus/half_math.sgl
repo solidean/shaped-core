@@ -1,7 +1,11 @@
 // differential: setup floats
 // differential: across exact
+// differential: known amd dx12 bug-sgl-half-conversion-rounds-toward-zero-on-amd
+// differential: known amd vulkan bug-sgl-half-conversion-rounds-toward-zero-on-amd
+// differential: known intel dx12 bug-sg-diff-half-corpus-fails-on-intel
+// differential: known nvidia vulkan bug-sg-diff-half-math-unrounded-on-nvidia-vulkan
 // EVAL-96 rounds a float converted to a half once, to nearest, ties to even, at every level, so a conversion agrees to the bit everywhere.
-// AMD's dx12 and vulkan drivers convert a float to a half toward zero instead; issue: bug-sgl-half-conversion-rounds-toward-zero-on-amd
+// AMD's drivers convert a float to a half toward zero instead, and Intel's dx12 and NVIDIA's vulkan fold the round trip away.
 // Half-precision math as a bandwidth-bound or mobile shader writes it starts here: floats converted to halves, read and computed.
 // The operations on halves are half_arithmetic.sgl's, since `.fast` lets them keep a float's precision.
 require shader_f16

@@ -19,4 +19,5 @@ What would make SGL keep its word:
 - dx12: no rounding control exists, so the conversion would round by hand, from the float's bits, or correct the driver's half by one step where it truncated.
 - Or EVAL-96 states the conversion's rounding as the target's, as it does a builtin's.
 
-Until then `half_math.sgl` fails its reference on AMD, which is the finding and no refresh's to remove.
+Until then `half_math.sgl`'s `known amd dx12` and `known amd vulkan` lines log the divergence rather than fail it, and fail once AMD agrees.
+No refresh is to remove the finding.

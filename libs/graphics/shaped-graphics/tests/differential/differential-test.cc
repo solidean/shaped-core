@@ -30,13 +30,43 @@ struct configuration
     cc::string label;
 };
 
-/// Runs `w` on every configuration and holds each to the first one that ran, at the tolerance their relation calls for.
-cc::shared_async<cc::unit> held_alike(sg_diff::workload const& w, cc::span<configuration const> configurations)
+/// Holds a configuration's differences from a ground truth: each fails, unless the file knows its driver diverges.
+/// A known divergence that no longer shows fails too, so a fixed driver retires its line.
+void judge(sg_diff::workload const& w, configuration const& c, cc::string_view against, cc::vector<cc::string> const& lines)
 {
+    auto const* const known = w.known_on(*c.ctx);
+    if (known == nullptr)
+    {
+        for (auto const& line : lines)
+            CHECK(false).context(cc::format("{} {} on {} against {}: {}", w.file, w.entry, c.label, against, line));
+        return;
+    }
+    if (lines.empty())
+        CHECK(false).context(cc::format("{} {} on {} agrees with {}, though its file expects {}: remove that `known` "
+                                        "line, and check whether the issue is fixed",
+                                        w.file, w.entry, c.label, against, known->issue));
+    else
+        CC_LOG_INFO("differential: {} {} on {} diverges from {} as {} says: {}", w.file, w.entry, c.label, against,
+                    known->issue, lines.front());
+}
+
+/// Runs `w` on every configuration and holds each to the first one that ran, at the tolerance their relation calls for.
+/// A configuration the file knows to diverge runs last, so it is never what the others are held to, and only logs.
+cc::shared_async<cc::unit> held_alike(sg_diff::workload const& w, cc::span<configuration const> all)
+{
+    auto configurations = cc::vector<configuration const*>();
+    for (auto const& c : all)
+        if (w.known_on(*c.ctx) == nullptr)
+            configurations.push_back(&c);
+    for (auto const& c : all)
+        if (w.known_on(*c.ctx) != nullptr)
+            configurations.push_back(&c);
+
     auto reference = cc::optional<sg_diff::run_result>();
     auto const* reference_of = static_cast<configuration const*>(nullptr);
-    for (auto const& c : configurations)
+    for (auto const* const p : configurations)
     {
+        auto const& c = *p;
         auto result = co_await sg_diff::run(c.ctx.get(), &w, c.route);
         if (result.skipped.has_value())
         {
@@ -51,7 +81,16 @@ cc::shared_async<cc::unit> held_alike(sg_diff::workload const& w, cc::span<confi
             continue;
         }
         auto const tolerance = c.ctx == reference_of->ctx ? w.routes : w.across;
-        for (auto const& line : sg_diff::differences(reference.value(), result, tolerance))
+        auto const lines = sg_diff::differences(reference.value(), result, tolerance);
+        // two routes of one known driver may agree with each other, so agreeing proves nothing here
+        if (auto const* const known = w.known_on(*c.ctx); known != nullptr)
+        {
+            if (!lines.empty())
+                CC_LOG_INFO("differential: {} {}: {} against {} diverges as {} says: {}", w.file, w.entry, c.label,
+                            reference_of->label, known->issue, lines.front());
+            continue;
+        }
+        for (auto const& line : lines)
             CHECK(false).context(
                 cc::format("{} {}: {} against {}: {}", w.file, w.entry, c.label, reference_of->label, line));
     }
@@ -189,6 +228,9 @@ ASYNC_TEST("sg differential - every corpus entry point computes what its committ
             }
             for (auto const& c : configurations)
             {
+                // a driver the file knows to diverge writes no reference
+                if (w.known_on(*c.ctx) != nullptr)
+                    continue;
                 auto const result = co_await sg_diff::run(c.ctx.get(), &w, c.route);
                 if (result.skipped.has_value())
                     continue;
@@ -217,9 +259,7 @@ ASYNC_TEST("sg differential - every corpus entry point computes what its committ
                                                  w.entry, o.name, c.ctx->metrics.adapter().name, c.route.name);
                     write_text(name, cc::string_view(reinterpret_cast<char const*>(o.bytes.data()), o.bytes.size()));
                 }
-            for (auto const& line : sg_diff::against_reference(reference.value(), w, result))
-                CHECK(false).context(cc::format("{} {} on {} against {}: {}", w.file, w.entry, c.label,
-                                                sg_diff::reference_name(w), line));
+            judge(w, c, sg_diff::reference_name(w), sg_diff::against_reference(reference.value(), w, result));
         }
     }
 }
@@ -257,8 +297,7 @@ ASYNC_TEST("sg differential - every corpus entry point computes on the GPU what 
             auto const result = co_await sg_diff::run(c.ctx.get(), &w, c.route);
             if (result.skipped.has_value())
                 continue;
-            for (auto const& line : sg_diff::differences(oracle.value(), result, w.across))
-                CHECK(false).context(cc::format("{} {}: {} against the interpreter: {}", w.file, w.entry, c.label, line));
+            judge(w, c, "the interpreter", sg_diff::differences(oracle.value(), result, w.across));
         }
     }
     CC_LOG_INFO("differential: {} of {} entry points interpreted", interpreted, corpus.workloads.size());

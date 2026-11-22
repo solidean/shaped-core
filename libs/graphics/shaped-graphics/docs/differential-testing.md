@@ -77,7 +77,22 @@ An output a setup marks `is_exact`, as `targets` marks its integer target, is co
 Agreement between configurations cannot see a layout every backend gets wrong alike; that check can.
 On the Arc B580 sampling and derivatives are bit-exact across dx12 and vulkan, and only a `dot` in a pixel stage moves, by 1 ulp.
 
-A comment block naming no known setup, or a tolerance that does not parse, fails both tests, naming the file.
+A comment block naming no known setup, a tolerance or a `known` line that does not parse, fails both tests, naming the file.
+
+## Known divergences
+
+**A driver that computes a file wrongly is a finding, and an open issue says who is wrong; it need not keep every machine with that GPU from shipping.**
+A `known` line names the vendor, the backend and the issue:
+
+```sgl
+// differential: known nvidia vulkan bug-sg-diff-half-math-unrounded-on-nvidia-vulkan
+```
+
+The vendor is `amd`, `apple`, `intel` or `nvidia`, matched by the adapter's PCI vendor id, and the backend is `dx12`, `vulkan`, `metal` or `webgpu`.
+On a matching context a difference logs at info, naming the issue, where it would fail.
+**A known line that stops diverging fails**, against the reference and against the interpreter: a fixed driver retires its line, and the issue gets checked.
+A matching context is never what the others are held to, and a refresh writes no reference from it.
+Two routes of one matching context are not held to each other, since one driver folding both alike proves nothing.
 
 ## Tolerances
 

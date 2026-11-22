@@ -12,7 +12,8 @@ refs:
 # NVIDIA's vulkan elides a float's round trip through a half
 
 On an RTX 4090, driver 610.88, `half_math.sgl`'s `halves` differs from its reference, from the interpreter and from dx12 on the same GPU.
-It fails on vulkan's dxc and native routes alike, so `dev.py ship` refuses on this machine.
+It fails on vulkan's dxc and native routes alike.
+`half_math.sgl`'s `known nvidia vulkan` line turns that into an info line naming this issue, and fails once the driver agrees.
 
 ## Measured
 
@@ -26,4 +27,3 @@ It fails on vulkan's dxc and native routes alike, so `dev.py ship` refuses on th
 ## Open
 
 - Whether the `RoundingModeRTE` execution mode for 16-bit floats keeps the driver from folding, which would also fix AMD's toward-zero rounding.
-- What the differential test does with a vendor's known divergence, so a machine with that GPU can still ship.

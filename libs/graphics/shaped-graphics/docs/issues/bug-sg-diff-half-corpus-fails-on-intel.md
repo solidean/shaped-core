@@ -11,6 +11,7 @@ refs:
 # The half corpus fails on Intel's Arc: dx12 elides a float's round trip through a half
 
 On the Arc B580, driver 32.0.101.9150, all three differential tests fail on the half corpus that `8f626fed6` and `4fde5ca31` added, so `dev.py ship` refuses on this machine.
+`half_math.sgl`'s `known intel dx12` line logs that file's divergence now; `half_arithmetic.sgl` has no such line yet, since whether `.fast` covers it is open.
 
 ## Measured
 
