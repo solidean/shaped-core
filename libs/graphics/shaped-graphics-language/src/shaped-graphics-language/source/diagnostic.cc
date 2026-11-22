@@ -102,6 +102,8 @@ cc::string_view sgl::to_string(diagnostic_kind kind)
         return "mixed-struct-type";
     case diagnostic_kind::misplaced_splat:
         return "misplaced-splat";
+    case diagnostic_kind::splat_of_an_operation:
+        return "splat-of-an-operation";
     case diagnostic_kind::misplaced_attribute_on_expression:
         return "misplaced-attribute-on-expression";
     case diagnostic_kind::statement_in_expression:
@@ -176,6 +178,8 @@ cc::string_view sgl::to_string(diagnostic_kind kind)
         return "invalid-entry-point";
     case diagnostic_kind::wrong_kind_of_name:
         return "wrong-kind-of-name";
+    case diagnostic_kind::padding_not_stated:
+        return "padding-not-stated";
     case diagnostic_kind::missing_type:
         return "missing-type";
     case diagnostic_kind::invalid_attribute_arguments:
@@ -374,6 +378,9 @@ cc::string_view sgl::summary_of(diagnostic_kind kind)
         return "curly braces holding both `name: type` and `name = value` elements";
     case diagnostic_kind::misplaced_splat:
         return "a splat that is not a whole element of a list";
+    case diagnostic_kind::splat_of_an_operation:
+        return "a splat binds tighter than the operation after it, so `..a + b` splats `a` alone; write `..(a + b)` to "
+               "splat the result";
     case diagnostic_kind::misplaced_attribute_on_expression:
         return "an attribute on an expression that is no type";
     case diagnostic_kind::statement_in_expression:
@@ -448,6 +455,8 @@ cc::string_view sgl::summary_of(diagnostic_kind kind)
         return "an entry point that breaks a rule entry points follow";
     case diagnostic_kind::wrong_kind_of_name:
         return "a name that stands for something this position does not take";
+    case diagnostic_kind::padding_not_stated:
+        return "a buffer whose elements GPU memory pads past what a host's type takes, with no @padding saying which";
     case diagnostic_kind::missing_type:
         return "a field, a binding member or a parameter without a type";
     case diagnostic_kind::invalid_attribute_arguments:
@@ -598,6 +607,7 @@ sgl::severity sgl::default_severity_of(diagnostic_kind kind)
     case diagnostic_kind::stray_else:
     case diagnostic_kind::mixed_struct_type:
     case diagnostic_kind::misplaced_splat:
+    case diagnostic_kind::splat_of_an_operation:
     case diagnostic_kind::misplaced_attribute_on_expression:
     case diagnostic_kind::statement_in_expression:
     case diagnostic_kind::unexpected_keyword:
@@ -633,6 +643,7 @@ sgl::severity sgl::default_severity_of(diagnostic_kind kind)
     case diagnostic_kind::duplicate_declaration:
     case diagnostic_kind::invalid_entry_point:
     case diagnostic_kind::wrong_kind_of_name:
+    case diagnostic_kind::padding_not_stated:
     case diagnostic_kind::missing_type:
     case diagnostic_kind::invalid_attribute_arguments:
     case diagnostic_kind::missing_return:

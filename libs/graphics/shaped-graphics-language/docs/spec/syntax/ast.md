@@ -117,6 +117,7 @@ let k = x in 0..<1
 * **AST-27** An element of an `object` that is one bare identifier is the **object shorthand** for `a = a`, and the AST records the shorthand without expanding it.
 * **AST-28** The **splat** is the prefix operator `..`, and it must be a whole element of a paren group: `(..normal, 0)` ([why](why/ast.md#ast-28)).
 * **AST-29** A splat is recorded on its argument, and a splat that is not a whole element of a paren group is a normal error.
+  One that is the leftmost operand of an element's operation, `(..a + b, 1.0)`, is `splat-of-an-operation`, which says to write `..(a + b)`.
 * **AST-97** An element of an `object` is the object shorthand, a named argument or a splat.
 * **AST-98** Any other element of an `object` is a normal error, and it is kept as a positional argument.
 

@@ -126,6 +126,8 @@ struct builder
     file_ast ast;
     /// The bodies being read, which is all a jump needs to know where it goes.
     cc::vector<body_frame> owners;
+    /// A splat that stands as the left operand of a list element's operator, `..a + b`, which splats `a` alone.
+    form_id splat_of_an_operation = form_id::none;
 
     // ---- forms (build.cc) ------------------------------------------------------------------------------------
 

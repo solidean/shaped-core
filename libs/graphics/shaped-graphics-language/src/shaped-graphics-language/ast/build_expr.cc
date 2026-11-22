@@ -266,7 +266,8 @@ expr_id builder::prefix_expression(form_id form)
     {
         // The operand is still read, so what is wrong inside it is found in the same run.
         (void)expression(at(form).first_child);
-        return invalid_expression(form, diagnostic_kind::misplaced_splat);
+        return invalid_expression(form, form == splat_of_an_operation ? diagnostic_kind::splat_of_an_operation
+                                                                      : diagnostic_kind::misplaced_splat);
     }
 
     auto const operand = at(form).first_child;

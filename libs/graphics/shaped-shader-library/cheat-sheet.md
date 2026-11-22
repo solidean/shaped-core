@@ -412,7 +412,8 @@ pass.set_inline_constants(shaders::compute::constants{.view_projection = vp}.to_
 auto const items = ctx.persistent.create_buffer_from_data(cc::vector<shaders::compute::particle>{...}, sg::buffer_usage::readwrite_buffer);
 //   every vector at its natural alignment, a 3-vector at 16, so the padding fields are real (the SGL spec's layout rules);
 //   `@padding(.none)` in the shader packs it as C++ does instead.
-// SGL `buffer[float3]` -> sg::readonly_buffer_view<slib::gpu_padded<tg::vec3f, 16>> (gpu_padded.hh): a value and its padding,
+// SGL `@padding(.natural) buffer[float3]` -> sg::readonly_buffer_view<slib::gpu_padded<tg::vec3f, 16>> (gpu_padded.hh):
+//   the shader must state which layout it means (CHK-532); a value and its padding,
 //   which a tg::vec3f converts to and from; under `@padding(.none)` it is plain tg::vec3f at a 12-byte stride.
 // SGL `mat3` -> slib::gpu_mat3 (gpu_mat3.hh): three 16-byte columns, which a tg::mat3f converts to and from;
 //   under `@padding(.none)` it is plain tg::mat3f, 36 bytes.

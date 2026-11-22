@@ -584,12 +584,16 @@ fun shade(k: float) -> float:
   On any other member it is `wrong-kind-of-name`, and it needs `device_coherence`, a form CHK-201 judges.
 * **CHK-369** `@padding(.none)` places GPU memory as a C++ compiler places a struct of the generated host types, and promises that layout to the host ([why](why/checking.md#chk-369)).
   On a binding it places the binding's constant block (EMIT-154) and every buffer's element (EMIT-167); on a buffer member, that buffer's element.
-  Without it, memory is placed at its natural alignment (EMIT-110).
+  Without it, or with `@padding(.natural)`, memory is placed at its natural alignment (EMIT-110).
   On any other member it is `wrong-kind-of-name`, since a constant takes its block's padding.
   `@padding(.every_element)` on a constant block's member that is an array of values starts each element on a row (EMIT-172).
   On any other member it is `wrong-kind-of-name`, and on a binding `invalid-attribute-arguments`, since it stands on the array it pads.
   `.every_column` is `unsupported-yet`, since a `mat3`'s columns stand 16 bytes apart already.
   Any other argument, and the attribute on a `@workgroup` binding, is `invalid-attribute-arguments`.
+* **CHK-532** A buffer whose element is a builtin that strides past its C++ host type states its `@padding`, on the member or on the binding.
+  `buffer[float3]` strides by 16 where `tg::vec3f` takes 12, and `buffer[mat3]` by 48 where `tg::mat3f` takes 36; without either it is `padding-not-stated`, naming both strides.
+  `@padding(.natural)` keeps the natural layout (EMIT-110) and `@padding(.none)` takes the host's.
+  A host that writes its own values sees no generated struct, so a padding that would surprise it is never implicit; a struct's element is the generated struct the host writes, and needs no statement.
 
 ```sgl
 @inline binding constants:
@@ -626,7 +630,8 @@ fun shade(k: float) -> float:
   Its one argument is `false` or `true`, on any declaration it stands on, and anything else is `invalid-attribute-arguments`.
 * **CHK-266** Every type of `builtins.sgl` is `@shadowable(false)`, and the types of `core.sgl` are not.
   A program's own `int` would be a second type that reads like the first, while a literal stays of the prelude's, so `level: int = 0` would read `expected int, got int`.
-* **CHK-55** A pattern in a `let` is `unsupported-yet`; `let mut` is CHK-111.
+* **CHK-55** `let _ = v` evaluates `v` and binds nothing, which says a value is dropped on purpose; `let mut _` and a `let _` with no value are `wrong-kind-of-name`.
+  Any other pattern in a `let` is `unsupported-yet`; `let mut` is CHK-111.
   A `let mut` with a written type may stand without a value, `let mut v: float`, and holds nothing until it is assigned.
   Every read of it must come after an assignment of it whole on every path to the read, or it is the normal error `read-before-assignment`.
   A `while` or a `for` may run its body no time, so what only the body assigns counts nowhere after it; after a `loop:` it counts on the paths through each `break`.
@@ -1935,6 +1940,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `module-cycle` | CHK-349 |
 | `unknown-name` | CHK-24, CHK-62, CHK-245, CHK-330 |
 | `wrong-kind-of-name` | CHK-24, CHK-54, CHK-79, CHK-237, CHK-247, CHK-199, CHK-200, CHK-202, CHK-203, CHK-205, CHK-279, CHK-285, CHK-286, CHK-292, CHK-296, CHK-297, CHK-299, CHK-300, CHK-315, CHK-317, CHK-320, CHK-338, CHK-339, CHK-347, CHK-368, CHK-372, CHK-373, CHK-374, CHK-390 |
+| `padding-not-stated` | CHK-532 |
 | `unexpected-keyword` | CHK-315 |
 | `default-not-allowed-here` | CHK-316 |
 | `missing-type` | CHK-26 |

@@ -196,7 +196,7 @@ constexpr auto k_particles = cc::string_view("struct particle:\n"
                                              "binding work:\n"
                                              "    scale: float\n"
                                              "    items: mut buffer[particle]\n"
-                                             "    dirs: mut buffer[float3]\n"
+                                             "    @padding(.natural) dirs: mut buffer[float3]\n"
                                              "\n"
                                              "@compute(64) fun main(@thread_id id: int3){work}:\n"
                                              "    let p = work.items[id.x]\n"
@@ -253,7 +253,7 @@ TEST("sgl emit layout - a buffer's element aligns every vector to its size, as W
 TEST("sgl emit layout - a @padding(.none) buffer packs its element tight, as a tg struct does")
 {
     auto packed = cc::string(k_particles);
-    packed.replace_first("    items: mut buffer[particle]\n    dirs: mut buffer[float3]\n",
+    packed.replace_first("    items: mut buffer[particle]\n    @padding(.natural) dirs: mut buffer[float3]\n",
                          "    @padding(.none) items: mut buffer[particle]\n    @padding(.none) dirs: mut "
                          "buffer[float3]\n");
 
@@ -667,7 +667,7 @@ TEST("sgl emit layout - a mat3 is three 16-byte columns, which HLSL holds as who
                             "    xf: mat3\n"
                             "    after: float\n"
                             "    frames: mut buffer[framed]\n"
-                            "    mats: mut buffer[mat3]\n"
+                            "    @padding(.natural) mats: mut buffer[mat3]\n"
                             "    @padding(.none) flat: mut buffer[mat3]\n"
                             "\n"
                             "@compute(64) fun main(@thread_id id: int3){work}:\n"

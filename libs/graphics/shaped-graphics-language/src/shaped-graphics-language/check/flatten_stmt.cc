@@ -802,6 +802,9 @@ void sgl::check::impl::flattener::flatten_stmt(ast::stmt_id id)
     auto const at = cursor_scope(*this, from);
     if (auto const* const let = s.node.try_as<ast::let_stmt>())
     {
+        // CHK-55: `let _ = v` is `v` as a statement of its own
+        if (ast::is_valid(let->pattern) && ast::is_valid(let->value) && ast().at(let->pattern).node.is<ast::wildcard>())
+            return flatten_expr_stmt(from, let->value);
         auto const* const name = ast::is_valid(let->pattern) ? ast().at(let->pattern).node.try_as<ast::name>() : nullptr;
         if (name == nullptr)
         {

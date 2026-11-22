@@ -77,6 +77,8 @@ enum class sgl::diagnostic_kind : sgl::u8
     stray_else,
     mixed_struct_type,
     misplaced_splat,
+    /// A splat as the left operand of an operation in a list element: `..a + b`, meaning `..(a + b)`.
+    splat_of_an_operation,
     misplaced_attribute_on_expression,
     /// An assignment, a `let`, an `if` or a declaration where a value was expected.
     statement_in_expression,
@@ -148,6 +150,8 @@ enum class sgl::diagnostic_kind : sgl::u8
     invalid_entry_point,
     /// A name that stands for something its position does not take: a function where a type is expected.
     wrong_kind_of_name,
+    /// A buffer of a builtin its host type places otherwise, with no `@padding` to say which layout it means (CHK-532).
+    padding_not_stated,
     /// A field, a binding member or a parameter without a type.
     missing_type,
     /// An attribute the compiler knows, with arguments it does not take.

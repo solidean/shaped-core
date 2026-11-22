@@ -45,8 +45,8 @@ test:
 
 // no GPU memory holds one yet, so a shader builds it from what memory holds
 binding scene:
-    axes: buffer[float3]
-    points: mut buffer[float3]
+    @padding(.natural) axes: buffer[float3]
+    @padding(.natural) points: mut buffer[float3]
 
 @compute(64) fun rotate(@thread_id id: int3){scene}:
     let basis = mat3(scene.axes[0], scene.axes[1], scene.axes[2])

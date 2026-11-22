@@ -39,7 +39,7 @@ struct flat_pair:
 
 binding stretch:
     pairs: mut buffer[pair]
-    dirs: mut buffer[float3]
+    @padding(.natural) dirs: mut buffer[float3]
     @padding(.none) flat_pairs: mut buffer[flat_pair]
     @padding(.none) flat_dirs: mut buffer[float3]
 
@@ -63,7 +63,7 @@ binding turn:
     xf: mat3
     after: float
     frames: mut buffer[framed]
-    mats: mut buffer[mat3]
+    @padding(.natural) mats: mut buffer[mat3]
     @padding(.none) flat: mut buffer[mat3]
     dirs: mut buffer[float4]
 

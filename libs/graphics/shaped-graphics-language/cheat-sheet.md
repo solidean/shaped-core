@@ -920,6 +920,7 @@ ops[i](mut v)                                            // raygen, miss, closes
 - **GPU memory is placed at natural alignment, the same on every target, because that is what loads fastest** (EMIT-110).
   A vector aligns to its size and a 3-vector to 16, a scalar may fill a 3-vector's tail, and a struct nested in a constant block takes whole rows.
   So `buffer[float3]` strides by 16, and the host writes it as `slib::gpu_padded<tg::vec3f, 16>`; the generated structs carry every padding field.
+  **Such a buffer states its `@padding`**, `.natural` for 16 or `.none` for 12, or it is `padding-not-stated` (CHK-532); `buffer[mat3]` likewise.
   WGSL writes it natively, MSL packs a 3-vector whose tail holds a value, and HLSL writes padding fields into its structs (EMIT-112).
   A struct placed by two rules is `layout-conflict`; `@no_padding` turns a gap into `padding-forbidden`; `bool` has no layout, `bool32` does.
   **`@padding(.none)` packs as C++ does**, on a binding (its block and its buffers) or on one buffer member (CHK-369).

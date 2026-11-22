@@ -124,3 +124,24 @@ test:
     let c = counter(0, 0.0)
     c.bump(1.0)
     c.hits == 0
+
+// `let _ =` keeps a call for what it does to its mut arguments and drops what it gives, saying so (CHK-55)
+fun bumped(x: mut int) -> int:
+    x = x + 1
+    return x * 10
+
+test:
+    let mut n = 1
+    let _ = bumped(mut n)
+    let _ = n + 100
+    n == 2
+
+@expect(error = "wrong-kind-of-name")
+test:
+    let mut _ = 1
+    true
+
+@compute(64) fun discarding(@thread_id id: int3):
+    let mut n = id.x
+    let _ = bumped(mut n)
+    let _ = n * 2

@@ -831,7 +831,7 @@ constexpr auto k_layout_sources = {
                     "binding work:\n"
                     "    scale: float\n"
                     "    items: mut buffer[particle]\n"
-                    "    dirs: mut buffer[float3]\n"
+                    "    @padding(.natural) dirs: mut buffer[float3]\n"
                     "\n"
                     "@compute(64) fun main(@thread_id id: int3){work}:\n"
                     "    let p = work.items[id.x]\n"

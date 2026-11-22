@@ -269,13 +269,17 @@ sgl::check::padding_kind checker::padding_of(i32 file, ast::attribute const* a)
     auto const rule = dot != nullptr ? text_of(file, dot->name) : cc::string_view();
     if (rule == "none")
         return padding_kind::none;
+    // CHK-532: the default, stated where a host would expect another layout
+    if (rule == "natural")
+        return padding_kind::natural;
     if (rule == "every_element")
         return padding_kind::every_element;
     if (rule == "every_column")
         unsupported(file, a->name, "@padding(.every_column), since a mat3's columns stand 16 bytes apart already");
     else
         report(diagnostic_kind::invalid_attribute_arguments, file, a->name,
-               "@padding takes where GPU memory leaves room: `@padding(.none)` or `@padding(.every_element)`");
+               "@padding takes where GPU memory leaves room: `@padding(.natural)`, `@padding(.none)` or "
+               "`@padding(.every_element)`");
     return padding_kind::natural;
 }
 
@@ -1852,6 +1856,28 @@ void checker::compile_binding(symbol_id id)
         no_padding != nullptr && is_workgroup)
         report(diagnostic_kind::invalid_attribute_arguments, file, no_padding->name,
                "@no_padding guards a constant block's layout, and @workgroup memory has none a host sees");
+    // CHK-532: a buffer of builtins strides past its host type only where the binding or the member says so
+    if (!is_workgroup && padded == nullptr)
+        for (auto const& m : out.at(members))
+        {
+            if (m.type == checked_module::error_type || !ast::is_valid(m.field))
+                continue;
+            auto const& field = ast_of(file).at(m.field);
+            if (find_attribute(file, field.attributes, "padding") != nullptr)
+                continue;
+            auto held = m.type;
+            while (is_valid(held) && out.builtin_type_of(held) == nullptr && out.at(held).kind == type_kind::array)
+                held = out.at(held).element;
+            if (!is_valid(held) || out.builtin_type_of(held) != nullptr || out.at(held).kind != type_kind::buffer)
+                continue;
+            if (auto const strides = builtin_strides_of(out.at(held).element); strides.natural != strides.host)
+                report(diagnostic_kind::padding_not_stated, file, span_of(file, field.type),
+                       cc::format("buffer[{}] strides by {} bytes, where the host's {} takes {}: "
+                                  "`@padding(.natural)` keeps {}, and `@padding(.none)` strides by {}",
+                                  out.name_of(out.at(held).element), strides.natural, out.name_of(out.at(held).element),
+                                  strides.host, strides.natural, strides.host));
+        }
+
     // CHK-293: WebGPU's default limit, and vulkan's required minimum, is what every target has
     if (is_workgroup)
     {

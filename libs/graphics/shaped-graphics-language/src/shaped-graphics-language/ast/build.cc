@@ -268,7 +268,15 @@ argument builder::list_element(form_id element, bool is_object, bool allows_attr
         result.value = expression(keyword_parts_of(element).arguments[0], attribute_mode::taken);
     }
     else
+    {
+        // AST-29: `..a + b` splats `a` alone, which is never what a list element means, so it says how to write it
+        auto left = element;
+        while (is_kind(left, form_kind::operator_run))
+            left = run_parts_of(left).operands[0];
+        if (left != element && is_kind(left, form_kind::prefix_operator) && token_text_of(left) == "..")
+            splat_of_an_operation = left;
         result.value = expression(element, attribute_mode::taken);
+    }
     return result;
 }
 

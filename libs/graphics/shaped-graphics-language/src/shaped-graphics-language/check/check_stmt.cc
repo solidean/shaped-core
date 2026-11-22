@@ -291,6 +291,17 @@ void checker::check_let(function_scope& scope, ast::stmt_id id, ast::let_stmt co
 
     if (!ast::is_valid(let.pattern))
         return;
+    // CHK-55: `let _ = v` evaluates `v` and binds nothing
+    if (ast.at(let.pattern).node.is<ast::wildcard>())
+    {
+        if (let.is_mut)
+            report(diagnostic_kind::wrong_kind_of_name, file, span_of(file, let.pattern),
+                   "`let mut _` binds nothing that could be assigned; `let _ = v` discards a value");
+        else if (!ast::is_valid(let.value))
+            report(diagnostic_kind::wrong_kind_of_name, file, span_of(file, let.pattern),
+                   "`let _` discards a value, and this one has none");
+        return;
+    }
     auto const* const n = ast.at(let.pattern).node.try_as<ast::name>();
     if (n == nullptr)
     {
