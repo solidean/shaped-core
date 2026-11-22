@@ -7,18 +7,18 @@ refs:
   - file: libs/graphics/shaped-graphics-language/docs/spec/semantics/checking.md
 ---
 
-# Padding a host would not expect is refused until it is spelled out
+# A buffer of a builtin padded past its host type is refused until it says so
 
 `buffer[float3]` strides by 16 without a word (EMIT-111), where a host that writes `tg::vec3f` strides by 12.
 A port lost a debugging session to it.
-The generated host struct is right (`slib::gpu_padded<tg::vec3f, 16>`), but a host that hand-writes its upload never sees it.
 
-**The rule wanted is a meta rule: padding that would surprise is never implicit.**
-Where the natural layout (EMIT-110) places memory other than a C++ compiler places the same types, the compile is refused until the binding or member says which it means.
-`@padding(.none)` is one answer, and the natural layout needs an explicit spelling of its own, such as `@padding(.natural)`.
-The diagnostic names the place, both sizes and both fixes.
+**The meta rule: padding that would surprise is never implicit.**
+It binds where a builtin type's GPU layout differs from its natural C++ host type, since that is where a host writes its own data.
+A user struct does not need it: the host writes the generated struct, which carries the padding already.
 
-Open:
+So the refusal covers a buffer whose element is a builtin, or an array of builtins, whose stride is not the host type's size.
+`buffer[float3]` (16 against `tg::vec3f`'s 12), `buffer[half3]` (8 against 6), and `buffer[mat3]` (48 against `tg::mat3f`'s 36) are the cases known.
 
-- Where the boundary is: a buffer's element stride surely, and a `mat3`'s 48 bytes and a struct member after a scalar probably; a constant block's row rules are the question.
-- `@padding` on a struct is `unsupported-yet` (emitting.md's Open list), and is what makes the annotation cheap where one struct is used by many bindings.
+- The fixes are `@padding(.none)`, which gives the host type's stride, and an explicit spelling of the natural layout, such as `@padding(.natural)`.
+- The diagnostic names the element, both strides and both fixes.
+- `buffer[float4]`, `buffer[float]` and every other builtin whose stride is its host type's size stay as they are.
