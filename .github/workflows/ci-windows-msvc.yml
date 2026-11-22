@@ -4,7 +4,7 @@ name: Windows MSVC (VS2022)
 # on the windows-2025 image (Visual Studio 2022). --toolset 14.44 pins the MSVC
 # toolset that VS 2022 ships, so dev.py selects it via vswhere + vcvars and fails
 # loudly if it is absent rather than silently using a different default. The
-# VS2026 toolset (14.51) is exercised by ci-windows-msvc-vs2026.yml.
+# VS2026 toolset (14.52) is exercised by ci-windows-msvc-vs2026.yml.
 # See docs/guides/ci.md.
 
 on:

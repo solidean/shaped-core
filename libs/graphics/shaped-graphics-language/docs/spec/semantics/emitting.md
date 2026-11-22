@@ -297,6 +297,16 @@ A binding that is not `@inline` is a group.
 * **EMIT-101** A call of a builtin that gives nothing is a statement as it stands, with no `_ =` in WGSL.
 * **EMIT-102** A builtin a target cannot write as one expression declares a helper function ahead of the entry point, once per text, and the call names it.
   HLSL's `GetDimensions` writes through out parameters, so `size` is an overload of `sgl_size` per texture type the entry point passes.
+* **EMIT-273** A level-of-detail query (CHK-535) is each target's own call, and WebGPU's is a helper EMIT-102 declares.
+
+| SGL | HLSL | MSL | WGSL | SPIR-V, DXIL |
+|---|---|---|---|---|
+| `t.lod(uv, smp)` | `t.CalculateLevelOfDetail(smp, uv)` | `t.calculate_clamped_lod(smp, uv)` | `sgl_lod_2d(t, uv)` | `OpImageQueryLod`'s x, `calculateLOD` clamped |
+| `t.lod_unclamped(uv, smp)` | `t.CalculateLevelOfDetailUnclamped(smp, uv)` | `t.calculate_unclamped_lod(smp, uv)` | `sgl_lod_unclamped_2d(t, uv)` | `OpImageQueryLod`'s y, `calculateLOD` unclamped |
+
+  An array's helper is `sgl_lod_2d_array` or `sgl_lod_unclamped_2d_array`, since WGSL has no overloads, and no target takes the layer.
+  The helper takes no sampler: it is `0.5 * log2(max(dot(dx, dx), dot(dy, dy)))`, `dx` and `dy` being `dpdx(uv)` and `dpdy(uv)` times the size of level 0.
+  `lod`'s clamps that to `0.0` and `textureNumLevels(t) - 1`.
 * **EMIT-103** WGSL text that takes a derivative opens with `diagnostic(off, derivative_uniformity);`, and text that enables `subgroups` with `diagnostic(off, subgroup_uniformity);`.
   The check pass has judged both already, by rules that reconverge after a loop where Tint's do not (CHK-284), so Tint's verdict would only refuse what the pass accepted.
   A barrier has no such switch in WGSL, which is why the pass judges a barrier by WGSL's rules.
@@ -911,6 +921,7 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
 |---|---|---|---|
 | `subgroup_all`, `subgroup_any` | `WaveActiveAllTrue`, `WaveActiveAnyTrue` | `subgroupAll`, `subgroupAny` | `simd_all`, `simd_any` |
 | `subgroup_ballot` | `WaveActiveBallot` | `subgroupBallot` | `simd_ballot` |
+| `subgroup_elect` | `WaveIsFirstLane` | `subgroupElect` | `simd_is_first` |
 | `subgroup_add`, `subgroup_mul` | `WaveActiveSum`, `WaveActiveProduct` | `subgroupAdd`, `subgroupMul` | `simd_sum`, `simd_product` |
 | `subgroup_min`, `subgroup_max` | `WaveActiveMin`, `WaveActiveMax` | `subgroupMin`, `subgroupMax` | `simd_min`, `simd_max` |
 | `subgroup_bit_and`, `subgroup_bit_or`, `subgroup_bit_xor` | `WaveActiveBitAnd`, `WaveActiveBitOr`, `WaveActiveBitXor` | `subgroupAnd`, `subgroupOr`, `subgroupXor` | `simd_and`, `simd_or`, `simd_xor` |
@@ -921,6 +932,7 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
 | `subgroup_shuffle_xor`, `_up`, `_down` | `WaveReadLaneAt` of the lane `WaveGetLaneIndex()` gives | `subgroupShuffleXor`, `subgroupShuffleUp`, `subgroupShuffleDown` | `simd_shuffle_xor`, `simd_shuffle_up`, `simd_shuffle_down` |
 | `quad_swap_x`, `quad_swap_y`, `quad_swap_diagonal` | `QuadReadAcrossX`, `QuadReadAcrossY`, `QuadReadAcrossDiagonal` | `quadSwapX`, `quadSwapY`, `quadSwapDiagonal` | `quad_shuffle_xor` by 1, 2 and 3 |
 | `quad_broadcast` | `QuadReadLaneAt` | `quadBroadcast` | `quad_broadcast` |
+| `quad_any`, `quad_all` | dx12 `sgl_quad_any` and `sgl_quad_all`, the bit or-ed or and-ed over `QuadReadAcrossX`, `Y` and `Diagonal`; vulkan `QuadAny` and `QuadAll` | none: `target-lacks-feature` | `quad_any`, `quad_all` |
 
 ## Layout
 
@@ -939,6 +951,7 @@ The C++ struct a package generates is that layout byte for byte, padding include
   No vector crosses a 16-byte row, so a constant buffer read by rows reads each one from one.
 * **EMIT-111** A buffer's element is placed by EMIT-110, and the buffer strides by the element's size.
   A builtin element's size is rounded up to its alignment too, so `buffer[float3]` strides by 16, and CHK-381 holds every stride to whole 4-byte words.
+  Such a buffer states that it means it, `@padding(.natural)`, wherever its stride is not its host type's (CHK-532).
   The host writes such an element as `slib::gpu_padded<tg::vec3f, 16>`.
 * **EMIT-112** Each target is made to follow the rule ([why](why/emitting.md#emit-112)).
   WGSL's storage rule is this one, and its uniform rule too, so WGSL writes every root as it is.

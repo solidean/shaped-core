@@ -337,6 +337,39 @@ f32 lod_of(call const& c,
     return lod;
 }
 
+/// EVAL-149: the level a `sample` would pick from the quad's `gradients`, before the sampler's bias and clamps.
+/// `lod` clamps it to the texture's levels, `lod_unclamped` does not; a run of one lane has no gradients.
+void level_of_detail(call const& c, texels const& t, coordinate_gradients const* gradients, cc::vector<scalar>& out)
+{
+    constexpr auto lowest = -3.4028235e38f;
+    auto lod = lowest;
+    if (gradients != nullptr)
+    {
+        f32 const extent[3] = {f32(t.width(0)), f32(t.height(0)), f32(t.depth(0))};
+        auto const squared = [&](cc::span<scalar const> g)
+        {
+            auto sum = 0.0f;
+            for (auto i = 0; i < g.size() && i < 3; ++i)
+            {
+                auto const d = g[i].as_float() * extent[i];
+                sum += d * d;
+            }
+            return sum;
+        };
+        auto const x = squared(gradients->x);
+        auto const y = squared(gradients->y);
+        auto const rho = x > y ? x : y;
+        if (rho > 0.0f)
+            lod = f32(0.5 * builtins::impl::soft_log(f64(rho)) / 0.693147180559945309417232121458176568);
+    }
+    if (c.what == op::lod)
+    {
+        auto const top = f32(t.t.levels - 1);
+        lod = lod < 0.0f ? 0.0f : lod > top ? top : lod;
+    }
+    out.push_back(scalar::of(lod));
+}
+
 texture_failure sampled(call const& c,
                         texels const& t,
                         sampler_state const& s,
@@ -489,6 +522,10 @@ impl::texture_failure impl::run_texture_call(call const& c,
         stored = true;
         return {};
     }
+    case op::lod:
+    case op::lod_unclamped:
+        level_of_detail(c, t, gradients, out);
+        return {};
     default:
         if (sampler == nullptr)
             return malformed("a sample without its sampler");

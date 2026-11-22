@@ -736,6 +736,17 @@ value_ref lowering::texture_call(flat_call const& c, builtins::function_record c
         auto const reference = expr(arguments[layout.first]);
         return add(ir::op::image_gather_compare, texels, {with_image(sampler), at, reference});
     }
+    case op::lod:
+    case op::lod_unclamped:
+    {
+        auto const sampler = sampler_handle();
+        if (!is_valid(sampler))
+            return value_ref::none;
+        // an array's level of detail takes no layer, which its layout leaves out
+        auto const at = coordinate(expr(arguments[1]));
+        auto const both = add(ir::op::image_query_lod, vector_type(_float, 2), {with_image(sampler), at});
+        return extracted(both, _float, shape.what == op::lod ? 0 : 1);
+    }
     case op::image_load:
         return narrowed(add(ir::op::image_read, texels, {image, coordinate(expr(arguments[1]))}));
     case op::image_store:
@@ -799,6 +810,9 @@ value_ref lowering::subgroup_call(flat_call const& c, builtins::function_record 
     using builtins::subgroup_op;
     auto const arguments = cc::vector<flat_expr_id>::create_copy_of(cc::span<flat_expr_id const>(_e.at(c.arguments)));
     auto const what = subgroup_op(record.write.data);
+    // the one operation that takes no value
+    if (what == subgroup_op::elect)
+        return add(op::subgroup, result, cc::span<u32 const>(), u8(subgroup::elect));
     auto const value = expr(arguments[0]);
     auto const type = _out.type_of(value);
     auto const scalar = _out.at(scalar_of(type));
@@ -865,6 +879,12 @@ value_ref lowering::subgroup_call(flat_call const& c, builtins::function_record 
         return with(subgroup::quad_swap, uint_constant(2));
     case subgroup_op::quad_broadcast:
         return with(subgroup::quad_broadcast, expr(arguments[1]));
+    case subgroup_op::quad_any:
+        return add(op::subgroup, result, {value}, u8(subgroup::quad_any));
+    case subgroup_op::quad_all:
+        return add(op::subgroup, result, {value}, u8(subgroup::quad_all));
+    case subgroup_op::elect:
+        break;
     }
     return value_ref::none;
 }

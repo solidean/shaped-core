@@ -178,6 +178,8 @@ cc::string_view sgl::to_string(diagnostic_kind kind)
         return "invalid-entry-point";
     case diagnostic_kind::wrong_kind_of_name:
         return "wrong-kind-of-name";
+    case diagnostic_kind::padding_not_stated:
+        return "padding-not-stated";
     case diagnostic_kind::missing_type:
         return "missing-type";
     case diagnostic_kind::invalid_attribute_arguments:
@@ -453,6 +455,8 @@ cc::string_view sgl::summary_of(diagnostic_kind kind)
         return "an entry point that breaks a rule entry points follow";
     case diagnostic_kind::wrong_kind_of_name:
         return "a name that stands for something this position does not take";
+    case diagnostic_kind::padding_not_stated:
+        return "a buffer whose elements GPU memory pads past what a host's type takes, with no @padding saying which";
     case diagnostic_kind::missing_type:
         return "a field, a binding member or a parameter without a type";
     case diagnostic_kind::invalid_attribute_arguments:
@@ -639,6 +643,7 @@ sgl::severity sgl::default_severity_of(diagnostic_kind kind)
     case diagnostic_kind::duplicate_declaration:
     case diagnostic_kind::invalid_entry_point:
     case diagnostic_kind::wrong_kind_of_name:
+    case diagnostic_kind::padding_not_stated:
     case diagnostic_kind::missing_type:
     case diagnostic_kind::invalid_attribute_arguments:
     case diagnostic_kind::missing_return:

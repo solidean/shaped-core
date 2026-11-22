@@ -613,11 +613,26 @@ def open_issues_naming_test(test: str, *, cwd: Path) -> list[str]:
     Stricter than `known`, since a caller acts on the answer unread: a ref, never a mention in the text, and the ref as a
     glob over the whole name or over an invoked test's own, never one name merely containing the other.
     """
-    names = {test.lower(), test.rsplit(" / ", 1)[-1].lower()}
+    return open_issues_naming_tests([test], cwd=cwd)[test]
+
+
+def open_issues_naming_tests(tests: list[str], *, cwd: Path) -> dict[str, list[str]]:
+    """`open_issues_naming_test` for each of `tests`, reading the issues once: each read lists and parses every issue file.
+
+    A binary that ends without a report reds every case it holds, so a caller asks this of a thousand tests at once.
+    """
     ws = Workspace(cwd)
-    return [issue.qid for repo in ws.default for issue in repo.issues()
-            if not issue.closed and any(kind == "test" and any(fnmatch.fnmatchcase(n, value.lower()) for n in names)
-                                        for kind, value in issue.refs())]
+    globs = [(issue.qid, value.lower()) for repo in ws.default for issue in repo.issues() if not issue.closed
+             for kind, value in issue.refs() if kind == "test"]
+    out: dict[str, list[str]] = {}
+    for test in tests:
+        names = {test.lower(), test.rsplit(" / ", 1)[-1].lower()}
+        qids: list[str] = []
+        for qid, glob in globs:
+            if qid not in qids and any(fnmatch.fnmatchcase(n, glob) for n in names):
+                qids.append(qid)
+        out[test] = qids
+    return out
 
 
 def cmd_known(ws: Workspace, args: argparse.Namespace) -> int:

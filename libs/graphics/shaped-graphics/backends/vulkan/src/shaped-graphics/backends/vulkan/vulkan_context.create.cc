@@ -519,6 +519,8 @@ struct optional_shader_features
     VkBool32 subgroup_size_control = VK_FALSE;
     /// SPIR-V's `Layer` written by a vertex shader, which DXC declares as `ShaderLayer`.
     VkBool32 shader_output_layer = VK_FALSE;
+    /// SPIR-V's `ViewportIndex` written by a vertex shader, which DXC declares as `ShaderViewportIndex`.
+    VkBool32 shader_output_viewport_index = VK_FALSE;
     /// One draw rendering several views through a rendering's view mask, and SPIR-V's `ViewIndex` that reads which.
     VkBool32 multiview = VK_FALSE;
     /// DXC writes a compute stage's quad operations in a derivative group, linear along one axis or of 2x2 threads.
@@ -596,6 +598,7 @@ optional_shader_features query_optional_shader_features(VkPhysicalDevice dev)
         .subgroup_extended_types = vk12.shaderSubgroupExtendedTypes,
         .subgroup_size_control = vk13.subgroupSizeControl,
         .shader_output_layer = vk12.shaderOutputLayer,
+        .shader_output_viewport_index = vk12.shaderOutputViewportIndex,
         .multiview = vk11.multiview,
         .has_compute_derivatives = has_compute_derivatives,
         .compute_derivative_group_linear = linear,
@@ -934,6 +937,33 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     if (float_atomic_add_supported)
         device_extensions.push_back(VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME);
 
+    // SGL's quad votes, whose derivatives are their quads' (QuadDerivativesKHR), as DXC writes HLSL's QuadAny
+    auto quad_control_supported = false;
+#if defined(VK_KHR_shader_quad_control) && defined(VK_KHR_shader_maximal_reconvergence)
+    char const* const quad_control_names[]
+        = {VK_KHR_SHADER_QUAD_CONTROL_EXTENSION_NAME, VK_KHR_SHADER_MAXIMAL_RECONVERGENCE_EXTENSION_NAME};
+    if (device_extensions_available(best_device, quad_control_names))
+    {
+        auto reconvergence_query = VkPhysicalDeviceShaderMaximalReconvergenceFeaturesKHR{
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_MAXIMAL_RECONVERGENCE_FEATURES_KHR,
+        };
+        auto quad_query = VkPhysicalDeviceShaderQuadControlFeaturesKHR{
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_QUAD_CONTROL_FEATURES_KHR,
+            .pNext = &reconvergence_query,
+        };
+        auto features
+            = VkPhysicalDeviceFeatures2{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &quad_query};
+        vkGetPhysicalDeviceFeatures2(best_device, &features);
+        quad_control_supported
+            = quad_query.shaderQuadControl == VK_TRUE && reconvergence_query.shaderMaximalReconvergence == VK_TRUE;
+    }
+    if (quad_control_supported)
+    {
+        device_extensions.push_back(VK_KHR_SHADER_QUAD_CONTROL_EXTENSION_NAME);
+        device_extensions.push_back(VK_KHR_SHADER_MAXIMAL_RECONVERGENCE_EXTENSION_NAME);
+    }
+#endif
+
     // The mesh and task stages, which sg's feature grants together.
     char const* const mesh_names[] = {VK_EXT_MESH_SHADER_EXTENSION_NAME};
     auto mesh_shader_supported = false;
@@ -1103,6 +1133,7 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
         .hostQueryReset = VK_TRUE,
         .timelineSemaphore = VK_TRUE,
         .bufferDeviceAddress = VK_TRUE,
+        .shaderOutputViewportIndex = shader_features.shader_output_viewport_index,
         .shaderOutputLayer = shader_features.shader_output_layer,
     };
     // One create-info per family: the graphics one always, plus the transfer family when it is a different one.
@@ -1162,6 +1193,7 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
         .features = {.imageCubeArray = supported.imageCubeArray,
                      .independentBlend = supported.independentBlend,
                      .geometryShader = supported.geometryShader,
+                     .multiViewport = supported.multiViewport,
                      .tessellationShader = supported.tessellationShader,
                      .sampleRateShading = supported.sampleRateShading,
                      .drawIndirectFirstInstance = supported.drawIndirectFirstInstance,
@@ -1188,9 +1220,27 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
         .micromap = VK_TRUE,
     };
 
+    void* const after_quad_control
+        = micromap_supported ? static_cast<void*>(&micromap_features) : micromap_features.pNext;
+#if defined(VK_KHR_shader_quad_control) && defined(VK_KHR_shader_maximal_reconvergence)
+    auto quad_control_features = VkPhysicalDeviceShaderQuadControlFeaturesKHR{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_QUAD_CONTROL_FEATURES_KHR,
+        .pNext = after_quad_control,
+        .shaderQuadControl = VK_TRUE,
+    };
+    auto reconvergence_features = VkPhysicalDeviceShaderMaximalReconvergenceFeaturesKHR{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_MAXIMAL_RECONVERGENCE_FEATURES_KHR,
+        .pNext = &quad_control_features,
+        .shaderMaximalReconvergence = VK_TRUE,
+    };
+    void* const after_float_atomic
+        = quad_control_supported ? static_cast<void*>(&reconvergence_features) : after_quad_control;
+#else
+    void* const after_float_atomic = after_quad_control;
+#endif
     auto float_atomic_features = VkPhysicalDeviceShaderAtomicFloatFeaturesEXT{
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT_FEATURES_EXT,
-        .pNext = micromap_supported ? static_cast<void*>(&micromap_features) : micromap_features.pNext,
+        .pNext = after_float_atomic,
         .shaderBufferFloat32Atomics = VK_TRUE,
         .shaderBufferFloat32AtomicAdd = VK_TRUE,
         .shaderSharedFloat32Atomics = VK_TRUE,
@@ -1360,9 +1410,11 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     ctx->_unbounded_binding_arrays = shader_features.variable_descriptor_count == VK_TRUE;
     ctx->_subgroups = shader_features.subgroups;
     ctx->_vertex_layer_output = shader_features.shader_output_layer == VK_TRUE;
+    ctx->_multi_viewport = supported.multiViewport == VK_TRUE && shader_features.shader_output_viewport_index == VK_TRUE;
     ctx->_view_instancing = shader_features.multiview == VK_TRUE;
     ctx->_vertex_pipeline_stores = supported.vertexPipelineStoresAndAtomics == VK_TRUE;
     ctx->_float_atomic_add = float_atomic_add_supported;
+    ctx->_quad_control = quad_control_supported;
     ctx->_shader_execution_reordering = raytracing_supported && reorder_supported;
     if (statistics_supported)
     {

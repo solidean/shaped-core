@@ -135,6 +135,7 @@ constexpr cc::string_view k_names[] = {
     "image_fetch",
     "image_gather",
     "image_gather_compare",
+    "image_query_lod",
     "image_read",
     "image_write",
     "image_size",

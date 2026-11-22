@@ -31,7 +31,7 @@ TEST("sgl check - a buffer member and its mut form are types")
     CHECK(reports_for(listing("    scale: float\n"
                               "    src: buffer[float]\n"
                               "    dst: mut buffer[float]\n"
-                              "    pos: buffer[float3]\n"))
+                              "    @padding(.natural) pos: buffer[float3]\n"))
           == "");
 }
 
@@ -198,7 +198,9 @@ TEST("sgl check - a texture, an image or a sampler is handed to a builtin and is
                                        "    work.dst.store(int2(0, 0), c + work.ro.load(int2(0, 0)))\n"))
           == "");
 
-    CHECK(reports_for(listing(members, "    let t = work.src\n")).contains("texture_2d[float4] as a value"));
+    // CHK-536: a let names the member, which every use of it reads
+    CHECK(reports_for(listing(members, "    let t = work.src\n    let c = t.load(int2(0, 0))\n")) == "");
+    CHECK(reports_for(listing(members, "    let c = [work.src]\n")).contains("texture_2d[float4] as a value"));
     // CHK-207: a read-only image cannot be stored to, and a write-only one cannot be loaded.
     CHECK(reports_for(listing(members, "    work.ro.store(int2(0, 0), float4(1.0, 1.0, 1.0, 1.0))\n"))
               .contains("no-matching-overload"));
@@ -215,7 +217,9 @@ TEST("sgl check - a file-scope sampler is handed to a builtin, and filters as a 
     constexpr auto texture = "    t: texture_2d[float4]\n";
 
     CHECK(with(file_sampler, texture, "    let c = work.t.sample(float2(0.5, 0.5), edge, level = 0.0)\n") == "");
-    CHECK(with(file_sampler, texture, "    let s = edge\n").contains("unsupported-yet user:[edge] a sampler as a value"));
+    CHECK(with(file_sampler, texture, "    let s = edge\n    let c = work.t.sample(float2(0.5, 0.5), s, level = 0.0)\n")
+          == "");
+    CHECK(with(file_sampler, texture, "    let c = [edge]\n").contains("unsupported-yet user:[edge] a sampler as a value"));
     // CHK-210: nearest in every filter is a sampler an @unfilterable texture takes, and a linear one is refused
     constexpr auto unfilterable = "    @unfilterable t: texture_2d[float4]\n";
     CHECK(with(file_sampler, unfilterable, "    let c = work.t.sample(float2(0.5, 0.5), edge, level = 0.0)\n") == "");
@@ -279,11 +283,15 @@ TEST("sgl check - a buffer is a resource and never a value")
     constexpr auto members = "    src: buffer[float]\n    dst: mut buffer[float]\n";
     constexpr auto value = "a buffer as a value";
 
-    // Read through a subscript, or handed to a parameter that stands for it (CHK-366): not bound to a local, not returned.
-    CHECK(reports_for(listing(members, "    let b = work.src\n")).contains(value));
+    // Read through a subscript, handed to a parameter that stands for it (CHK-366) or named by a let (CHK-536).
+    CHECK(reports_for(listing(members, "    let b = work.src\n    work.dst[0] = b[0]\n")) == "");
+    CHECK(reports_for(listing(members, "    let b = if work.src[0] > 0.0 => work.src else work.src\n"))
+              .contains("buffer[float] chosen at run time, where a let names one binding member"));
+    CHECK(reports_for(listing(members, "    let b = work.src\n    b = work.src\n")).contains("not-assignable"));
+    CHECK(reports_for(listing(members, "    let b = [work.src]\n")).contains(value));
     CHECK(!reports_for(cc::string("fun first(b: buffer[float]) -> float => b[0]\n\n") + listing(members)).contains(value));
     CHECK(reports_for(cc::string("fun pass(x: float) -> buffer[float] => x\n\n") + listing(members)).contains(value));
-    CHECK(reports_for(listing(members, "    let b : buffer[float] = work.src\n")).contains(value));
+    CHECK(reports_for(listing(members, "    let b : buffer[float] = work.src\n    work.dst[0] = b[0]\n")) == "");
 
     // Nor a field of a struct, which no target can hold; relaxing that needs a rule for hoisting it (the spec's bindings file).
     CHECK(reports_for(cc::string("struct view:\n    items: buffer[float]\n\n") + listing(members)).contains(value));
@@ -405,14 +413,43 @@ TEST("sgl check - a @workgroup binding holds values a compute stage shares, with
     CHECK(raster.contains("tile is @workgroup memory, which only a compute, a task and a mesh stage have"));
 }
 
+TEST("sgl check - a buffer of builtins padded past its host type states its @padding (CHK-532)")
+{
+    auto const refused = [](cc::string_view member, cc::string_view detail)
+    {
+        auto const reported = reports_for(listing(member));
+        CHECK(reported.contains("padding-not-stated")).dump("member", member);
+        CHECK(reported.contains(detail)).dump("member", member).dump("reported", reported);
+    };
+    refused("    dirs: mut buffer[float3]\n",
+            "buffer[float3] strides by 16 bytes, where the host's float3 takes 12: `@padding(.natural)` keeps 16, and "
+            "`@padding(.none)` strides by 12");
+    refused("    xfs: buffer[mat3]\n", "buffer[mat3] strides by 48 bytes, where the host's mat3 takes 36");
+    refused("    ns: buffer[vec3]\n", "buffer[vec3] strides by 16 bytes");
+    // a binding array of such buffers is each of them
+    refused("    many: buffer[float3][2]\n", "buffer[float3] strides by 16 bytes");
+
+    // either layout, stated on the member or on the binding, is the author's choice
+    CHECK(reports_for(listing("    @padding(.natural) dirs: mut buffer[float3]\n")) == "");
+    CHECK(reports_for(listing("    @padding(.none) dirs: mut buffer[float3]\n")) == "");
+    CHECK(reports_for(cc::string("@padding(.natural)\n") + listing("    dirs: mut buffer[float3]\n")) == "");
+    CHECK(reports_for(cc::string("@padding(.none)\n") + listing("    dirs: mut buffer[float3]\n")) == "");
+
+    // a builtin its host type places alike needs nothing, nor does a struct, whose generated type the host writes
+    CHECK(reports_for(listing("    a: buffer[float4]\n    b: buffer[float2]\n    c: buffer[float]\n    d: "
+                              "buffer[mat4]\n"))
+          == "");
+    CHECK(reports_for("struct p:\n    v: float3\n\nbinding work:\n    ps: buffer[p]\n") == "");
+}
+
 TEST("sgl check - @padding(.none) on a binding or a buffer member packs GPU memory as C++ does (CHK-369)")
 {
     CHECK(reports_for(cc::string("@padding(.none)\n") + listing("    scale: float\n    dst: mut buffer[float]\n")) == "");
     CHECK(reports_for("@padding(.none) @inline binding look:\n    scale: float\n") == "");
     CHECK(reports_for(listing("    scale: float\n    @padding(.none) dst: mut buffer[float3]\n")) == "");
 
-    constexpr auto expected
-        = "@padding takes where GPU memory leaves room: `@padding(.none)` or `@padding(.every_element)`";
+    constexpr auto expected = "@padding takes where GPU memory leaves room: `@padding(.natural)`, `@padding(.none)` or "
+                              "`@padding(.every_element)`";
     for (auto const attribute : {"@padding", "@padding(.std430)", "@padding(none)", "@padding(.none, .none)"})
     {
         auto const reported = reports_for(cc::format("{}\n{}", attribute, listing("    scale: float\n")));
@@ -547,7 +584,7 @@ TEST("sgl check - a mat3 stands in GPU memory, and crosses a stage link alone")
     CHECK(reports_for(listing("    basis: mat3\n")) == "");
     CHECK(with_nested("    o: outer\n") == "");
     CHECK(reports_for(cc::format("{}@inline binding pushed:\n    o: outer\n", nested)) == "");
-    CHECK(reports_for(listing("    raw: mut buffer[mat3]\n")) == "");
+    CHECK(reports_for(listing("    @padding(.natural) raw: mut buffer[mat3]\n")) == "");
     CHECK(with_nested("    items: buffer[outer]\n") == "");
     CHECK(reports_for(listing("    @padding(.none) raw: mut buffer[mat3]\n")) == "");
     CHECK(reports_for("@workgroup binding tile:\n    rows: mat3[4]\n") == "");

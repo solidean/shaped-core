@@ -343,6 +343,9 @@ struct sgl::builtins::function_record
     bool agrees_in_subgroup = false;
     /// A subgroup operation within a quad, which a compute stage forms along one axis (CHK-380).
     bool is_quad_operation = false;
+    /// Of those, one every invocation of the quad agrees on, its helpers included: `quad_any` and `quad_all` (CHK-533).
+    /// A branch on it keeps a derivative in uniform control flow, since each quad goes one way whole.
+    bool agrees_in_quad = false;
     /// `workgroup_uniform_load`: a barrier whose argument is workgroup memory and whose result is uniform (CHK-374).
     bool is_uniform_load = false;
     /// Gives what differs between the invocations of a stage whatever its arguments are: a ray-tracing stage's launch

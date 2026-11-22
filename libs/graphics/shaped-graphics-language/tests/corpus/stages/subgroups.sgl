@@ -33,6 +33,15 @@ const wave = 64
         workgroup_barrier()
         work.output[li] = workgroup_uniform_load(spd.total)
 
+// a branch on what the subgroup agrees on keeps it whole, so a subgroup operation stands in it (CHK-537), and the
+// elected invocation adds the sum once
+@compute(64) fun count_positive(@local_thread_index li: int){work}:
+    let v = work.input[li]
+    if subgroup_any(v > 0.0):
+        let positive = subgroup_add(if v > 0.0 => 1u else 0u)
+        if subgroup_elect():
+            work.counter[0].add(positive)
+
 struct varyings:
     @position position: hpos4
     uv: float2

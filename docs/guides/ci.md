@@ -28,9 +28,9 @@ One workflow per platform/compiler, so each gets its own status badge in the
 |-----------------------------------------------------------------------|------------------|------------------------------------------------------------|
 | [ci-linux-clang.yml](../../.github/workflows/ci-linux-clang.yml)      | `ubuntu-26.04`   | `debug-linux-clang`, `relwithdebinfo-linux-clang`, `release-linux-clang` (deep matrix), `--toolset 21` |
 | [ci-linux-gcc.yml](../../.github/workflows/ci-linux-gcc.yml)          | `ubuntu-26.04`   | `relwithdebinfo-linux-gcc`, `--toolset 14`                  |
-| [ci-windows-clang.yml](../../.github/workflows/ci-windows-clang.yml)  | `windows-latest` | `relwithdebinfo-clang`, `--toolset 20` (assert clang-cl 20) |
+| [ci-windows-clang.yml](../../.github/workflows/ci-windows-clang.yml)  | `windows-latest` | `relwithdebinfo-clang`, `--toolset 22` (assert clang-cl 22) |
 | [ci-windows-msvc.yml](../../.github/workflows/ci-windows-msvc.yml)    | `windows-2025`   | `relwithdebinfo-msvc`, and `v2-avx-msvc` (`SC_X64_LEVEL=v2-avx`) as a second job, `--toolset 14.44` (VS 2022) |
-| [ci-windows-msvc-vs2026.yml](../../.github/workflows/ci-windows-msvc-vs2026.yml) | `windows-2025-vs2026` | `relwithdebinfo-msvc`, `--toolset 14.51` (VS 2026) |
+| [ci-windows-msvc-vs2026.yml](../../.github/workflows/ci-windows-msvc-vs2026.yml) | `windows-2025-vs2026` | `relwithdebinfo-msvc`, `--toolset 14.52` (VS 2026) |
 | [ci-windows-arm-msvc.yml](../../.github/workflows/ci-windows-arm-msvc.yml) | `windows-11-arm` | `relwithdebinfo-arm64-windows-msvc`, `--toolset 14.44` (VS 2022, native arm64) |
 | [ci-linux-arm-clang.yml](../../.github/workflows/ci-linux-arm-clang.yml) | `ubuntu-26.04-arm` | `relwithdebinfo-arm64-linux-clang`, `--toolset 21` (native arm64) |
 | [ci-macos-clang.yml](../../.github/workflows/ci-macos-clang.yml)      | `macos-latest`   | `macos-arm-llvm-relwithdebinfo`, `--toolset 22` (assert the `llvm@22` formula) |
@@ -117,12 +117,14 @@ Per-platform specifics:
 - **Windows MSVC** runs **two** jobs, one per toolset, each pinning it with
   `--toolset` so dev.py selects it via `vswhere` + `vcvars`: VS 2022's **14.44**
   on `windows-2025` ([ci-windows-msvc.yml](../../.github/workflows/ci-windows-msvc.yml)),
-  and VS 2026's **14.51** on `windows-2025-vs2026`
+  and VS 2026's **14.52** on `windows-2025-vs2026`
   ([ci-windows-msvc-vs2026.yml](../../.github/workflows/ci-windows-msvc-vs2026.yml)).
   `--toolset` searches prerelease installs too, so a preview VS is reachable.
-- **Windows clang** (`windows-latest`) uses the preinstalled **LLVM (clang 20)** `clang-cl`, with `dev.py` injecting the MSVC environment via `vswhere`.
-  `clang-cl` is a single unversioned binary with no `clang++-N` to swap to, so `--toolset 20` here *asserts* it is clang 20 rather than selecting it — a hard error if the base image moves on.
-  Riding clang 20, a touch behind the 21 target, is fine because the clang-format and clang-tidy gates run on Linux clang 21, so Windows clang only needs to *compile* clean.
+- **Windows clang** (`windows-latest`) uses `clang-cl`, with `dev.py` injecting the image's default MSVC environment via `vswhere`.
+  **It installs a pinned LLVM 22.1.8 from Chocolatey, a temporary workaround.**
+  The image's MSVC 14.52 STL refuses anything below Clang 22 (`STL1000`), while the image still ships LLVM 20.1.8.
+  Once the image ships clang-cl 22 or newer, the job goes back to the preinstalled LLVM, as every other job takes the image's toolchain.
+  `clang-cl` is a single unversioned binary with no `clang++-N` to swap to, so `--toolset 22` here *asserts* it is clang 22 rather than selecting it — a hard error if the install moves on.
 - **macOS** (`macos-latest`, arm64) needs Homebrew LLVM: the `macos-arm-llvm-*` presets point `CMAKE_CXX_COMPILER` at `/opt/homebrew/opt/llvm@22/bin/clang++` and link Homebrew `libc++`.
   So the job runs `brew install llvm@22 ninja` — CMake ships on the runner, and this is a distinct toolchain from the image's system Apple clang.
   **The formula is versioned on purpose.**

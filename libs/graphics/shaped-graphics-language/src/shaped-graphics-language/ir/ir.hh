@@ -273,6 +273,9 @@ enum class sgl::ir::subgroup : sgl::u8
     bit_xor,
     quad_broadcast,
     quad_swap,
+    quad_any,
+    quad_all,
+    elect,
 };
 
 /// How a subgroup reduction folds: over the subgroup, up to and including this invocation, or up to it alone.
@@ -502,6 +505,9 @@ enum class sgl::ir::op : sgl::u16
     image_gather,
     /// Operands: sampled image, coordinate, reference.
     image_gather_compare,
+    /// Operands: sampled image, coordinate, without a layer; gives a float2 of the clamped level and the unclamped one.
+    /// A pixel stage's alone, as `sample_implicit` is.
+    image_query_lod,
     image_read,
     /// Operands: image, coordinate, texel.
     image_write,
@@ -650,6 +656,8 @@ enum class sgl::ir::built_in : sgl::u8
     position,
     /// `@layer`.
     layer,
+    /// `@viewport_index`.
+    viewport_index,
     vertex_index,
     instance_index,
     first_instance,

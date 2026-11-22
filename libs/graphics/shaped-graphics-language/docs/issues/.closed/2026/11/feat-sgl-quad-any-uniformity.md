@@ -4,6 +4,8 @@ priority: next
 tags: [porting-feedback]
 refs:
   - file: libs/graphics/shaped-graphics-language/docs/spec/incubator/uniformity.md
+closed: 2026-11-22
+resolution: fixed
 ---
 
 # A branch on quad_any keeps a derivative in uniform control flow

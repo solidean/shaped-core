@@ -421,6 +421,11 @@ struct flattener
     /// value a local could hold, and it stands wherever it is named, since naming one has no effect.
     [[nodiscard]] bool is_resource_member(flat_expr_id id) const;
 
+    /// What stands wherever a name for the resource `value` is read: the member itself, or the element of a binding
+    /// array at its index evaluated once, here (CHK-366, CHK-536).
+    /// None where `value` is neither, which no target could hold in a local.
+    flat_expr_id resource_stand_in(flat_expr_id value);
+
     /// A value that is read more than once and evaluated once, where it stands.
     /// `first` is what stands in place of the value, and every later read is `again(later, …)`.
     struct evaluated_once

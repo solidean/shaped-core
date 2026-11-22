@@ -42,6 +42,9 @@ include(BuildConfig)
 # on SC_BUILD_TOOLS.
 option(SC_BUILD_TESTS "Build the per-library *-test executables" ${PROJECT_IS_TOP_LEVEL})
 option(SC_BUILD_TOOLS "Build the developer tools in tools/" ${PROJECT_IS_TOP_LEVEL})
+# shaped-linter alone, which `dev.py lint shaped` builds: a consuming project wants it without shaped-core's other tools,
+# some of which carry tests of their own that its `dev.py test` would then find.
+option(SC_BUILD_LINTER "Build shaped-linter" ${SC_BUILD_TOOLS})
 
 # Examples are built by every normal and CI build and executed by nobody automatically — building them is
 # what keeps them compiling against the API they demonstrate. `dev.py example <match>` runs exactly one.
@@ -396,8 +399,8 @@ endif()
 
 # shaped-linter: a self-contained C++ custom linter (its own lexer + parser, no LLVM). Cross-platform,
 # so it gates on SC_BUILD_TOOLS alone; clean-core and nexus are already added above.
-# A subset adds it too: it is what `dev.py lint shaped` runs in a consuming project, and SC_BUILD_TOOLS puts nexus in every subset.
-if(SC_BUILD_TOOLS)
+# A subset adds it too: it is what `dev.py lint shaped` runs in a consuming project, and SC_BUILD_LINTER puts nexus in every subset.
+if(SC_BUILD_TOOLS OR SC_BUILD_LINTER)
     add_subdirectory(tools/shaped-linter)
 endif()
 

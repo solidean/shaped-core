@@ -260,8 +260,8 @@ def _settle_at_base(ctx: Context, preset, proof: build_server.Proof) -> tuple[bo
     from tools.issues import issues as tracker
 
     root = getattr(ctx, "root", None)
-    known = {(r["binary"], r["test"]): qids for r in red
-             if root is not None and (qids := tracker.open_issues_naming_test(r["test"], cwd=root))}
+    naming = tracker.open_issues_naming_tests([r["test"] for r in red], cwd=root) if root is not None and red else {}
+    known = {(r["binary"], r["test"]): qids for r in red if (qids := naming.get(r["test"]))}
     settle = [r for r in red if r.get("judged") in _SETTLED_AT_BASE and (r["binary"], r["test"]) not in known]
     at_base: dict[tuple[str, str], bool | None] = {}
     base = (report.get("delta") or {}).get("base")

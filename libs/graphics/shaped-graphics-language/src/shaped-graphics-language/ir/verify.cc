@@ -196,6 +196,7 @@ constexpr shape k_shapes[] = {
     shape::image_access,        // image_fetch
     shape::image_access,        // image_gather
     shape::image_access,        // image_gather_compare
+    shape::image_access,        // image_query_lod
     shape::image_access,        // image_read
     shape::image_write,         // image_write
     shape::image_access,        // image_size

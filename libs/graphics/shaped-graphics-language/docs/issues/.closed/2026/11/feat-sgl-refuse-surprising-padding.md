@@ -5,8 +5,8 @@ tags: [porting-feedback]
 refs:
   - file: libs/graphics/shaped-graphics-language/docs/spec/semantics/emitting.md
   - file: libs/graphics/shaped-graphics-language/docs/spec/semantics/checking.md
-claimed-by: Claude (for Philip Trettner)
-claimed-at: 2026-11-22T12:09Z
+closed: 2026-11-22
+resolution: fixed
 ---
 
 # A buffer of a builtin padded past its host type is refused until it says so

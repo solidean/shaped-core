@@ -95,6 +95,9 @@ constexpr stated k_stated[] = {
     {"add", none},
     {"exchange", none},
     {"workgroup_uniform_load", none},
+    // what the quad's derivatives of the coordinate give, and not the coordinate
+    {"lod", none},
+    {"lod_unclamped", none},
     // a rule of the differentiator's own, past the arithmetic
     {"determinant", rule},
     {"refract", rule},

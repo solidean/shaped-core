@@ -51,6 +51,7 @@ constexpr built_in_number k_built_ins[] = {
     {built_in::primitive_id, 7},
     {built_in::view_index, 4440},
     {built_in::layer, 9},
+    {built_in::viewport_index, 10},
     {built_in::depth, 22},
     {built_in::depth_greater_equal, 22},
     {built_in::depth_less_equal, 22},
@@ -104,6 +105,8 @@ constexpr u32 k_model_task = 5364;
 constexpr u32 k_model_mesh = 5365;
 constexpr u32 k_mode_origin_upper_left = 7;
 constexpr u32 k_mode_depth_replacing = 12;
+constexpr u32 k_mode_quad_derivatives = 5088;
+constexpr u32 k_mode_maximally_reconverges = 6023;
 constexpr u32 k_mode_depth_greater = 14;
 constexpr u32 k_mode_depth_less = 15;
 constexpr u32 k_mode_local_size = 17;
@@ -473,6 +476,10 @@ void writer::write_stage_elements()
                 if (e.system == built_in::layer && _p.stage != check::stage::mesh)
                     require(_p.stage == check::stage::pixel || _p.stage == check::stage::geometry ? spv::Geometry
                                                                                                   : spv::ShaderLayer);
+                if (e.system == built_in::viewport_index && _p.stage != check::stage::mesh)
+                    require(_p.stage == check::stage::pixel || _p.stage == check::stage::geometry
+                                ? spv::MultiViewport
+                                : spv::ShaderViewportIndex);
             }
         if (e.system == built_in::none && e.location >= 0)
             emit(_annotations, spv::Decorate, {id, spv::Location, u32(e.location)});
@@ -694,6 +701,13 @@ void writer::write_entry()
     if (_p.stage == check::stage::pixel)
     {
         emit(_modes, spv::ExecutionMode, {_function, k_mode_origin_upper_left});
+        // CHK-533: as DXC states it for HLSL's QuadAny and QuadAll
+        if (_uses_quad_control)
+        {
+            require_extension("SPV_KHR_maximal_reconvergence");
+            emit(_modes, spv::ExecutionMode, {_function, k_mode_quad_derivatives});
+            emit(_modes, spv::ExecutionMode, {_function, k_mode_maximally_reconverges});
+        }
         for (auto const& e : _p.stage_elements)
         {
             if (e.system == built_in::depth || e.system == built_in::depth_greater_equal

@@ -269,13 +269,17 @@ sgl::check::padding_kind checker::padding_of(i32 file, ast::attribute const* a)
     auto const rule = dot != nullptr ? text_of(file, dot->name) : cc::string_view();
     if (rule == "none")
         return padding_kind::none;
+    // CHK-532: the default, stated where a host would expect another layout
+    if (rule == "natural")
+        return padding_kind::natural;
     if (rule == "every_element")
         return padding_kind::every_element;
     if (rule == "every_column")
         unsupported(file, a->name, "@padding(.every_column), since a mat3's columns stand 16 bytes apart already");
     else
         report(diagnostic_kind::invalid_attribute_arguments, file, a->name,
-               "@padding takes where GPU memory leaves room: `@padding(.none)` or `@padding(.every_element)`");
+               "@padding takes where GPU memory leaves room: `@padding(.natural)`, `@padding(.none)` or "
+               "`@padding(.every_element)`");
     return padding_kind::natural;
 }
 
@@ -730,8 +734,9 @@ ast::range_of<member_info> checker::compile_members(i32 file,
             continue;
         auto const name = text_of(file, f.name);
 
-        cc::string_view const known_on_field[] = {"position", "layer",        "per_instance",   "stream", "interpolate",
-                                                  "per_draw", "edge_factors", "inside_factors", "bits",   "absent"};
+        cc::string_view const known_on_field[]
+            = {"position", "layer",        "viewport_index", "per_instance", "stream", "interpolate",
+               "per_draw", "edge_factors", "inside_factors", "bits",         "absent"};
         // CHK-276: a `@pixel struct` member may be the depth or the sample mask rather than a color target
         cc::string_view const known_on_pixel_field[]
             = {"position", "per_instance", "stream", "interpolate", "depth", "sample_mask"};
@@ -1029,6 +1034,7 @@ ast::range_of<member_info> checker::compile_members(i32 file,
             .field = line->field,
             .is_position = find_attribute(file, f.attributes, "position") != nullptr,
             .is_layer = find_attribute(file, f.attributes, "layer") != nullptr,
+            .is_viewport_index = find_attribute(file, f.attributes, "viewport_index") != nullptr,
             .interpolate = interpolated,
             .has_interpolate = interpolate != nullptr,
             .is_per_draw = is_per_draw,
@@ -1852,6 +1858,28 @@ void checker::compile_binding(symbol_id id)
         no_padding != nullptr && is_workgroup)
         report(diagnostic_kind::invalid_attribute_arguments, file, no_padding->name,
                "@no_padding guards a constant block's layout, and @workgroup memory has none a host sees");
+    // CHK-532: a buffer of builtins strides past its host type only where the binding or the member says so
+    if (!is_workgroup && padded == nullptr)
+        for (auto const& m : out.at(members))
+        {
+            if (m.type == checked_module::error_type || !ast::is_valid(m.field))
+                continue;
+            auto const& field = ast_of(file).at(m.field);
+            if (find_attribute(file, field.attributes, "padding") != nullptr)
+                continue;
+            auto held = m.type;
+            while (is_valid(held) && out.builtin_type_of(held) == nullptr && out.at(held).kind == type_kind::array)
+                held = out.at(held).element;
+            if (!is_valid(held) || out.builtin_type_of(held) != nullptr || out.at(held).kind != type_kind::buffer)
+                continue;
+            if (auto const strides = builtin_strides_of(out.at(held).element); strides.natural != strides.host)
+                report(diagnostic_kind::padding_not_stated, file, span_of(file, field.type),
+                       cc::format("buffer[{}] strides by {} bytes, where the host's {} takes {}: "
+                                  "`@padding(.natural)` keeps {}, and `@padding(.none)` strides by {}",
+                                  out.name_of(out.at(held).element), strides.natural, out.name_of(out.at(held).element),
+                                  strides.host, strides.natural, strides.host));
+        }
+
     // CHK-293: WebGPU's default limit, and vulkan's required minimum, is what every target has
     if (is_workgroup)
     {
@@ -2702,7 +2730,11 @@ void checker::judge_entry_point(symbol_id id)
             // CHK-419: the layer is the rasterizer's, and the pixel stage reads the one its primitive went to
             if (m.is_layer && m.has_interpolate)
                 invalid(cc::format("the @layer member '{}' is the rasterizer's, and is no interpolated value", m.name));
-            if (is_integer && !m.is_layer && m.interpolate.kind != interpolation::kind_t::flat)
+            // CHK-534: so is the viewport, which the pixel stage reads as the one its primitive went to
+            if (m.is_viewport_index && m.has_interpolate)
+                invalid(cc::format("the @viewport_index member '{}' is the rasterizer's, and is no interpolated value",
+                                   m.name));
+            if (is_integer && !m.is_layer && !m.is_viewport_index && m.interpolate.kind != interpolation::kind_t::flat)
                 invalid(cc::format("the {} member '{}' crosses stages only flat: write `@interpolate(.flat)`",
                                    out.name_of(m.type), m.name));
             if (m.has_interpolate && m.is_position)
@@ -2724,6 +2756,8 @@ void checker::judge_entry_point(symbol_id id)
                 invalid(cc::format("'{}' crosses no stage edge, so @interpolate means nothing on it", m.name));
             if (m.is_layer)
                 invalid(cc::format("'{}' reaches no rasterizer, so @layer means nothing on it", m.name));
+            if (m.is_viewport_index)
+                invalid(cc::format("'{}' reaches no rasterizer, so @viewport_index means nothing on it", m.name));
             if (m.is_per_draw)
                 invalid(cc::format("'{}' crosses no stage edge, so @per_draw means nothing on it", m.name));
         }
@@ -2785,6 +2819,17 @@ void checker::judge_entry_point(symbol_id id)
             }
         if (layers > 1)
             invalid("a @vertex fun returns a struct with at most one @layer field");
+        // CHK-534: one viewport at most, a uint, as every target's viewport output is
+        auto viewports = 0;
+        for (auto const& m : out.at(result.members))
+            if (m.is_viewport_index)
+            {
+                ++viewports;
+                if (m.type != checked_module::error_type && out.name_of(m.type) != builtins::k_uint)
+                    invalid(cc::format("the @viewport_index field '{}' of a @vertex fun is a uint", m.name));
+            }
+        if (viewports > 1)
+            invalid("a @vertex fun returns a struct with at most one @viewport_index field");
         // CHK-90: a vertex stage before a tessellation stage hands on control points, which have none
         if (positions > 1)
             invalid("a @vertex fun returns a struct with at most one @position field");

@@ -96,3 +96,15 @@ TEST("sgl check - @stages is judged wherever the stage comes from")
     CHECK(reports.contains("user:[lit(c)] a compute entry point reaches this, and lit is @stages without it"));
     CHECK(reports_for(pixel(deep, "    return {color = outer(float4(1.0, 1.0, 1.0, 1.0))}\n")) == "");
 }
+
+TEST("sgl check - a level-of-detail query is the pixel stage's alone, as an implicit sample is")
+{
+    constexpr auto lod
+        = "    let l = tex.src.lod(float2(0.5, 0.5), tex.smp) + tex.src.lod_unclamped(float2(0.5, 0.5), tex.smp)\n";
+    CHECK(reports_for(pixel("", cc::format("{}    return {{color = float4(l, l, l, 1.0)}}\n", lod))) == "");
+    auto const computed
+        = reports_for(compute("", cc::format("{}    tex.dst.store(int2(0, 0), float4(l, l, l, 1.0))\n", lod)));
+    CHECK(computed.contains("stage-not-allowed"));
+    CHECK(computed.contains("a compute entry point reaches this, and lod is @stages without it"));
+    CHECK(computed.contains("a compute entry point reaches this, and lod_unclamped is @stages without it"));
+}

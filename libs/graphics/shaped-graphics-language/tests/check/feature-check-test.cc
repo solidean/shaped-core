@@ -84,7 +84,7 @@ TEST("sgl check - a require names a feature a shader can use, as sg names it")
              "view_instancing, pixel_view_read_workaround, vertex_pipeline_stores, shader_int64, shader_f64, "
              "shader_int64_atomics, "
              "unbounded_binding_arrays, shader_shared_int64_atomics, shader_int64_min_max_atomics, "
-             "clustered_geometry\n");
+             "clustered_geometry, quad_control, multi_viewport\n");
     CHECK(reports_for("require raytracing\n").contains("unknown-feature user:[raytracing]"));
     CHECK(reports_for("require ray_query, binding_arrays\n") == "");
 
@@ -340,7 +340,7 @@ TEST("sgl check - a 64-bit value needs its feature, crosses no stage edge and st
               .contains("cs needs shader_int64"));
     CHECK(reports_for(listing("", "    scale: double\n"))
           == "needs-feature user:[double] a value of double needs shader_f64, which `require shader_f64` grants\n");
-    CHECK(reports_for(listing("require shader_int64\n\n", "    keys: mut buffer[ulong3]\n")) == "");
+    CHECK(reports_for(listing("require shader_int64\n\n", "    @padding(.natural) keys: mut buffer[ulong3]\n")) == "");
     // a test runs on no device, and needs nothing
     CHECK(reports_for("test (1i64 << 40) > 0i64\n") == "");
 

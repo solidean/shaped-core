@@ -112,6 +112,8 @@ void lowering::elements_of_struct(check::type_id t, stage_part part, u32 array_s
             e.system = built_in::position;
         else if (member.is_layer)
             e.system = built_in::layer;
+        else if (member.is_viewport_index)
+            e.system = built_in::viewport_index;
         else if (member.factor == check::tessellation_factor::edge)
             e.system = built_in::tess_edge;
         else if (member.factor == check::tessellation_factor::inside)
@@ -157,7 +159,7 @@ void lowering::elements_of_struct(check::type_id t, stage_part part, u32 array_s
             e.interpolate = scalar.kind == ir::type_kind::float_ ? mode_of(member.interpolate) : interpolation::flat;
         if (member.is_position)
             e.interpolate = interpolation::noperspective;
-        else if (member.is_layer)
+        else if (member.is_layer || member.is_viewport_index)
             e.interpolate = interpolation::flat;
         add_stage_element(e, semantic, member.source_name);
     }

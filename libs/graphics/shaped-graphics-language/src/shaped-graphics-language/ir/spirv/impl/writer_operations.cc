@@ -54,6 +54,7 @@ enum class rule_kind : u8
     image_gather,
     image_write,
     image_size,
+    image_query_lod,
     subgroup,
     ray_query,
     ray_stage,
@@ -182,6 +183,7 @@ constexpr op_rule k_rules[] = {
     {op::image_gather_compare, rule_kind::image_gather, spv::ImageDrefGather},
     {op::image_write, rule_kind::image_write, spv::ImageWrite},
     {op::image_size, rule_kind::image_size, 0},
+    {op::image_query_lod, rule_kind::image_query_lod, spv::ImageQueryLod},
     {op::subgroup, rule_kind::subgroup, 0},
     {op::trace_ray, rule_kind::ray_stage, 0},
     {op::execute_callable, rule_kind::ray_stage, 0},
@@ -223,6 +225,10 @@ enum class group_form : u8
     with_id,
     /// A `group_fold` before the value.
     folded,
+    /// The quad votes of SPV_KHR_quad_control, which take the predicate alone, with no scope.
+    quad_vote,
+    /// The scope alone, and no value.
+    scope_only,
 };
 
 struct group_rule
@@ -258,8 +264,11 @@ constexpr group_rule k_groups[] = {
     {spv::GroupNonUniformBitwiseXor, group_form::folded, spv::GroupNonUniformArithmetic},        // bit_xor
     {spv::GroupNonUniformQuadBroadcast, group_form::with_id, spv::GroupNonUniformQuad},          // quad_broadcast
     {spv::GroupNonUniformQuadSwap, group_form::with_id, spv::GroupNonUniformQuad},               // quad_swap
+    {spv::GroupNonUniformQuadAnyKHR, group_form::quad_vote, spv::QuadControlKHR},                // quad_any
+    {spv::GroupNonUniformQuadAllKHR, group_form::quad_vote, spv::QuadControlKHR},                // quad_all
+    {spv::GroupNonUniformElect, group_form::scope_only, spv::GroupNonUniform},                   // elect
 };
-static_assert(sizeof(k_groups) / sizeof(k_groups[0]) == sizeof(char[isize(subgroup::quad_swap) + 1]));
+static_assert(sizeof(k_groups) / sizeof(k_groups[0]) == sizeof(char[isize(subgroup::elect) + 1]));
 } // namespace
 
 void writer::ext_inst(instruction const& i, u32 id)
@@ -312,12 +321,21 @@ void writer::group(instruction const& i, u32 id)
     auto const operands = _p.operands_of(i);
     auto const scope = literal_id(k_scope_subgroup);
     auto const type = id_of(i.type);
-    auto const value = id_of_raw(operands[0]);
     auto const& rule = k_groups[i.sub];
     require(spv::GroupNonUniform);
     require(rule.capability);
+    if (rule.form == group_form::scope_only)
+        return emit(_code, rule.opcode, {type, id, scope});
+    auto const value = id_of_raw(operands[0]);
     switch (rule.form)
     {
+    case group_form::scope_only:
+        return;
+    case group_form::quad_vote:
+        // CHK-533: the entry point states that its derivatives are its quads', which a quad vote keeps uniform
+        require_extension("SPV_KHR_quad_control");
+        _uses_quad_control = true;
+        return emit(_code, rule.opcode, {type, id, value});
     case group_form::plain:
         return emit(_code, rule.opcode, {type, id, scope, value});
     case group_form::with_id:
@@ -710,6 +728,9 @@ void writer::instruction_of(u32 index)
             return emit(_code, spv::ImageQuerySizeLod,
                         {id_of(i.type), id, id_of_raw(operands[0]), id_of_raw(operands[1])});
         return emit(_code, spv::ImageQuerySize, {id_of(i.type), id, id_of_raw(operands[0])});
+    case rule_kind::image_query_lod:
+        require(spv::ImageQuery);
+        return emit(_code, rule.opcode, {id_of(i.type), id, id_of_raw(operands[0]), id_of_raw(operands[1])});
     case rule_kind::subgroup:
         return group(i, id);
     case rule_kind::ray_query:

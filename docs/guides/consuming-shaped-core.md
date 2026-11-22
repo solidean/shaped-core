@@ -14,13 +14,15 @@ add_subdirectory(extern/shaped-core EXCLUDE_FROM_ALL)
   Its options and helper functions (`sc_nexus_binary`, `sc_add_example`, …) exist from then on.
 - `EXCLUDE_FROM_ALL` keeps `all` to what your targets link; every library is still configured.
 - `SC_BUILD_TESTS`, `SC_BUILD_TOOLS` and `SC_BUILD_EXAMPLES` default to OFF here.
-  Set `SC_BUILD_TOOLS` ON before the call to build shaped-linter into your tree for `dev.py lint shaped`, a `SC_LIBRARIES` subset included.
+  Set `SC_BUILD_LINTER` ON before the call to build shaped-linter into your tree for `dev.py lint shaped`, a `SC_LIBRARIES` subset included.
+  `SC_BUILD_TOOLS` builds every shaped-core tool, and the ones carrying tests would join your `dev.py test`.
 - **The repo-wide build flags reach you through clean-core.**
   The x86-64 level's flag, floating-point contraction, sanitizers, coverage, PGO and the wasm flags are recorded on `shaped-core::build-config`, which clean-core links `PUBLIC`.
   [tools/cmake/BuildConfig.cmake](../../tools/cmake/BuildConfig.cmake) is the mechanism.
 - **What is ABI is clean-core's generated `clean-core/build_config.hh`**, not a compile definition: the configuration, `CC_X64_LEVEL`, threading, source sites.
   `macros.hh` includes it, so a target using shaped-core headers still links clean-core, directly or not, for its include directory.
 - `SC_LIBRARIES` names the libraries you need; only they and their shaped-core dependencies are added.
+- The fetched dependencies (DXC, SDL3, SQLite, …) are fetched into the submodule's `extern/`, where its CMake reads them, by your dev.py as by ours.
 
 ## An installed shaped-core
 
@@ -102,5 +104,4 @@ Then a bare `git submodule update --remote` merges into the checked-out branch i
 
 - `lint clang-tidy` runs `tools/lint/clang-tidy.py`, which roots itself at shaped-core and reads shaped-core's gate list.
 - `deps`, `install` and `test-web` expect shaped-core's own files at the project root.
-- The prerequisite fetchers (DXC, SDL3, SQLite, …) look under the project's `extern/`, so a consumer gets those optional dependencies only by vendoring or fetching them itself.
 - `.shaped-lint.yml` configs merge along a file's own ancestors, so a consumer copies the root policy rather than inheriting it.

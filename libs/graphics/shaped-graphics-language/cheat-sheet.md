@@ -854,14 +854,23 @@ ops[i](mut v)                                            // raygen, miss, closes
   Unmarked, a proven varying index is `non-uniform-index` and an unproven one `unproven-index`; `uniform` on a proven varying one is `uniform-index-varies` (CHK-399, CHK-400).
 - **A function takes any resource as a parameter, `b: mut buffer[float]`, of exactly its member's type** (CHK-366): `mut` is the access, never a caller's place.
   Inlining substitutes the member, so the footprint and an element's index stay the caller's; `buffer[float]` is no argument of `mut buffer[float]`, nor the reverse.
-  A buffer parameter is subscripted, measured or handed on; `let u = b` and a resource result stay `unsupported-yet`.
+  A buffer parameter is subscripted, measured or handed on; a resource result stays `unsupported-yet`.
+- **`let src = io.pts` names a resource as a parameter does** (CHK-536): every use is the member, and `let t = maps[nonuniform i]` evaluates `i` once.
+  A resource chosen at run time and a `let mut` of one are `wrong-kind-of-name`; assigning the name is `not-assignable`.
   A helper's index is judged per call: one it reaches both ways is `mixed-index`, split in two or marked `nonuniform` (CHK-401); a needless `nonuniform` is a warning.
   A stage-link member marked `@per_draw` crosses flat and is uniform in the pixel stage; the vertex stage must return it uniform, or it is `non-uniform-per-draw` (CHK-393).
 - **The uniformity pass judges the inlined entry point** (CHK-282 to CHK-284) by WGSL's rules, so no target refuses what SGL accepts.
   A barrier, or a call that takes derivatives implicitly (`sample` without `level`, `ddx`), in non-uniform control flow is `non-uniform-control-flow`.
+  A branch on `quad_any(b)` or `quad_all(b)` reaches each quad whole, helpers included, so a derivative stands under it (CHK-533); `subgroup_any` does not.
+  The votes need `require subgroups, quad_control`, which WebGPU lacks.
+  A branch on a vote, a reduction or a constant-lane broadcast reaches each subgroup whole, so a subgroup operation stands under it (CHK-537).
+  A barrier, a derivative and a quad operation do not.
+  `subgroup_elect()` is true in the lowest-indexed active invocation of the subgroup alone, so a branch on it diverges.
 - **`@sampler(name)` on a texture member names a sampler of the same binding, or a file-scope one** (CHK-279), which a method call then leaves out: `material.albedo.sample(uv)`.
   A member of that name hides a file-scope sampler of it.
   A call without a sampler on a texture without one is `missing-sampler`.
+- **`t.lod(uv, smp)` is the level a `sample` would read, clamped to `t`'s levels, and `t.lod_unclamped(uv, smp)` the same unclamped** (CHK-535): pixel stage, derivatives as `sample`'s.
+  `texture_2d` and `texture_2d_array` of floats, an array's without a layer; WebGPU's is a polyfill from `dpdx`/`dpdy` that ignores the sampler's bias and clamps.
 - **A `sampler name:` at file scope is a static sampler of the pipeline layout** (CHK-314), handed to a builtin by its name: `tex.sample(uv, name)`.
   It joins the layout of every entry point whose inlined code reaches it, at its position among the file's samplers (EMIT-133).
   An entry point reaching one at position 16 or later is `too-many-samplers`, and unreached samplers declared above it count.
@@ -920,6 +929,7 @@ ops[i](mut v)                                            // raygen, miss, closes
 - **GPU memory is placed at natural alignment, the same on every target, because that is what loads fastest** (EMIT-110).
   A vector aligns to its size and a 3-vector to 16, a scalar may fill a 3-vector's tail, and a struct nested in a constant block takes whole rows.
   So `buffer[float3]` strides by 16, and the host writes it as `slib::gpu_padded<tg::vec3f, 16>`; the generated structs carry every padding field.
+  **Such a buffer states its `@padding`**, `.natural` for 16 or `.none` for 12, or it is `padding-not-stated` (CHK-532); `buffer[mat3]` likewise.
   WGSL writes it natively, MSL packs a 3-vector whose tail holds a value, and HLSL writes padding fields into its structs (EMIT-112).
   A struct placed by two rules is `layout-conflict`; `@no_padding` turns a gap into `padding-forbidden`; `bool` has no layout, `bool32` does.
   **`@padding(.none)` packs as C++ does**, on a binding (its block and its buffers) or on one buffer member (CHK-369).

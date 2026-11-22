@@ -41,6 +41,7 @@ The convolution is faster because SGL unrolls the loops the HLSL marks `[unroll]
 ## Where to look
 
 * **To write SGL**: [docs/spec/](docs/spec/_index.md) is the language, and [sgl-cube](../../../examples/graphics/sgl-cube/shaders/cube.sgl) is a shader that draws.
+  **To port HLSL**: [docs/migrating-from-hlsl.md](docs/migrating-from-hlsl.md) maps what carries over and names the traps a real port fell into.
 * **To work on the compiler**: [docs/architecture.md](docs/architecture.md) is the map of the pipeline, and [cheat-sheet.md](cheat-sheet.md) the API.
   [docs/issues/](docs/issues/) holds what is known to be open, and the [spec incubator](docs/spec/incubator/_index.md) the far-off ideas.
 * **To work on the language server**: [docs/lsp.md](docs/lsp.md) is its design, what it measures and where it grows.

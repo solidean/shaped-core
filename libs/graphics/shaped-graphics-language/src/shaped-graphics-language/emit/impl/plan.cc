@@ -261,7 +261,8 @@ struct planner
     {
         auto count = 0;
         for (auto const& member : p.m.at(p.m.at(type).members))
-            if (!member.is_position && !member.is_layer && member.type != check::checked_module::void_type)
+            if (!member.is_position && !member.is_layer && !member.is_viewport_index
+                && member.type != check::checked_module::void_type)
             {
                 count += locations_taken(member.type);
             }
@@ -378,7 +379,7 @@ struct planner
         auto next_location = first_location;
         for (auto const& member : members)
         {
-            auto const split = has_locations && !member.is_position && !member.is_layer
+            auto const split = has_locations && !member.is_position && !member.is_layer && !member.is_viewport_index
                                     && member.factor == check::tessellation_factor::none
                                  ? pieces_of(member.type)
                                  : edge_pieces();
@@ -388,10 +389,11 @@ struct planner
                 .type = member.type,
                 .is_position = has_locations && member.is_position,
                 .is_layer = has_locations && member.is_layer,
+                .is_viewport_index = has_locations && member.is_viewport_index,
                 .interpolate = member.interpolate,
                 .output = member.output,
                 .factor = member.factor,
-                .location = has_locations && !member.is_position && !member.is_layer
+                .location = has_locations && !member.is_position && !member.is_layer && !member.is_viewport_index
                                  && member.output == check::pixel_output::color
                                  && member.factor == check::tessellation_factor::none
                               ? next_location
@@ -1668,6 +1670,8 @@ cc::string sgl::emit::impl::semantic_of(plan const& p, planned_struct const& s, 
         return "SV_Position";
     if (member.is_layer)
         return "SV_RenderTargetArrayIndex";
+    if (member.is_viewport_index)
+        return "SV_ViewportArrayIndex";
     switch (s.role)
     {
     case struct_role::vertex_input:

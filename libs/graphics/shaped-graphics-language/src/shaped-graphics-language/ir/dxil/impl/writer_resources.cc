@@ -512,6 +512,30 @@ void writer::texture_op(u32 index, instruction const& i)
                 args.push_back(leaf_at(value_ref(operands[2])));
             },
             2);
+    case op::image_query_lod:
+    {
+        // one `calculateLOD` a lane: its last argument says whether the level is clamped
+        auto const pair = value_ref(operands[0]);
+        auto const at = value_ref(operands[1]);
+        auto const lanes = count_of(at);
+        auto const level = [&](bool clamped)
+        {
+            ll_value const args[] = {_m.constant_i32(k_dx_ops[isize(dx_op::calculate_lod)].number),
+                                     leaf_at(pair, 0),
+                                     leaf_at(pair, 1),
+                                     leaf_at(at, 0),
+                                     lanes > 1 ? leaf_at(at, 1) : unstated(),
+                                     lanes > 2 ? leaf_at(at, 2) : unstated(),
+                                     _m.constant_bool(clamped)};
+            return call(dx_op::calculate_lod, _m.float_type(), args);
+        };
+        auto const clamped = level(true);
+        auto const unclamped = level(false);
+        _scratch.clear();
+        _scratch.push_back(clamped);
+        _scratch.push_back(unclamped);
+        return define(index);
+    }
     default:
         return unsupported("this texture operation on DXIL");
     }
@@ -683,8 +707,14 @@ void writer::subgroup_op(u32 index, instruction const& i)
 
     _uses.waves = true;
     auto const operands = _p.operands_of(i);
-    auto const value = value_ref(operands[0]);
     auto const what = subgroup(i.sub);
+    // the one operation that takes no value
+    if (what == subgroup::elect)
+    {
+        ll_value const args[] = {_m.constant_i32(k_dx_ops[isize(dx_op::wave_is_first_lane)].number)};
+        return define_one(index, call(dx_op::wave_is_first_lane, _m.void_type(), args));
+    }
+    auto const value = value_ref(operands[0]);
     auto const number = [&](dx_op op) { return _m.constant_i32(k_dx_ops[isize(op)].number); };
 
     _scratch.clear();
@@ -792,6 +822,20 @@ void writer::subgroup_op(u32 index, instruction const& i)
             _scratch.push_back(call(dx_op::quad_read_lane_at, _m.type_of(lane_value), args));
         }
         return define(index);
+    }
+    // CHK-533: the vote's bit and its three neighbours' over `quadOp`, which D3D's helpers take part in, at 6.6
+    case subgroup::quad_any:
+    case subgroup::quad_all:
+    {
+        auto const bit = _m.cast(cast_op::zext, leaf_at(value), _m.int_type());
+        auto const combine = what == subgroup::quad_any ? binary_op::bit_or : binary_op::bit_and;
+        auto folded = bit;
+        for (auto axis = u32(0); axis < 3; ++axis)
+        {
+            ll_value const args[] = {number(dx_op::quad_op), bit, _m.constant_i8(axis)};
+            folded = _m.binary(combine, folded, call(dx_op::quad_op, _m.int_type(), args));
+        }
+        return define_one(index, _m.compare(predicate::i_ne, folded, _m.constant_i32(0)));
     }
     case subgroup::quad_swap:
     {

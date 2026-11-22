@@ -936,6 +936,14 @@ struct checker
     /// The bytes one element of a `buffer[type]` takes by EMIT-111, before any stride rounding: each value aligned to
     /// its scalar's size, and a struct sized to its largest scalar.
     [[nodiscard]] i32 storage_size_of(type_id type) const;
+    /// What a buffer element of builtins, or of an array of them, strides by in GPU memory and in its host type.
+    struct builtin_strides
+    {
+        i32 natural = 0;
+        i32 host = 0;
+    };
+    /// Both 0 for an element that holds anything but builtins, a struct or an atomic among them (CHK-532).
+    [[nodiscard]] builtin_strides builtin_strides_of(type_id element) const;
     /// A `@workgroup` binding, whose members a shader writes and a test holds without listing it (CHK-292).
     [[nodiscard]] bool is_workgroup_binding(symbol_id id) const
     {
@@ -1357,6 +1365,9 @@ struct checker
     [[nodiscard]] flow check_nested(function_scope& scope, ast::body const& body);
     [[nodiscard]] flow check_stmt(function_scope& scope, ast::stmt_id stmt);
     void check_let(function_scope& scope, ast::stmt_id id, ast::let_stmt const& let);
+    /// Hands `value` over as an argument is, and the value each arrow arm of an `if` or a `case` it is gives, so a
+    /// resource chosen among them is refused as one, not as a resource standing as a value (CHK-536).
+    void hand_arm_values(i32 file, ast::expr_id value);
     void check_assign(function_scope& scope, ast::stmt_id id, ast::assign_stmt const& assign);
     [[nodiscard]] flow check_if(function_scope& scope, ast::if_stmt const& chain);
     void check_for(function_scope& scope, ast::stmt_id id, ast::for_stmt const& loop);

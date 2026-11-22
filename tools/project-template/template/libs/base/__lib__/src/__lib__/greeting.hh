@@ -1,5 +1,6 @@
 #pragma once
 
+#include <__lib__/fwd.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
 

@@ -18,3 +18,13 @@ Measured on Windows at `a7ba8ff45`, 12 jobs:
 
 Each compiles every fixture through SGL, DXC and the validators; a debug build pays for that many times over.
 Options: narrow them under `nx::is_thorough()` or `nx::is_smoke()`, or give the binary a longer declared timeout.
+
+## 2026-11-22: the sweeps run per entry point
+
+The two slowest tests now compile one task per entry point and hand spirv-val one batch instead of a process per module.
+That also fixed the relwithdebinfo stall under load, where the binary passed the watchdog's limit beside the whole suite.
+
+Measured on Windows at `b84a2a4e9`: all 267 tests pass on `debug-clang` in 67.5 s wall, at 8.5 cores.
+The long pole is now "sgl signature - DXIL's packer places every element of the repo's SGL as DXC does", 66 s,
+then "slib - a vulkan entry's draw start as builtins is the SPIR-V DXC made of the system values before (EMIT-128)", 53 s.
+Both still compile serially, so the same split is what is left; on relwithdebinfo the binary takes 9.6 s.

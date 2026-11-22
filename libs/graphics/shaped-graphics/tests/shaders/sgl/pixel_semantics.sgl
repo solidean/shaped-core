@@ -290,3 +290,74 @@ pipeline viewed_tags:
     cull = .none
     format = .rgba32_float
     view_count = 2
+
+// A quad vote is its quad's whole answer, helpers included, so a derivative stands under a branch on one (CHK-533).
+// Pixel (5, 2) alone asks, so its quad, columns 4 and 5 of rows 2 and 3, takes ddx of x, 1 in each of its pixels.
+// `quad_all` of x < 5 holds in the quads left of column 4, and in no quad that holds column 5.
+@pixel fun quad_vote_ps(p: tagged) -> tag_target:
+    require subgroups, quad_control
+    let x = p.position.x
+    let y = p.position.y
+    let asked = x > 5.0 and x < 6.0 and y > 2.0 and y < 3.0
+    let mut slope = 0.0
+    if quad_any(asked):
+        slope = ddx(x)
+    return {
+        value = float4(slope, if quad_all(x < 5.0) => 1.0 else 0.0, p.tag as float, 1.0)
+    }
+
+pipeline quad_votes:
+    vertex = tagged_vs
+    pixel = quad_vote_ps
+    cull = .none
+    format = .rgba32_float
+
+struct placed:
+    @position position: hpos4
+    @viewport_index viewport: uint
+    @interpolate(.flat) tag: int
+
+// One draw of two instances, each sent to the viewport its instance names (CHK-534).
+@vertex fun placed_vs(v: tagged_corner, @instance_index i: int) -> placed:
+    require multi_viewport
+    return {
+        position = hpos4(v.position.x, v.position.y, v.depth, 1.0)
+        viewport = i as uint
+        tag = v.tag + 10 * i
+    }
+
+@pixel fun placed_ps(p: placed) -> float4:
+    require multi_viewport
+    return float4(p.tag as float, p.viewport as float, 0.0, 1.0)
+
+pipeline placed_tags:
+    vertex = placed_vs
+    pixel = placed_ps
+    cull = .none
+    format = .rgba32_float
+
+// The level of detail a sample would read, clamped and not (CHK-535).
+// A 64 x 64 texture over a 16 x 16 target at uv = position / 16 is 4 texels a pixel, level 2.
+// An eighth of that uv is half a texel a pixel, level -1, which `lod` clamps to 0.
+binding detail:
+    source: texture_2d[float4]
+    sampler trilinear:
+        filter = .linear
+        mip_filter = .linear
+
+@pixel fun lod_ps(p: tagged){detail} -> tag_target:
+    let uv = float2(p.position.x, p.position.y) / 16.0
+    let near = uv * 0.125
+    let at = detail.source.lod(uv, detail.trilinear)
+    let at_unclamped = detail.source.lod_unclamped(uv, detail.trilinear)
+    let below = detail.source.lod(near, detail.trilinear)
+    let below_unclamped = detail.source.lod_unclamped(near, detail.trilinear)
+    return {
+        value = float4(at, at_unclamped, below, below_unclamped + (p.tag as float))
+    }
+
+pipeline lod_query:
+    vertex = tagged_vs
+    pixel = lod_ps
+    cull = .none
+    format = .rgba32_float

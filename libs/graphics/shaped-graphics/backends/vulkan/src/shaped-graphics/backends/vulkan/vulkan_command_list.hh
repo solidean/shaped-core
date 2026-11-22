@@ -355,6 +355,8 @@ protected:
                                                           cc::span<sg::array_texture_access const> elements) override;
     void raster_set_viewport(sg::viewport const& vp) override;
     void raster_set_scissor(tg::aabb2i const& rect) override;
+    void raster_set_viewports(cc::span<sg::viewport const> viewports) override;
+    void raster_set_scissors(cc::span<tg::aabb2i const> rects) override;
     void raster_set_stencil_reference(u32 reference) override;
     void raster_set_blend_constants(tg::vec4f constants) override;
     void raster_set_inline_constants(cc::span<byte const> data, cc::optional<isize> offset) override;

@@ -3,13 +3,10 @@ name: Windows Clang
 # Tier-1 native gate: Windows clang-cl, RelWithDebInfo, build + tests.
 # Wide-but-shallow gate (single config); the deep debug/release matrix lives in
 # ci-linux-clang.yml. Everything runs through dev.py with an explicit preset (no
-# default-preset reliance). Uses the runner's preinstalled toolchain — clang 20
-# (LLVM), CMake, Ninja — with only LLVM's bin put back on PATH; dev.py injects the
-# MSVC environment for clang-cl via vswhere, so there is no toolchain-install or
-# MSVC-setup step. clang-cl ships as
-# a single unversioned binary (no clang++-N to swap to), so --toolset 20 here
-# *asserts* clang-cl is version 20 rather than selecting it — a hard error if the
-# base image moves off clang 20, so the bump is loud. See docs/guides/ci.md.
+# default-preset reliance). Uses the runner's CMake and Ninja, and the MSVC environment dev.py injects for clang-cl via vswhere.
+# LLVM is the one exception to taking the image's toolchain: see "Install LLVM 22" below.
+# clang-cl ships as a single unversioned binary (no clang++-N to swap to), so --toolset 22 here *asserts* clang-cl is version 22 rather than selecting it.
+# See docs/guides/ci.md.
 
 on:
   push:
@@ -32,11 +29,16 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v6
 
+      # Workaround, temporary: the image's MSVC 14.52 STL refuses anything below Clang 22 (STL1000), and the image still ships LLVM 20.1.8.
+      # Drop this step, and go back to the image's LLVM with its version in --toolset, once the image ships clang-cl 22 or newer.
+      # Pinned, since an unversioned install moves whenever upstream does.
+      - name: Install LLVM 22 (image LLVM is older than its STL accepts)
+        run: choco install llvm --version=22.1.8 --allow-downgrade --no-progress -y
+
       # Runner image 20260728.188 stopped putting LLVM's bin on PATH; 20260714.173 still did.
-      # LLVM itself is unchanged (still 20.1.8) and still at the standard location, but the preset's
-      # `CMAKE_CXX_COMPILER: clang-cl` is a bare name, so losing PATH reads as "no version-20 compiler"
+      # The preset's `CMAKE_CXX_COMPILER: clang-cl` is a bare name, so losing PATH reads as "no version-N compiler"
       # rather than as the environment change it is.
-      # Fails loudly here instead, if the image ever moves LLVM rather than just unsetting PATH.
+      # Fails loudly here instead, if LLVM ever lands anywhere but the standard location.
       - name: Put LLVM on PATH
         run: |
           $llvm = "$env:ProgramFiles\LLVM\bin"
@@ -46,7 +48,7 @@ jobs:
       # Informational only: doctor also probes clangd's compile DB and llvm-cov,
       # which aren't needed for build+test and would fail a fresh runner.
       - name: Doctor (toolchain info)
-        run: uv run dev.py doctor --preset relwithdebinfo-clang --toolset 20
+        run: uv run dev.py doctor --preset relwithdebinfo-clang --toolset 22
         continue-on-error: true
 
       # The dx12 tests run on Microsoft's NuGet WARP rather than the image's own, which traces some scenes wrong
@@ -62,10 +64,10 @@ jobs:
         run: uv run extern/agility/fetch-agility.py --accept-license
 
       - name: Build
-        run: uv run dev.py --collect-logs build/ci-logs.zip build --preset relwithdebinfo-clang --toolset 20 --diag-archive build/ci-diag.zip --keep-going
+        run: uv run dev.py --collect-logs build/ci-logs.zip build --preset relwithdebinfo-clang --toolset 22 --diag-archive build/ci-diag.zip --keep-going
 
       - name: Test
-        run: uv run dev.py --collect-logs build/ci-logs.zip test --preset relwithdebinfo-clang --toolset 20 --merged-xml-report build/ci-test-results.xml
+        run: uv run dev.py --collect-logs build/ci-logs.zip test --preset relwithdebinfo-clang --toolset 22 --merged-xml-report build/ci-test-results.xml
 
       - name: Upload diagnostics
         if: always()

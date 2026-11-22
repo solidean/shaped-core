@@ -74,3 +74,27 @@ binding wave_staggered:
         n += 1u
     wave_staggered.sums[id.x] = subgroup_add(n)
     wave_staggered.sizes[id.x] = size as uint
+
+// A branch on a subgroup's vote is taken by the whole subgroup, so a sum and an election stand in it (CHK-537).
+// Only the subgroup holding a workgroup's first invocation takes it; a workgroup of 128 holds every subgroup whole.
+// 4 words an invocation: whether it took the branch, the sum there, whether it was elected there, and its lane.
+binding wave_vote:
+    words: mut buffer[uint]
+    sizes: mut buffer[uint]
+    // the elected invocations of the whole dispatch, and the sizes of their subgroups added up
+    elected: mut buffer[atomic[uint]]
+
+@compute(128) fun elect_under_vote(@thread_id id: int3, @local_thread_index local: int, @subgroup_invocation_id lane: int, @subgroup_size size: int){wave_vote}:
+    let base = 4 * id.x
+    wave_vote.words[base] = 0u
+    wave_vote.words[base + 1] = 0u
+    wave_vote.words[base + 2] = 0u
+    wave_vote.words[base + 3] = lane as uint
+    wave_vote.sizes[id.x] = size as uint
+    if subgroup_any(local == 0):
+        wave_vote.words[base] = 1u
+        wave_vote.words[base + 1] = subgroup_add(1u)
+        wave_vote.words[base + 2] = if subgroup_elect() => 1u else 0u
+    if subgroup_elect():
+        wave_vote.elected[0].add(1u)
+        wave_vote.elected[1].add(size as uint)

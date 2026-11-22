@@ -109,6 +109,45 @@ ASYNC_INVOCABLE_TEST("sg - a discarded pixel still takes part in its quad's deri
     }
 }
 
+ASYNC_INVOCABLE_TEST("sg - a quad vote is its whole quad's, so a derivative under a branch on one is its quad's "
+                     "(CHK-533)",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::quad_control))
+        SKIP("this context has no quad votes its helpers take part in");
+
+    // An 8 x 4 target, four quads wide and two high: only pixel (5, 2) asks, so only its quad takes the derivative.
+    auto vertices = cc::vector<corner>();
+    push_rect(vertices, tg::vec4f(-1, -1, 1, 1), 0.5f, 0);
+    auto const buffer = ctx->persistent.create_buffer_from_data(cc::move(vertices), sg::buffer_usage::vertex_buffer);
+    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::pixel_semantics::quad_votes);
+
+    auto const pixels = co_await sg_test::draw_offscreen(*ctx,
+                                                         {.width = 8,
+                                                          .height = 4,
+                                                          .colors = {sg::pixel_format::rgba32_float},
+                                                          .target_set = shaders::pixel_semantics::tag_target::name,
+                                                          .clear_color = tg::vec4f(-1, -1, -1, -1)},
+                                                         [&](sg::rendering_scope& scope)
+                                                         {
+                                                             scope.bind_pipeline(*pipeline);
+                                                             scope.bind_vertex_buffer(buffer.as_vertex_buffer());
+                                                             scope.draw({.vertex_range = {.offset = 0, .size = 6}});
+                                                         });
+
+    for (auto y = 0; y < 4; ++y)
+        for (auto x = 0; x < 8; ++x)
+        {
+            auto const in_asking_quad = x / 2 == 2 && y / 2 == 1;
+            auto const got = pixels[0].rgba_float(x, y);
+            CHECK(got[0] == (in_asking_quad ? 1.0f : 0.0f)).context(cc::format("quad_any at ({}, {})", x, y));
+            CHECK(got[1] == (x < 4 ? 1.0f : 0.0f)).context(cc::format("quad_all at ({}, {})", x, y));
+        }
+}
+
 ASYNC_INVOCABLE_TEST("sg - a coarse derivative is one per quad and a fine one per pixel, at every float level",
                      (sg::context_handle const& ctx))
 {
@@ -416,6 +455,113 @@ ASYNC_INVOCABLE_TEST("sg - a pixel stage returns one color without a struct, or 
     REQUIRE(got.size() == 8);
     for (auto i = 0; i < 8; ++i)
         CHECK(got[i] == 8u).context(cc::format("slot {}", i));
+}
+
+ASYNC_INVOCABLE_TEST("sg - a pixel stage asks which level of detail a sample would read, clamped and not (CHK-535)",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+
+    // A 64 x 64 texture of 7 levels over a 16 x 16 target: 4 texels a pixel, level 2.
+    // An eighth of that is half a texel a pixel, level -1, which the clamped query raises to 0.
+    // Hardware keeps a level to a few bits of fraction, so each is held to within 1/16.
+    auto vertices = cc::vector<corner>();
+    push_rect(vertices, tg::vec4f(-1, -1, 1, 1), 0.5f, 0);
+    auto const buffer = ctx->persistent.create_buffer_from_data(cc::move(vertices), sg::buffer_usage::vertex_buffer);
+    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::pixel_semantics::lod_query);
+    auto const source
+        = ctx->persistent.create_texture_2d({.format = sg::pixel_format::rgba8_unorm,
+                                             .width = 64,
+                                             .height = 64,
+                                             .mip_levels = 7,
+                                             .usage = sg::texture_usage::texture | sg::texture_usage::copy_dst});
+    auto const group = ctx->persistent.create_binding_group(
+        ctx->cached.acquire_binding_group_layout<shaders::pixel_semantics::detail>(),
+        shaders::pixel_semantics::detail{.source = source.as_texture_view()});
+
+    auto const pixels = co_await sg_test::draw_offscreen(*ctx,
+                                                         {.width = 16,
+                                                          .height = 16,
+                                                          .colors = {sg::pixel_format::rgba32_float},
+                                                          .target_set = shaders::pixel_semantics::tag_target::name},
+                                                         [&](sg::rendering_scope& scope)
+                                                         {
+                                                             scope.bind_pipeline(*pipeline);
+                                                             scope.bind_group(0, *group);
+                                                             scope.bind_vertex_buffer(buffer.as_vertex_buffer());
+                                                             scope.draw({.vertex_range = {.offset = 0, .size = 6}});
+                                                         });
+
+    constexpr float expected[] = {2.0f, 2.0f, 0.0f, -1.0f};
+    constexpr cc::string_view names[] = {"lod", "lod_unclamped", "lod of an eighth", "lod_unclamped of an eighth"};
+    for (auto y = 0; y < 16; ++y)
+        for (auto x = 0; x < 16; ++x)
+        {
+            auto const got = pixels[0].rgba_float(x, y);
+            for (auto i = 0; i < 4; ++i)
+            {
+                auto const within = got[i] - expected[i] <= 1.0f / 16 && expected[i] - got[i] <= 1.0f / 16;
+                CHECK(within).context(cc::format("{} at ({}, {}) is {}, not {}", names[i], x, y, got[i], expected[i]));
+            }
+        }
+}
+
+ASYNC_INVOCABLE_TEST("sg - a vertex stage sends each instance to its own viewport, each with its own scissor (CHK-534)",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::multi_viewport))
+        SKIP("this context has one viewport alone");
+
+    // One rect over the whole of clip space, drawn twice: instance 0 into the left half of an 8 x 4 target, instance 1 into the right half.
+    // Each instance raises its tag by 10, and one viewport alone would leave the right half clear.
+    auto vertices = cc::vector<corner>();
+    push_rect(vertices, tg::vec4f(-1, -1, 1, 1), 0.5f, 3);
+    auto const buffer = ctx->persistent.create_buffer_from_data(cc::move(vertices), sg::buffer_usage::vertex_buffer);
+    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::pixel_semantics::placed_tags);
+
+    sg::viewport const halves[] = {
+        {.offset = tg::pos2f(0, 0), .size = tg::vec2f(4, 4)},
+        {.offset = tg::pos2f(4, 0), .size = tg::vec2f(4, 4)},
+    };
+    auto const pixels = co_await sg_test::draw_offscreen(
+        *ctx,
+        {.width = 8, .height = 4, .colors = {sg::pixel_format::rgba32_float}, .clear_color = tg::vec4f(-1, -1, -1, -1)},
+        [&](sg::rendering_scope& scope)
+        {
+            scope.bind_pipeline(*pipeline);
+            scope.set_viewports(halves);
+            scope.bind_vertex_buffer(buffer.as_vertex_buffer());
+            scope.draw({.vertex_range = {.offset = 0, .size = 6}, .instance_range = {.offset = 0, .size = 2}});
+        });
+    for (auto y = 0; y < 4; ++y)
+        for (auto x = 0; x < 8; ++x)
+        {
+            auto const expected = x < 4 ? tg::vec4f(3, 0, 0, 1) : tg::vec4f(13, 1, 0, 1);
+            CHECK(pixels[0].rgba_float(x, y) == expected).context(cc::format("pixel ({}, {})", x, y));
+        }
+
+    // a scissor per viewport: the right one cut to its top row alone
+    tg::aabb2i const cuts[]
+        = {tg::aabb2i(tg::pos2i(0, 0), tg::pos2i(4, 4)), tg::aabb2i(tg::pos2i(4, 0), tg::pos2i(8, 1))};
+    auto const cut = co_await sg_test::draw_offscreen(
+        *ctx,
+        {.width = 8, .height = 4, .colors = {sg::pixel_format::rgba32_float}, .clear_color = tg::vec4f(-1, -1, -1, -1)},
+        [&](sg::rendering_scope& scope)
+        {
+            scope.bind_pipeline(*pipeline);
+            scope.set_viewports(halves);
+            scope.set_scissors(cuts);
+            scope.bind_vertex_buffer(buffer.as_vertex_buffer());
+            scope.draw({.vertex_range = {.offset = 0, .size = 6}, .instance_range = {.offset = 0, .size = 2}});
+        });
+    CHECK(cut[0].rgba_float(5, 0) == tg::vec4f(13, 1, 0, 1));
+    CHECK(cut[0].rgba_float(5, 2) == tg::vec4f(-1, -1, -1, -1));
+    CHECK(cut[0].rgba_float(1, 2) == tg::vec4f(3, 0, 0, 1));
 }
 
 ASYNC_INVOCABLE_TEST("sg - a vertex stage sends each instance to its own layer of an array target",

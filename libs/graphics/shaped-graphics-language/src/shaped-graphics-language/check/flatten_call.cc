@@ -737,12 +737,11 @@ auto sgl::check::impl::flattener::inline_bound(ast::expr_id call,
         auto const* const ref = x.node.try_as<flat_local_ref>();
         if (ref != nullptr && is_substitutable(argument))
             bound.push_back({.where = where, .local = ref->local});
-        // CHK-324: a resource stands wherever the parameter is named, since no target holds one in a local
-        else if (is_substitutable(argument) || is_resource_member(argument))
+        else if (is_substitutable(argument))
             bound.push_back({.where = where, .literal = argument});
-        // an element of a binding array at an index computed once, named again wherever the parameter is (CHK-366)
-        else if (is_resource(c.out.at(x.type).kind) && x.node.is<flat_element>())
-            bound.push_back({.where = where, .literal = pin_place(argument)});
+        // CHK-324: a resource stands wherever the parameter is named, since no target holds one in a local
+        else if (auto const stand_in = resource_stand_in(argument); is_valid(stand_in))
+            bound.push_back({.where = where, .literal = stand_in});
         else
         {
             auto const local = add_local(local_kind::let, parameters[i].name, x.type, parameters[i].name);

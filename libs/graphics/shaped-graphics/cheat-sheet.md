@@ -119,6 +119,10 @@ ctx.supports(sg::feature::ray_query)               // bool — THE capability qu
                                                    //     compare-exchange in a pixel stage needs it; false on webgpu)
                                                    //   | vertex_layer_output (a vertex stage picks the layer of an array target,
                                                    //     SGL's @layer; dx12 and vulkan ask the device, true on metal, false on webgpu)
+                                                   //   | quad_control (SGL's quad_any / quad_all, helpers included; dx12 with wave ops,
+                                                   //     vulkan with VK_KHR_shader_quad_control; false on metal until verified, and on webgpu)
+                                                   //   | multi_viewport (set_viewports past one, SGL's @viewport_index; dx12 with the
+                                                   //     layer output, vulkan's multiViewport; false on metal until verified, and on webgpu)
                                                    //   | view_instancing (one draw renders view_count views, view i into layer i;
                                                    //   | pixel_view_read_workaround (no capability: Intel dx12 needs a pixel stage to read the view; SGL's keep_view asks for it)
                                                    //     SGL's @view_index; dx12's ViewInstancingTier, vulkan's multiview,
@@ -437,6 +441,8 @@ cmd.raster.bind_group(group_index, binding_group)      // void — bind at slot 
 cmd.raster.bind_vertex_buffers({vbuf->as_vertex_buffer<Vtx>()}, first_slot=0)  // void — also: bind_vertex_buffer(view, slot) / span overload
 cmd.raster.bind_index_buffer(ibuf->as_index_buffer(sg::index_format::uint16))  // void
 cmd.raster.set_viewport(vp) / .set_scissor(rect)       // void — override the scope's viewport / scissor
+cmd.raster.set_viewports(span) / .set_scissors(span)   // void — viewport i for SGL's @viewport_index i, each its own
+                                                       //   scissor; more than one needs feature::multi_viewport, max_viewports 16
 cmd.raster.set_stencil_reference(u32) / .set_blend_constants(tg::vec4f)  // void — dynamic depth-stencil / blend state; blend constants are 0 until set, per rendering scope
 cmd.raster.set_inline_constants(data|POD, offset={})   // void — root/push constants (same as cmd.compute)
 cmd.raster.declare_array_buffer_access(G::arrays::member | "name", elements) / declare_array_texture_access(…)  // -> sg::array_access_declaration — as on cmd.compute, every draw while it lives; also ends with the scope

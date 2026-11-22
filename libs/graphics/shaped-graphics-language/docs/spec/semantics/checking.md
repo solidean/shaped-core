@@ -545,6 +545,13 @@ fun shade(k: float) -> float:
   An offset's literals are from -8 to 7, and a comparison's `level` is the literal `0.0`; anything else is `invalid-constant-argument`.
 * **CHK-281** A call that samples a depth texture through a sampler that filters is `type-mismatch`, as CHK-210 is for an `@unfilterable` texture.
   A comparison takes a `comparison_sampler`, which is none of the samplers this counts.
+* **CHK-535** `t.lod(coord, smp)` is the level of detail a `sample` of `t` at `coord` would read, clamped to the levels `t` has, a `float`.
+  `t.lod_unclamped(coord, smp)` is the same level unclamped.
+  They are methods of a `texture_2d` and a `texture_2d_array` of floats, and an array's takes no layer, since the level is the same in every layer.
+  Each is `@stages(.pixel)` and takes derivatives, so it stands in uniform control flow as an implicit `sample` does (CHK-282).
+  dx12 and metal ask the hardware, and vulkan's `OpImageQueryLod` gives both levels at once.
+  WebGPU has no such query, so its text computes the level from `dpdx` and `dpdy` of `coord` and the size of level 0 (EMIT-273).
+  That polyfill ignores the sampler's bias and its level clamps, and is an approximation: GPUs already disagree on an anisotropic level.
 * **CHK-314** A `sampler name:` at file scope is a symbol whose type is `comparison_sampler` where it sets `compare`, and `sampler` otherwise.
   Its settings and its attributes are judged as CHK-204 judges a binding's static sampler.
   It is used by its name, handed to a builtin as CHK-206 says, or through a texture's `@sampler` (CHK-279).
@@ -557,7 +564,13 @@ fun shade(k: float) -> float:
   `mut` on a buffer, `bytes` or an image is its access, as on a binding member, and never a caller's place (CHK-315).
   The parameter stands for its argument wherever it is named, so the member's access, its `@sampler` and its footprint are the parameter's, and the function lists no binding for it.
   A buffer or `bytes` parameter is subscripted, its `length` read, or handed to a call; a texture, an image or a sampler is handed to a call.
-  A local, a field and a result of a resource type stay `unsupported-yet`.
+  A `let` of a resource is CHK-536; a `let mut`, a field and a result of a resource type stay refused.
+* **CHK-536** `let t = v` of a resource names it as a parameter does (CHK-366): `v` is handed to the `let` as an argument is, and the name stands for it wherever it is read.
+  So `v` is a binding member, an element of a binding array, a file-scope sampler, or a name that stands for one, and no local holds it on any target.
+  An element's index is evaluated once, where the `let` stands, and keeps its `nonuniform` or `uniform` mark at every use.
+  A resource chosen at run time, `if c => a.x else a.y` or a `case` of them, is `wrong-kind-of-name`, since no one member is what each use reads.
+  So is a `let mut` of a resource, which could be assigned another, and an assignment to a name of a resource is `not-assignable`.
+  A test names what it lists the same way (CHK-333).
 * **CHK-367** `img[xy]` is a texel of an image member: a read of it is `img.load(xy)`, and an assignment to it is `img.store(xy, v)` ([why](why/checking.md#chk-367)).
   The subscript takes the arguments `load` takes, so an array's layer is named, `img[xy, layer = 2]`.
   It is judged as the call it stands for, so a read of an `out` image is `no-matching-overload`, and `img[xy] += v` reads and writes a `mut` one.
@@ -584,12 +597,16 @@ fun shade(k: float) -> float:
   On any other member it is `wrong-kind-of-name`, and it needs `device_coherence`, a form CHK-201 judges.
 * **CHK-369** `@padding(.none)` places GPU memory as a C++ compiler places a struct of the generated host types, and promises that layout to the host ([why](why/checking.md#chk-369)).
   On a binding it places the binding's constant block (EMIT-154) and every buffer's element (EMIT-167); on a buffer member, that buffer's element.
-  Without it, memory is placed at its natural alignment (EMIT-110).
+  Without it, or with `@padding(.natural)`, memory is placed at its natural alignment (EMIT-110).
   On any other member it is `wrong-kind-of-name`, since a constant takes its block's padding.
   `@padding(.every_element)` on a constant block's member that is an array of values starts each element on a row (EMIT-172).
   On any other member it is `wrong-kind-of-name`, and on a binding `invalid-attribute-arguments`, since it stands on the array it pads.
   `.every_column` is `unsupported-yet`, since a `mat3`'s columns stand 16 bytes apart already.
   Any other argument, and the attribute on a `@workgroup` binding, is `invalid-attribute-arguments`.
+* **CHK-532** A buffer whose element is a builtin that strides past its C++ host type states its `@padding`, on the member or on the binding.
+  `buffer[float3]` strides by 16 where `tg::vec3f` takes 12, and `buffer[mat3]` by 48 where `tg::mat3f` takes 36; without either it is `padding-not-stated`, naming both strides.
+  `@padding(.natural)` keeps the natural layout (EMIT-110) and `@padding(.none)` takes the host's.
+  A host that writes its own values sees no generated struct, so a padding that would surprise it is never implicit; a struct's element is the generated struct the host writes, and needs no statement.
 
 ```sgl
 @inline binding constants:
@@ -919,6 +936,10 @@ fun f() -> float:
   The rasterizer reads it, so it takes no location and no `@interpolate`, and a pixel stage that takes the struct reads the layer its primitive went to.
   Each stage whose struct holds one needs `vertex_layer_output`, which WebGPU has on no device, so its WGSL is `target-lacks-feature`.
   A layer past the target's last layers draws nothing.
+* **CHK-534** A field of that struct may carry `@viewport_index` likewise, at most one, a `uint`: the viewport its primitive draws into, and the scissor that clips it.
+  It takes no location and no `@interpolate`, and a pixel stage that takes the struct reads it as `@layer` is read.
+  Each stage whose struct holds one needs `multi_viewport`, which WebGPU has on no device, so its WGSL is `target-lacks-feature`.
+  A host sets the viewports with `set_viewports`; an index past the last one set is the API's to define, and SGL does not.
   The struct that reaches the rasterizer carries exactly one, which CHK-307 asks of the pipeline.
 * **CHK-437** `@view_index` is which view of a draw of several the invocation renders, from 0, and the pipeline's `view_count` says how many.
   View `i` renders into layer `i` of every target, so a stereo frame is one draw into a two-layer array, and the shader picks each eye's camera by it.
@@ -1355,6 +1376,7 @@ The stage inputs `@subgroup_size` and `@subgroup_invocation_id` (CHK-271) are it
   A number is a numeric scalar of the prelude, and every operation that takes a number takes a vector of numbers too, componentwise.
   A lane that names no invocation of the subgroup, at run time, gives a value the language does not specify, whichever operation names it.
 * **CHK-377** A subgroup operation stands only in uniform control flow, judged as CHK-282 judges a barrier, and its result is non-uniform ([why](why/checking.md#chk-377)).
+  Control flow that differs between subgroups alone is uniform enough for it (CHK-537).
 * **CHK-378** The lane of `subgroup_broadcast` is a constant `int` from 0 to 127, and the lane of `quad_broadcast` a constant from 0 to 3, or each is `invalid-constant-argument`.
   So are the mask of `subgroup_shuffle_xor` and the delta of `subgroup_shuffle_up` and `subgroup_shuffle_down`, from 0 to 127, which WGSL and MSL require every invocation to share.
   A constant is an `int` literal or the name of an `int` `const`; 128 is the most invocations a subgroup holds on any target, and WGSL refuses a lane past it.
@@ -1362,11 +1384,24 @@ The stage inputs `@subgroup_size` and `@subgroup_invocation_id` (CHK-271) are it
 * **CHK-380** A compute entry point whose inlined body reaches a quad operation has a workgroup of one row, `(x, 1, 1)` with `x` a multiple of 4 ([why](why/checking.md#chk-380)).
   Any other workgroup makes each such call `invalid-entry-point`.
   That is the one shape whose quads HLSL forms of four consecutive invocations, as WGSL and MSL form every compute stage's.
+* **CHK-533** `quad_any(b)` and `quad_all(b)` are the **quad votes**: whether `b` holds in any or in every invocation of the quad, its helpers included.
+  Each needs `quad_control` beside `subgroups`, and is `@stages(.pixel)`, since only a pixel stage's quads have helpers to agree with.
+  A quad vote differs between quads alone, so control flow that branches on one, and on nothing else that differs, reaches each quad whole.
+  There a derivative and a quad operation stand as in uniform control flow (CHK-282); a barrier and any other subgroup operation do not.
+  A `subgroup_any` gives no such thing: on WebGPU a helper may sit out a subgroup operation, which is why `quad_control` is a feature WebGPU lacks.
+* **CHK-537** A vote, a reduction and a broadcast of a constant lane give every active invocation of the subgroup the same value, so each differs between subgroups alone.
+  Control flow that branches on such a value, and on nothing else that differs, is taken the same way by every active invocation of each subgroup.
+  There a subgroup operation stands as in uniform control flow (CHK-377); a barrier, a derivative and a quad operation do not.
+  A barrier waits for the whole workgroup, whose subgroups may go different ways.
+  A derivative and a quad operation read the quad's helpers, which a target may leave out of the vote, so a helper may go the other way.
+  A quad's agreement (CHK-533) and a subgroup's are independent: control flow that branches on both differs within the quad and within the subgroup, as any other divergence does.
+  `subgroup_elect`, a scan and a shuffle give each invocation its own value, so a branch on one is divergent.
 
 | operation | gives |
 |---|---|
 | `subgroup_all(b)`, `subgroup_any(b)` | whether the `bool` `b` holds in every invocation, or in any |
 | `subgroup_ballot(b)` | a `uint4` whose bit `i` is set where invocation `i`'s `b` holds |
+| `subgroup_elect()` | whether this is the lowest-indexed active invocation, which exactly one invocation of the subgroup is |
 | `subgroup_add(x)`, `subgroup_mul(x)`, `subgroup_min(x)`, `subgroup_max(x)` | the sum, the product, the minimum or the maximum of the number `x` over the subgroup |
 | `subgroup_bit_and(x)`, `subgroup_bit_or(x)`, `subgroup_bit_xor(x)` | the same, bitwise, of an integer `x` |
 | `subgroup_exclusive_add(x)`, `subgroup_exclusive_mul(x)` | the sum or the product over the invocations below this one |
@@ -1376,6 +1411,7 @@ The stage inputs `@subgroup_size` and `@subgroup_invocation_id` (CHK-271) are it
 | `subgroup_shuffle_xor(x, mask)`, `subgroup_shuffle_up(x, delta)`, `subgroup_shuffle_down(x, delta)` | `x` of the invocation `id ^ mask`, `id - delta` or `id + delta`, for this invocation's `id` |
 | `quad_swap_x(x)`, `quad_swap_y(x)`, `quad_swap_diagonal(x)` | `x` of the quad's horizontal, vertical or diagonal neighbour |
 | `quad_broadcast(x, lane)` | `x` of the quad's invocation `lane` |
+| `quad_any(b)`, `quad_all(b)` | whether the `bool` `b` holds in any or every invocation of the quad, helpers included (CHK-533) |
 
 ```sgl sketch
 require subgroups
@@ -1935,7 +1971,8 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `unknown-module`, `use-of-own-module` | CHK-347 |
 | `module-cycle` | CHK-349 |
 | `unknown-name` | CHK-24, CHK-62, CHK-245, CHK-330 |
-| `wrong-kind-of-name` | CHK-24, CHK-54, CHK-79, CHK-237, CHK-247, CHK-199, CHK-200, CHK-202, CHK-203, CHK-205, CHK-279, CHK-285, CHK-286, CHK-292, CHK-296, CHK-297, CHK-299, CHK-300, CHK-315, CHK-317, CHK-320, CHK-338, CHK-339, CHK-347, CHK-368, CHK-372, CHK-373, CHK-374, CHK-390 |
+| `wrong-kind-of-name` | CHK-24, CHK-54, CHK-79, CHK-237, CHK-247, CHK-199, CHK-200, CHK-202, CHK-203, CHK-205, CHK-279, CHK-285, CHK-286, CHK-292, CHK-296, CHK-297, CHK-299, CHK-300, CHK-315, CHK-317, CHK-320, CHK-338, CHK-339, CHK-347, CHK-368, CHK-372, CHK-373, CHK-374, CHK-390, CHK-536 |
+| `padding-not-stated` | CHK-532 |
 | `unexpected-keyword` | CHK-315 |
 | `default-not-allowed-here` | CHK-316 |
 | `missing-type` | CHK-26 |
@@ -1946,7 +1983,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `binding-not-listed` | CHK-45, CHK-131, CHK-228 |
 | `as-precedence` | CHK-411 |
 | `type-mismatch` | CHK-52, CHK-56, CHK-77, CHK-112 to CHK-118, CHK-121, CHK-167, CHK-210, CHK-214, CHK-219, CHK-236, CHK-243, CHK-275, CHK-276, CHK-279, CHK-281, CHK-287, CHK-329, CHK-344, CHK-362, CHK-375, CHK-392, CHK-429, CHK-433, CHK-434 |
-| `not-assignable` | CHK-112, CHK-236, CHK-316, CHK-352, CHK-367, CHK-514 |
+| `not-assignable` | CHK-112, CHK-236, CHK-316, CHK-352, CHK-367, CHK-514, CHK-536 |
 | `read-before-assignment` | CHK-55 |
 | `missing-return` | CHK-125, CHK-236 |
 | `unreachable-code` | CHK-126, CHK-162, CHK-430 |

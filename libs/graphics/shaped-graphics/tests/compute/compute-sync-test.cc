@@ -580,6 +580,81 @@ ASYNC_INVOCABLE_TEST("sg - SGL's subgroup sum after a loop each lane leaves at i
     }
 }
 
+ASYNC_INVOCABLE_TEST("sg - SGL's branch on a subgroup vote keeps the subgroup whole, and subgroup_elect picks one lane "
+                     "of each subgroup (CHK-537)",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::subgroups))
+        SKIP("this context has no subgroup operations");
+
+    auto const pipeline = co_await shaders::subgroups::elect_under_vote.acquire_pipeline(*ctx);
+    auto const group_layout = ctx->cached.acquire_binding_group_layout<shaders::subgroups::wave_vote>();
+
+    constexpr auto groups = 4;
+    constexpr auto count = groups * 128;
+    constexpr auto per = 4;
+    auto const usage = sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src;
+    auto const words = ctx->persistent.create_buffer_from_data(cc::vector<u32>::create_defaulted(count * per), usage);
+    auto const sizes = ctx->persistent.create_buffer_from_data(cc::vector<u32>::create_defaulted(count), usage);
+    auto const elected = ctx->persistent.create_buffer_from_data(cc::vector<u32>::create_defaulted(2), usage);
+
+    auto cmd = ctx->create_command_list();
+    auto const group = ctx->transient.create_binding_group(*cmd, group_layout,
+                                                           shaders::subgroups::wave_vote{
+                                                               .words = words.as_readwrite_buffer(),
+                                                               .sizes = sizes.as_readwrite_buffer(),
+                                                               .elected = elected.as_readwrite_buffer(),
+                                                           });
+    cmd->compute.bind_pipeline(*pipeline);
+    cmd->compute.bind_group(0, *group);
+    cmd->compute.dispatch_threads(count);
+    auto const words_back = cmd->download.data_from_buffer(words);
+    auto const sizes_back = cmd->download.data_from_buffer(sizes);
+    auto const elected_back = cmd->download.data_from_buffer(elected);
+    ctx->submit_command_list(cc::move(cmd));
+
+    auto const got = co_await words_back.data();
+    auto const got_sizes = co_await sizes_back.data();
+    auto const got_elected = co_await elected_back.data();
+    REQUIRE(got.size() == isize(count * per));
+    REQUIRE(got_sizes.size() == isize(count));
+    REQUIRE(got_elected.size() == 2);
+    auto const size = got_sizes[0];
+    REQUIRE(size >= 4u);
+    REQUIRE(size <= 128u);
+    for (auto i = 0; i < count; ++i)
+        REQUIRE(got_sizes[i] == size);
+
+    // the subgroup holding a workgroup's first invocation takes the branch whole, and no other subgroup does
+    for (auto g = 0; g < groups; ++g)
+    {
+        auto taken = u32(0);
+        auto elected_there = u32(0);
+        for (auto i = g * 128; i < (g + 1) * 128; ++i)
+        {
+            auto const* const w = got.data() + i * per;
+            if (w[0] == 0u)
+                continue;
+            ++taken;
+            CHECK(w[1] == size).context(cc::format("the sum under the vote, invocation {}", i));
+            if (w[2] != 0u)
+            {
+                ++elected_there;
+                CHECK(w[3] == 0u).context(cc::format("the elected lane, invocation {}", i));
+            }
+        }
+        CHECK(taken == size).context(cc::format("workgroup {}", g));
+        CHECK(elected_there == 1u).context(cc::format("workgroup {}", g));
+    }
+
+    // every subgroup elects one invocation, and their subgroups cover the dispatch
+    CHECK(got_elected[0] == u32(count) / size);
+    CHECK(got_elected[1] == u32(count));
+}
+
 ASYNC_INVOCABLE_TEST("sg - an SGL buffer's length and a bytes' length are what the bound memory holds (CHK-460)",
                      (sg::context_handle const& ctx))
 {

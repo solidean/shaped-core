@@ -2803,6 +2803,10 @@
 @builtin @pure @stages(.pixel) fun sample(t: texture_2d[float], coord: float2, .bias: float) -> float
 @builtin @pure fun sample(t: texture_2d[float], coord: float2, smp: sampler, .grad_x: float2, .grad_y: float2) -> float
 @builtin @pure fun sample(t: texture_2d[float], coord: float2, .grad_x: float2, .grad_y: float2) -> float
+@builtin @pure @stages(.pixel) fun lod(t: texture_2d[float], coord: float2, smp: sampler) -> float
+@builtin @pure @stages(.pixel) fun lod(t: texture_2d[float], coord: float2) -> float
+@builtin @pure @stages(.pixel) fun lod_unclamped(t: texture_2d[float], coord: float2, smp: sampler) -> float
+@builtin @pure @stages(.pixel) fun lod_unclamped(t: texture_2d[float], coord: float2) -> float
 @builtin @pure fun gather(t: texture_2d[float], coord: float2, smp: sampler, .component: texel_component = texel_component.x) -> float4
 @builtin @pure fun gather(t: texture_2d[float], coord: float2, .component: texel_component = texel_component.x) -> float4
 @builtin @pure fun gather(t: texture_2d[float], coord: float2, smp: sampler, .component: texel_component = texel_component.x, .offset: int2) -> float4
@@ -2821,6 +2825,10 @@
 @builtin @pure @stages(.pixel) fun sample(t: texture_2d[float2], coord: float2, .bias: float) -> float2
 @builtin @pure fun sample(t: texture_2d[float2], coord: float2, smp: sampler, .grad_x: float2, .grad_y: float2) -> float2
 @builtin @pure fun sample(t: texture_2d[float2], coord: float2, .grad_x: float2, .grad_y: float2) -> float2
+@builtin @pure @stages(.pixel) fun lod(t: texture_2d[float2], coord: float2, smp: sampler) -> float
+@builtin @pure @stages(.pixel) fun lod(t: texture_2d[float2], coord: float2) -> float
+@builtin @pure @stages(.pixel) fun lod_unclamped(t: texture_2d[float2], coord: float2, smp: sampler) -> float
+@builtin @pure @stages(.pixel) fun lod_unclamped(t: texture_2d[float2], coord: float2) -> float
 @builtin @pure fun gather(t: texture_2d[float2], coord: float2, smp: sampler, .component: texel_component = texel_component.x) -> float4
 @builtin @pure fun gather(t: texture_2d[float2], coord: float2, .component: texel_component = texel_component.x) -> float4
 @builtin @pure fun gather(t: texture_2d[float2], coord: float2, smp: sampler, .component: texel_component = texel_component.x, .offset: int2) -> float4
@@ -2839,6 +2847,10 @@
 @builtin @pure @stages(.pixel) fun sample(t: texture_2d[float3], coord: float2, .bias: float) -> float3
 @builtin @pure fun sample(t: texture_2d[float3], coord: float2, smp: sampler, .grad_x: float2, .grad_y: float2) -> float3
 @builtin @pure fun sample(t: texture_2d[float3], coord: float2, .grad_x: float2, .grad_y: float2) -> float3
+@builtin @pure @stages(.pixel) fun lod(t: texture_2d[float3], coord: float2, smp: sampler) -> float
+@builtin @pure @stages(.pixel) fun lod(t: texture_2d[float3], coord: float2) -> float
+@builtin @pure @stages(.pixel) fun lod_unclamped(t: texture_2d[float3], coord: float2, smp: sampler) -> float
+@builtin @pure @stages(.pixel) fun lod_unclamped(t: texture_2d[float3], coord: float2) -> float
 @builtin @pure fun gather(t: texture_2d[float3], coord: float2, smp: sampler, .component: texel_component = texel_component.x) -> float4
 @builtin @pure fun gather(t: texture_2d[float3], coord: float2, .component: texel_component = texel_component.x) -> float4
 @builtin @pure fun gather(t: texture_2d[float3], coord: float2, smp: sampler, .component: texel_component = texel_component.x, .offset: int2) -> float4
@@ -2857,6 +2869,10 @@
 @builtin @pure @stages(.pixel) fun sample(t: texture_2d[float4], coord: float2, .bias: float) -> float4
 @builtin @pure fun sample(t: texture_2d[float4], coord: float2, smp: sampler, .grad_x: float2, .grad_y: float2) -> float4
 @builtin @pure fun sample(t: texture_2d[float4], coord: float2, .grad_x: float2, .grad_y: float2) -> float4
+@builtin @pure @stages(.pixel) fun lod(t: texture_2d[float4], coord: float2, smp: sampler) -> float
+@builtin @pure @stages(.pixel) fun lod(t: texture_2d[float4], coord: float2) -> float
+@builtin @pure @stages(.pixel) fun lod_unclamped(t: texture_2d[float4], coord: float2, smp: sampler) -> float
+@builtin @pure @stages(.pixel) fun lod_unclamped(t: texture_2d[float4], coord: float2) -> float
 @builtin @pure fun gather(t: texture_2d[float4], coord: float2, smp: sampler, .component: texel_component = texel_component.x) -> float4
 @builtin @pure fun gather(t: texture_2d[float4], coord: float2, .component: texel_component = texel_component.x) -> float4
 @builtin @pure fun gather(t: texture_2d[float4], coord: float2, smp: sampler, .component: texel_component = texel_component.x, .offset: int2) -> float4
@@ -2978,6 +2994,10 @@
 @builtin @pure @stages(.pixel) fun sample(t: texture_2d_array[float], coord: float2, .layer: int, .bias: float) -> float
 @builtin @pure fun sample(t: texture_2d_array[float], coord: float2, smp: sampler, .layer: int, .grad_x: float2, .grad_y: float2) -> float
 @builtin @pure fun sample(t: texture_2d_array[float], coord: float2, .layer: int, .grad_x: float2, .grad_y: float2) -> float
+@builtin @pure @stages(.pixel) fun lod(t: texture_2d_array[float], coord: float2, smp: sampler) -> float
+@builtin @pure @stages(.pixel) fun lod(t: texture_2d_array[float], coord: float2) -> float
+@builtin @pure @stages(.pixel) fun lod_unclamped(t: texture_2d_array[float], coord: float2, smp: sampler) -> float
+@builtin @pure @stages(.pixel) fun lod_unclamped(t: texture_2d_array[float], coord: float2) -> float
 @builtin @pure fun gather(t: texture_2d_array[float], coord: float2, smp: sampler, .layer: int, .component: texel_component = texel_component.x) -> float4
 @builtin @pure fun gather(t: texture_2d_array[float], coord: float2, .layer: int, .component: texel_component = texel_component.x) -> float4
 @builtin @pure fun gather(t: texture_2d_array[float], coord: float2, smp: sampler, .layer: int, .component: texel_component = texel_component.x, .offset: int2) -> float4
@@ -2996,6 +3016,10 @@
 @builtin @pure @stages(.pixel) fun sample(t: texture_2d_array[float2], coord: float2, .layer: int, .bias: float) -> float2
 @builtin @pure fun sample(t: texture_2d_array[float2], coord: float2, smp: sampler, .layer: int, .grad_x: float2, .grad_y: float2) -> float2
 @builtin @pure fun sample(t: texture_2d_array[float2], coord: float2, .layer: int, .grad_x: float2, .grad_y: float2) -> float2
+@builtin @pure @stages(.pixel) fun lod(t: texture_2d_array[float2], coord: float2, smp: sampler) -> float
+@builtin @pure @stages(.pixel) fun lod(t: texture_2d_array[float2], coord: float2) -> float
+@builtin @pure @stages(.pixel) fun lod_unclamped(t: texture_2d_array[float2], coord: float2, smp: sampler) -> float
+@builtin @pure @stages(.pixel) fun lod_unclamped(t: texture_2d_array[float2], coord: float2) -> float
 @builtin @pure fun gather(t: texture_2d_array[float2], coord: float2, smp: sampler, .layer: int, .component: texel_component = texel_component.x) -> float4
 @builtin @pure fun gather(t: texture_2d_array[float2], coord: float2, .layer: int, .component: texel_component = texel_component.x) -> float4
 @builtin @pure fun gather(t: texture_2d_array[float2], coord: float2, smp: sampler, .layer: int, .component: texel_component = texel_component.x, .offset: int2) -> float4
@@ -3014,6 +3038,10 @@
 @builtin @pure @stages(.pixel) fun sample(t: texture_2d_array[float3], coord: float2, .layer: int, .bias: float) -> float3
 @builtin @pure fun sample(t: texture_2d_array[float3], coord: float2, smp: sampler, .layer: int, .grad_x: float2, .grad_y: float2) -> float3
 @builtin @pure fun sample(t: texture_2d_array[float3], coord: float2, .layer: int, .grad_x: float2, .grad_y: float2) -> float3
+@builtin @pure @stages(.pixel) fun lod(t: texture_2d_array[float3], coord: float2, smp: sampler) -> float
+@builtin @pure @stages(.pixel) fun lod(t: texture_2d_array[float3], coord: float2) -> float
+@builtin @pure @stages(.pixel) fun lod_unclamped(t: texture_2d_array[float3], coord: float2, smp: sampler) -> float
+@builtin @pure @stages(.pixel) fun lod_unclamped(t: texture_2d_array[float3], coord: float2) -> float
 @builtin @pure fun gather(t: texture_2d_array[float3], coord: float2, smp: sampler, .layer: int, .component: texel_component = texel_component.x) -> float4
 @builtin @pure fun gather(t: texture_2d_array[float3], coord: float2, .layer: int, .component: texel_component = texel_component.x) -> float4
 @builtin @pure fun gather(t: texture_2d_array[float3], coord: float2, smp: sampler, .layer: int, .component: texel_component = texel_component.x, .offset: int2) -> float4
@@ -3032,6 +3060,10 @@
 @builtin @pure @stages(.pixel) fun sample(t: texture_2d_array[float4], coord: float2, .layer: int, .bias: float) -> float4
 @builtin @pure fun sample(t: texture_2d_array[float4], coord: float2, smp: sampler, .layer: int, .grad_x: float2, .grad_y: float2) -> float4
 @builtin @pure fun sample(t: texture_2d_array[float4], coord: float2, .layer: int, .grad_x: float2, .grad_y: float2) -> float4
+@builtin @pure @stages(.pixel) fun lod(t: texture_2d_array[float4], coord: float2, smp: sampler) -> float
+@builtin @pure @stages(.pixel) fun lod(t: texture_2d_array[float4], coord: float2) -> float
+@builtin @pure @stages(.pixel) fun lod_unclamped(t: texture_2d_array[float4], coord: float2, smp: sampler) -> float
+@builtin @pure @stages(.pixel) fun lod_unclamped(t: texture_2d_array[float4], coord: float2) -> float
 @builtin @pure fun gather(t: texture_2d_array[float4], coord: float2, smp: sampler, .layer: int, .component: texel_component = texel_component.x) -> float4
 @builtin @pure fun gather(t: texture_2d_array[float4], coord: float2, .layer: int, .component: texel_component = texel_component.x) -> float4
 @builtin @pure fun gather(t: texture_2d_array[float4], coord: float2, smp: sampler, .layer: int, .component: texel_component = texel_component.x, .offset: int2) -> float4
@@ -4121,6 +4153,8 @@ struct exchange_result[T]:
 @builtin @stages(.pixel, .compute) fun subgroup_any(b: bool) -> bool
 /// Bit `i` set where invocation `i`'s `b` holds.
 @builtin @stages(.pixel, .compute) fun subgroup_ballot(b: bool) -> uint4
+/// Whether this is the lowest-indexed active invocation of the subgroup, which exactly one is.
+@builtin @stages(.pixel, .compute) fun subgroup_elect() -> bool
 /// The sum of `x` over the subgroup.
 @builtin @stages(.pixel, .compute) fun subgroup_add(x: float) -> float
 /// The sum of `x` over the subgroup.
@@ -5081,6 +5115,10 @@ struct exchange_result[T]:
 @builtin @stages(.pixel, .compute) fun quad_broadcast(x: ushort3, lane: int) -> ushort3
 /// `x` of the quad's invocation `lane`, a constant from 0 to 3 (CHK-378).
 @builtin @stages(.pixel, .compute) fun quad_broadcast(x: ushort4, lane: int) -> ushort4
+/// Whether `b` holds in any invocation of the quad, its helpers included (CHK-533).
+@builtin @stages(.pixel) fun quad_any(b: bool) -> bool
+/// Whether `b` holds in every invocation of the quad, its helpers included (CHK-533).
+@builtin @stages(.pixel) fun quad_all(b: bool) -> bool
 
 // What a test's run is in, which it reads where an entry point reads its subgroup's stage inputs (EVAL-141).
 // A test that reaches either runs once per subgroup size a target has; no target writes them.
@@ -5331,6 +5369,8 @@ enum feature:
     shader_shared_int64_atomics
     shader_int64_min_max_atomics
     clustered_geometry
+    quad_control
+    multi_viewport
 
 /// The API this compile writes for, known once a body is inlined; no const holds it.
 const target_api: graphics_api = .none

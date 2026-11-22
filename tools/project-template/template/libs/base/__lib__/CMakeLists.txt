@@ -7,6 +7,7 @@ target_sources(__lib__
     TYPE HEADERS
     BASE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/src"
     FILES
+    src/__lib__/fwd.hh
     src/__lib__/greeting.hh
 )
 target_compile_features(__lib__ PUBLIC cxx_std_23)

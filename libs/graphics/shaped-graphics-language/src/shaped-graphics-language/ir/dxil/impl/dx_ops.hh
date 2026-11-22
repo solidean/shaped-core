@@ -90,6 +90,7 @@ enum class dx_class_id : u8
     sample_cmp,
     sample_cmp_level_zero,
     texture_gather_cmp,
+    calculate_lod,
     set_mesh_output_counts,
     emit_indices,
     get_mesh_payload,
@@ -135,6 +136,7 @@ enum class dx_class_id : u8
     buffer_update_counter,
     legacy_f32_to_f16,
     legacy_f16_to_f32,
+    wave_is_first_lane,
 };
 
 // clang-format off
@@ -200,6 +202,7 @@ inline constexpr dx_class k_dx_classes[] = {
     {"sampleCmp", "R:hhffffiiiff", dx_class::read_only},
     {"sampleCmpLevelZero", "R:hhffffiiif", dx_class::read_only},
     {"textureGatherCmp", "R:hhffffiiif", dx_class::read_only},
+    {"calculateLOD", "o:hhfffc", dx_class::read_only},
     {"setMeshOutputCounts", "v:ii"},
     {"emitIndices", "v:iiii"},
     {"getMeshPayload", "p:", dx_class::read_only},
@@ -245,6 +248,7 @@ inline constexpr dx_class k_dx_classes[] = {
     {"bufferUpdateCounter", "i:hb"},
     {"legacyF32ToF16", "i:f", dx_class::read_none},
     {"legacyF16ToF32", "f:i", dx_class::read_none},
+    {"waveIsFirstLane", "c:"},
 };
 // clang-format on
 
@@ -364,6 +368,7 @@ enum class dx_op : u8
     sample_cmp,
     sample_cmp_level_zero,
     texture_gather_cmp,
+    calculate_lod,
     set_mesh_output_counts,
     emit_indices,
     get_mesh_payload,
@@ -437,6 +442,7 @@ enum class dx_op : u8
     buffer_update_counter,
     legacy_f32_to_f16,
     legacy_f16_to_f32,
+    wave_is_first_lane,
 };
 
 struct dx_op_info
@@ -545,6 +551,7 @@ inline constexpr dx_op_info k_dx_ops[] = {
     {64, dx_class_id::sample_cmp, k_f16 | k_f32},
     {65, dx_class_id::sample_cmp_level_zero, k_f16 | k_f32},
     {74, dx_class_id::texture_gather_cmp, k_f16 | k_f32 | k_i16 | k_i32},
+    {81, dx_class_id::calculate_lod, k_f32},
     {168, dx_class_id::set_mesh_output_counts, k_no_overload},
     {169, dx_class_id::emit_indices, k_no_overload},
     {170, dx_class_id::get_mesh_payload, k_udt},
@@ -618,9 +625,10 @@ inline constexpr dx_op_info k_dx_ops[] = {
     {70, dx_class_id::buffer_update_counter, k_no_overload},
     {130, dx_class_id::legacy_f32_to_f16, k_no_overload},
     {131, dx_class_id::legacy_f16_to_f32, k_no_overload},
+    {110, dx_class_id::wave_is_first_lane, k_no_overload},
 };
 // clang-format on
 
-static_assert(sizeof(k_dx_ops) / sizeof(k_dx_ops[0]) == sizeof(char[isize(dx_op::legacy_f16_to_f32) + 1]));
-static_assert(sizeof(k_dx_classes) / sizeof(k_dx_classes[0]) == sizeof(char[isize(dx_class_id::legacy_f16_to_f32) + 1]));
+static_assert(sizeof(k_dx_ops) / sizeof(k_dx_ops[0]) == sizeof(char[isize(dx_op::wave_is_first_lane) + 1]));
+static_assert(sizeof(k_dx_classes) / sizeof(k_dx_classes[0]) == sizeof(char[isize(dx_class_id::wave_is_first_lane) + 1]));
 } // namespace sgl::ir::dxil::impl

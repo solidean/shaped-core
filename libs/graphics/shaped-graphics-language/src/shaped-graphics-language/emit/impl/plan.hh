@@ -65,6 +65,8 @@ struct planned_member
     bool is_position = false;
     /// `@layer`, which the target names by an attribute of its own and no location (CHK-419).
     bool is_layer = false;
+    /// `@viewport_index`, likewise (CHK-534).
+    bool is_viewport_index = false;
     /// How a stage link's member is interpolated; the default everywhere else.
     check::interpolation interpolate;
     /// A render target struct's depth or sample mask, which takes no location; `color` everywhere else.

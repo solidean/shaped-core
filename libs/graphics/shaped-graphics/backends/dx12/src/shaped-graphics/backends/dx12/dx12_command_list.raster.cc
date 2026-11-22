@@ -363,6 +363,32 @@ void dx12_command_list::raster_set_scissor(tg::aabb2i const& rect)
     _list->RSSetScissorRects(1, &r);
 }
 
+void dx12_command_list::raster_set_viewports(cc::span<sg::viewport const> viewports)
+{
+    CC_ASSERT(!viewports.empty() && viewports.size() <= sg::max_viewports, "set_viewports takes 1 to max_viewports "
+                                                                           "viewports");
+    D3D12_VIEWPORT d[sg::max_viewports] = {};
+    D3D12_RECT r[sg::max_viewports] = {};
+    for (auto i = isize(0); i < viewports.size(); ++i)
+    {
+        auto const& vp = viewports[i];
+        d[i] = {vp.offset[0], vp.offset[1], vp.size[0], vp.size[1], vp.min_depth, vp.max_depth};
+        // a viewport past the first has a scissor of zero area until one is set, so each takes its own rect
+        r[i] = {LONG(vp.offset[0]), LONG(vp.offset[1]), LONG(vp.offset[0] + vp.size[0]), LONG(vp.offset[1] + vp.size[1])};
+    }
+    _list->RSSetViewports(UINT(viewports.size()), d);
+    _list->RSSetScissorRects(UINT(viewports.size()), r);
+}
+
+void dx12_command_list::raster_set_scissors(cc::span<tg::aabb2i const> rects)
+{
+    CC_ASSERT(!rects.empty() && rects.size() <= sg::max_viewports, "set_scissors takes 1 to max_viewports rects");
+    D3D12_RECT r[sg::max_viewports] = {};
+    for (auto i = isize(0); i < rects.size(); ++i)
+        r[i] = {LONG(rects[i].min[0]), LONG(rects[i].min[1]), LONG(rects[i].max[0]), LONG(rects[i].max[1])};
+    _list->RSSetScissorRects(UINT(rects.size()), r);
+}
+
 void dx12_command_list::raster_set_stencil_reference(u32 reference)
 {
     _list->OMSetStencilRef(UINT(reference));

@@ -499,6 +499,15 @@ auto sgl::check::impl::flattener::is_resource_member(flat_expr_id id) const -> b
     return entry.at(id).node.is<flat_binding_member>() || entry.at(id).node.is<flat_file_sampler>();
 }
 
+auto sgl::check::impl::flattener::resource_stand_in(flat_expr_id value) -> flat_expr_id
+{
+    if (is_resource_member(value))
+        return value;
+    if (is_valid(value) && is_resource(c.out.at(entry.at(value).type).kind) && entry.at(value).node.is<flat_element>())
+        return pin_place(value);
+    return flat_expr_id::none;
+}
+
 auto sgl::check::impl::flattener::evaluate_once(flat_expr_id value, cc::string_view name, ast::expr_id from)
     -> evaluated_once
 {

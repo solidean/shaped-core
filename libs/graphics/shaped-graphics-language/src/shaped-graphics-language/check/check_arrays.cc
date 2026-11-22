@@ -501,6 +501,22 @@ i32 checker::storage_size_of(type_id type) const
     return measure(measure, type).size;
 }
 
+checker::builtin_strides checker::builtin_strides_of(type_id element) const
+{
+    auto count = i64(1);
+    while (is_valid(element) && out.builtin_type_of(element) == nullptr && out.at(element).kind == type_kind::array)
+    {
+        count *= out.at(element).count;
+        element = out.at(element).element;
+    }
+    auto const* const record = is_valid(element) ? out.builtin_type_of(element) : nullptr;
+    if (record == nullptr || record->wgsl_layout.size == 0)
+        return {};
+    auto const round_up = [](i32 n, i32 to) { return to > 0 ? (n + to - 1) / to * to : n; };
+    return {.natural = i32(count) * round_up(record->wgsl_layout.size, record->wgsl_layout.alignment),
+            .host = i32(count) * record->leaf_count * scalar_bytes_of(record->leaf_kind)};
+}
+
 bool checker::holds_atomic(type_id type) const
 {
     auto const& t = out.at(type);

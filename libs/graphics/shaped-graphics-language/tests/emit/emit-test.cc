@@ -535,6 +535,33 @@ TEST("sgl emit - only a let array of constants is static const, never a var or o
     CHECK(!msl.contains("static const"));
 }
 
+TEST("sgl emit - a const table of integers or bools is static const, which no invocation fills (EMIT-230)")
+{
+    // a table indexed at run time and filled per invocation stays in scratch memory: 1 KB per thread for BC7's shapes
+    auto const source
+        = cc::string_view("binding work:\n"
+                          "    dst: mut buffer[uint]\n"
+                          "\n"
+                          "const shapes = [\n"
+                          "    [0u, 1u, 2u]\n"
+                          "    [2u, 1u, 0u]\n"
+                          "]\n"
+                          "\n"
+                          "@compute(64) fun main(@thread_id id: int3){work}:\n"
+                          "    let offsets = [-1, 0, 1]\n"
+                          "    let kept = [true, false, true]\n"
+                          "    let s = shapes[id.x % 2][id.y % 3]\n"
+                          "    work.dst[id.x] = select(kept[id.z % 3], s, 7u) + (offsets[id.y % 3] as uint)\n");
+    for (auto const t : {target::hlsl_dx12, target::hlsl_vulkan})
+    {
+        auto const hlsl = text_of(source, t);
+        CHECK(hlsl.contains("static const uint shapes_1[2][3] = {{0u, 1u, 2u}, {2u, 1u, 0u}};\n")).context(hlsl);
+        CHECK(hlsl.contains("static const int offsets[3] = {")).context(hlsl);
+        CHECK(hlsl.contains("static const bool kept[3] = {true, false, true};\n")).context(hlsl);
+        CHECK(!hlsl.contains("array_value")).context(hlsl);
+    }
+}
+
 TEST("sgl emit - a vertex member whose name ends in a digit gets a semantic that does not")
 {
     // HLSL reads `UV1` as the semantic `UV` at index 1, and dx12 refuses an input layout naming `UV1`.
