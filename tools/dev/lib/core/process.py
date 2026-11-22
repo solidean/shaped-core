@@ -266,14 +266,16 @@ def env_for_preset(preset: Preset, emsdk_path: str | None = None) -> dict[str, s
     Cached process-wide, so a repeat for the same toolchain is free and only the first capture shows up as an "env" span.
     The result must therefore stay independent of anything that changes mid-run — it is derived from the toolchain alone, never from build state.
     """
-    key = ("emsdk", emsdk_path) if preset.is_emscripten else ("msvc", preset.toolset, preset.arch)
+    # Only an MSVC preset's --toolset names an MSVC toolset; a clang one names the clang version, and clang-cl takes the default MSVC environment.
+    msvc_toolset = preset.toolset if preset.family == "msvc" else None
+    key = ("emsdk", emsdk_path) if preset.is_emscripten else ("msvc", msvc_toolset, preset.arch)
     with _env_lock:
         if key in _env_cache:
             return _env_cache[key]
 
         # Profiled because the MSVC path shells out to vswhere and VsDevCmd.bat, and that is charged to nothing in the step banners.
         with profile.span(preset.name, type="env"):
-            env = emsdk_env(emsdk_path) if preset.is_emscripten else msvc_env(preset.toolset, preset.arch)
+            env = emsdk_env(emsdk_path) if preset.is_emscripten else msvc_env(msvc_toolset, preset.arch)
         _env_cache[key] = env
         return env
 

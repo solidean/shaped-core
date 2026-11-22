@@ -167,7 +167,7 @@ So the same dev.py can drive clang 19 / 20 / 21, or two Visual Studio toolsets, 
 ```bash
 uv run dev.py test --preset relwithdebinfo-linux-clang --toolset 21    # clang++-21 / clang-21 on PATH
 uv run dev.py test --preset relwithdebinfo-linux-gcc   --toolset 14    # g++-14 / gcc-14
-uv run dev.py test --preset relwithdebinfo-msvc        --toolset 14.51 # MSVC toolset 14.51 via vcvars
+uv run dev.py test --preset relwithdebinfo-msvc        --toolset 14.52 # MSVC toolset 14.52 via vcvars
 uv run dev.py test --preset relwithdebinfo-linux-clang --toolset /opt/llvm-20/bin/clang++  # explicit path
 ```
 
