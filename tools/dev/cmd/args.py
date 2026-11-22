@@ -54,11 +54,11 @@ def build_overrides(p: argparse.ArgumentParser) -> None:
 
 
 def server(p: argparse.ArgumentParser) -> None:
-    """The optional build server's flags (lib/pipeline/build_server.py); `--no-server` wins over every other opt-in."""
+    """The build server's flags (lib/pipeline/build_server.py); `--no-server` wins over everything else that turns it on."""
     p.add_argument(
         "--server", action="store_true",
-        help="Build through the optional local build server; when it is not installed or cannot serve, warn and "
-             "build as without it. Also SC_BUILD_SERVER=1, or the project's own default.",
+        help="Build through the local build server, the default wherever ccs is installed; when it is not installed or "
+             "cannot serve, warn and build as without it. Also SC_BUILD_SERVER=1.",
     )
     p.add_argument(
         "--no-server", action="store_true",

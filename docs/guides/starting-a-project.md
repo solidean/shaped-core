@@ -102,20 +102,15 @@ The graphics stack builds in a project as in shaped-core, with a few lines of it
 
 ## 5. The build server
 
-**When a build-server client is installed, opt this checkout in**; when none is, skip the step, since everything builds without one.
-ccs is the build server the driver's protocol is written against, and on Windows its client installs to `%LOCALAPPDATA%\ccs\bin\ccs.exe`.
-Look for it there, or ask, and write a `dev.toml` at the repository root:
+**Nothing to do where ccs is installed**: the project builds and tests through it by default, as shaped-core does.
+ccs is the build server the driver's protocol is written against, and its client is found at `%LOCALAPPDATA%\ccs\bin\ccs.exe` or on PATH.
+Where it is not installed, everything builds the plain way.
 
-```toml
-[build_server]
-enabled = true
-client = "C:/Users/<user>/AppData/Local/ccs/bin/ccs.exe"
-```
-
-- **`dev.toml` is per checkout and gitignored**: it names a path on one machine, so it is never committed, and the template's `.gitignore` already excludes it.
-- The project's `dev.py` reads it through `dev.build_server_from_dev_toml(ROOT)`, which the template already passes.
+- The project's `dev.py` decides through `dev.build_server_from_dev_toml(ROOT)`, which the template already passes.
+- **A `dev.toml` at the repository root** changes it for one checkout: `[build_server]` with `enabled = false` turns it off, and `client = "<path>"` names a client installed elsewhere.
+  It is per checkout and gitignored, and the template's `.gitignore` already excludes it.
 - `--no-server` and `SC_BUILD_SERVER=0` still win, and a server that cannot serve is one warning and a plain build.
-  [An optional build server](building-and-testing.md#an-optional-build-server) is the rest: what moves, the test cache, `ship --proof`.
+  [The build server](building-and-testing.md#the-build-server) is the rest: what moves, the test cache, `ship --proof`.
 
 ## 6. Issue tracking
 

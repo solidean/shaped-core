@@ -138,6 +138,22 @@ def test_dev_toml_sets_the_project_s_half() -> None:
         assert bs.from_dev_toml(root, client=default) == bs.BuildServer(client=default), "a dev.toml that does not parse is ignored"
 
 
+def test_an_installed_ccs_is_on_unless_the_checkout_turns_it_off() -> None:
+    with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as local:
+        root = Path(d)
+        nowhere = {"LOCALAPPDATA": str(Path(local)), "PATH": ""}
+        none = bs.from_dev_toml(root, environ=nowhere)
+        assert none.client is None and not none.enabled, "without ccs installed, nothing opts in and nothing warns"
+
+        client = Path(local) / "ccs" / "bin" / "ccs.exe"
+        client.parent.mkdir(parents=True)
+        client.write_bytes(b"")
+        on = bs.from_dev_toml(root, environ=nowhere)
+        assert on.client == client and on.enabled, "an installed ccs is on with no dev.toml at all"
+        (root / "dev.toml").write_text("[build_server]\nenabled = false\n", encoding="utf-8")
+        assert not bs.from_dev_toml(root, environ=nowhere).enabled, "enabled = false turns it off for the checkout"
+
+
 def test_no_server_wins_over_every_other_opt_in() -> None:
     on = bs.BuildServer(client=None, enabled=True)
     assert not bs.enabled(on, flag=False, environ={bs.ENV_ENABLE: "1"})

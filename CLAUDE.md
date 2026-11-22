@@ -304,6 +304,7 @@ it refuses uncommitted work, reruns the static gates on top of a merge the remot
 It runs the clang-tidy gates, shaped-linter, clang-format, a full-repo cross-reference check, then the test suite; `--no-test` skips that tail and `--list` shows the registry.
 The order is a correctness property rather than a listing convention, and [Pre-commit checks](docs/guides/building-and-testing.md#pre-commit-checks) says why.
 
+**Builds and tests go through the ccs build server wherever it is installed**, here and in every project built on shaped-core; `--no-server` or a checkout's `dev.toml` turns it off.
 `dev.py` is quiet by default and logs each step under `build/<preset>/run-logs/`.
 The loop is **run `dev.py`, then diagnose with `repo_tools`** — `build_diag` after a build, `test_diag` after a test, using the selector dev.py printed.
 
