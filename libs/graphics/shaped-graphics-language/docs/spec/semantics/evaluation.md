@@ -317,6 +317,9 @@ fun graded(a: float) -> float:
   A level of 0 or below magnifies, and filters by `mag_filter`; above 0 by `min_filter`.
   A `nearest` mip filter reads level `floor(level + 0.5)`, clamped to the levels the texture has; GPUs round a level of exactly a half differently.
   A `linear` one mixes the two levels around it, as EVAL-122 mixes texels.
+* **EVAL-149** `t.lod_unclamped(coord, smp)` is EVAL-124's level from the quad's gradients, before the sampler's bias and clamps (CHK-535).
+  `t.lod(coord, smp)` is that level clamped to `0` and the texture's last level.
+  In a run of one lane there are no gradients, so `lod_unclamped` is the lowest `float` and `lod` is 0.
 * **EVAL-125** A comparison sampler reads each texel as 1 where `reference op texel` holds and 0 where it does not, then filters those as EVAL-122 does.
   A gather reads one channel of the four texels a `linear` sample of level 0 weighs, as `(i0, j1)`, `(i1, j1)`, `(i1, j0)` and `(i0, j0)`, the order every target gives.
 * **EVAL-126** A cube's direction picks the face of its largest component, z before y before x where two are equal, and the coordinate on that face as Vulkan's table gives it.

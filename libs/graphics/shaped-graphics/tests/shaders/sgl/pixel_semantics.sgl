@@ -335,3 +335,29 @@ pipeline placed_tags:
     pixel = placed_ps
     cull = .none
     format = .rgba32_float
+
+// The level of detail a sample would read, clamped and not (CHK-535).
+// A 64 x 64 texture over a 16 x 16 target at uv = position / 16 is 4 texels a pixel, level 2.
+// An eighth of that uv is half a texel a pixel, level -1, which `lod` clamps to 0.
+binding detail:
+    source: texture_2d[float4]
+    sampler trilinear:
+        filter = .linear
+        mip_filter = .linear
+
+@pixel fun lod_ps(p: tagged){detail} -> tag_target:
+    let uv = float2(p.position.x, p.position.y) / 16.0
+    let near = uv * 0.125
+    let at = detail.source.lod(uv, detail.trilinear)
+    let at_unclamped = detail.source.lod_unclamped(uv, detail.trilinear)
+    let below = detail.source.lod(near, detail.trilinear)
+    let below_unclamped = detail.source.lod_unclamped(near, detail.trilinear)
+    return {
+        value = float4(at, at_unclamped, below, below_unclamped + (p.tag as float))
+    }
+
+pipeline lod_query:
+    vertex = tagged_vs
+    pixel = lod_ps
+    cull = .none
+    format = .rgba32_float

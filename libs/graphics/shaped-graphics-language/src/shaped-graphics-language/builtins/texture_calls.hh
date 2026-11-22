@@ -16,6 +16,9 @@ enum class sgl::builtins::texture::op : sgl::u8
     sample_compare,
     sample_compare_level,
     gather_compare,
+    /// The level of detail a `sample` would read, clamped to the texture's levels, or unclamped.
+    lod,
+    lod_unclamped,
     load,
     size,
     layer_count,

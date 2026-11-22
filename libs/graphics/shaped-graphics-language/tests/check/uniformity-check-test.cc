@@ -277,6 +277,18 @@ TEST("sgl check - a sample that picks its own level stands where every pixel of 
     CHECK(reports_for(pixel("    if p.uv.y > 0.5 => c.y = ddy(p.uv.x)\n")).contains("ddy takes derivatives"));
 }
 
+TEST("sgl check - a level-of-detail query takes derivatives, so it stands where every pixel of the quad arrives")
+{
+    CHECK(reports_for(pixel("    c.x = material.albedo.lod(p.uv, material.smp)\n")) == "");
+    CHECK(reports_for(pixel("    if material.threshold > 0.5 => c.x = material.albedo.lod_unclamped(p.uv)\n")) == "");
+
+    auto const varying = reports_for(pixel("    if p.uv.x < 0.5 => c.x = material.albedo.lod(p.uv, material.smp)\n"));
+    CHECK(varying.contains(kind));
+    CHECK(varying.contains("lod takes derivatives across a quad of pixels, and not every pixel of the quad reaches it "
+                           "here"));
+    CHECK(reports_for(pixel("    if p.uv.x < 0.5 => c.x = material.albedo.lod_unclamped(p.uv)\n")).contains(kind));
+}
+
 TEST("sgl check - a dynamic index into a binding array is proven uniform, or marked nonuniform")
 {
     auto const indexed = [](cc::string_view line)

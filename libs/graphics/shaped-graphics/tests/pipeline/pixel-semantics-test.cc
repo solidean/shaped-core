@@ -457,6 +457,57 @@ ASYNC_INVOCABLE_TEST("sg - a pixel stage returns one color without a struct, or 
         CHECK(got[i] == 8u).context(cc::format("slot {}", i));
 }
 
+ASYNC_INVOCABLE_TEST("sg - a pixel stage asks which level of detail a sample would read, clamped and not (CHK-535)",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+
+    // A 64 x 64 texture of 7 levels over a 16 x 16 target: 4 texels a pixel, level 2.
+    // An eighth of that is half a texel a pixel, level -1, which the clamped query raises to 0.
+    // Hardware keeps a level to a few bits of fraction, so each is held to within 1/16.
+    auto vertices = cc::vector<corner>();
+    push_rect(vertices, tg::vec4f(-1, -1, 1, 1), 0.5f, 0);
+    auto const buffer = ctx->persistent.create_buffer_from_data(cc::move(vertices), sg::buffer_usage::vertex_buffer);
+    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::pixel_semantics::lod_query);
+    auto const source
+        = ctx->persistent.create_texture_2d({.format = sg::pixel_format::rgba8_unorm,
+                                             .width = 64,
+                                             .height = 64,
+                                             .mip_levels = 7,
+                                             .usage = sg::texture_usage::texture | sg::texture_usage::copy_dst});
+    auto const group = ctx->persistent.create_binding_group(
+        ctx->cached.acquire_binding_group_layout<shaders::pixel_semantics::detail>(),
+        shaders::pixel_semantics::detail{.source = source.as_texture_view()});
+
+    auto const pixels = co_await sg_test::draw_offscreen(*ctx,
+                                                         {.width = 16,
+                                                          .height = 16,
+                                                          .colors = {sg::pixel_format::rgba32_float},
+                                                          .target_set = shaders::pixel_semantics::tag_target::name},
+                                                         [&](sg::rendering_scope& scope)
+                                                         {
+                                                             scope.bind_pipeline(*pipeline);
+                                                             scope.bind_group(0, *group);
+                                                             scope.bind_vertex_buffer(buffer.as_vertex_buffer());
+                                                             scope.draw({.vertex_range = {.offset = 0, .size = 6}});
+                                                         });
+
+    constexpr float expected[] = {2.0f, 2.0f, 0.0f, -1.0f};
+    constexpr cc::string_view names[] = {"lod", "lod_unclamped", "lod of an eighth", "lod_unclamped of an eighth"};
+    for (auto y = 0; y < 16; ++y)
+        for (auto x = 0; x < 16; ++x)
+        {
+            auto const got = pixels[0].rgba_float(x, y);
+            for (auto i = 0; i < 4; ++i)
+            {
+                auto const within = got[i] - expected[i] <= 1.0f / 16 && expected[i] - got[i] <= 1.0f / 16;
+                CHECK(within).context(cc::format("{} at ({}, {}) is {}, not {}", names[i], x, y, got[i], expected[i]));
+            }
+        }
+}
+
 ASYNC_INVOCABLE_TEST("sg - a vertex stage sends each instance to its own viewport, each with its own scissor (CHK-534)",
                      (sg::context_handle const& ctx))
 {

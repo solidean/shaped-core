@@ -545,6 +545,13 @@ fun shade(k: float) -> float:
   An offset's literals are from -8 to 7, and a comparison's `level` is the literal `0.0`; anything else is `invalid-constant-argument`.
 * **CHK-281** A call that samples a depth texture through a sampler that filters is `type-mismatch`, as CHK-210 is for an `@unfilterable` texture.
   A comparison takes a `comparison_sampler`, which is none of the samplers this counts.
+* **CHK-535** `t.lod(coord, smp)` is the level of detail a `sample` of `t` at `coord` would read, clamped to the levels `t` has, a `float`.
+  `t.lod_unclamped(coord, smp)` is the same level unclamped.
+  They are methods of a `texture_2d` and a `texture_2d_array` of floats, and an array's takes no layer, since the level is the same in every layer.
+  Each is `@stages(.pixel)` and takes derivatives, so it stands in uniform control flow as an implicit `sample` does (CHK-282).
+  dx12 and metal ask the hardware, and vulkan's `OpImageQueryLod` gives both levels at once.
+  WebGPU has no such query, so its text computes the level from `dpdx` and `dpdy` of `coord` and the size of level 0 (EMIT-273).
+  That polyfill ignores the sampler's bias and its level clamps, and is an approximation: GPUs already disagree on an anisotropic level.
 * **CHK-314** A `sampler name:` at file scope is a symbol whose type is `comparison_sampler` where it sets `compare`, and `sampler` otherwise.
   Its settings and its attributes are judged as CHK-204 judges a binding's static sampler.
   It is used by its name, handed to a builtin as CHK-206 says, or through a texture's `@sampler` (CHK-279).

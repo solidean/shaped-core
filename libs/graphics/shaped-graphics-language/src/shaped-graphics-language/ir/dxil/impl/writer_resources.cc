@@ -512,6 +512,30 @@ void writer::texture_op(u32 index, instruction const& i)
                 args.push_back(leaf_at(value_ref(operands[2])));
             },
             2);
+    case op::image_query_lod:
+    {
+        // one `calculateLOD` a lane: its last argument says whether the level is clamped
+        auto const pair = value_ref(operands[0]);
+        auto const at = value_ref(operands[1]);
+        auto const lanes = count_of(at);
+        auto const level = [&](bool clamped)
+        {
+            ll_value const args[] = {_m.constant_i32(k_dx_ops[isize(dx_op::calculate_lod)].number),
+                                     leaf_at(pair, 0),
+                                     leaf_at(pair, 1),
+                                     leaf_at(at, 0),
+                                     lanes > 1 ? leaf_at(at, 1) : unstated(),
+                                     lanes > 2 ? leaf_at(at, 2) : unstated(),
+                                     _m.constant_bool(clamped)};
+            return call(dx_op::calculate_lod, _m.float_type(), args);
+        };
+        auto const clamped = level(true);
+        auto const unclamped = level(false);
+        _scratch.clear();
+        _scratch.push_back(clamped);
+        _scratch.push_back(unclamped);
+        return define(index);
+    }
     default:
         return unsupported("this texture operation on DXIL");
     }

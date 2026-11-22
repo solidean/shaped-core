@@ -69,7 +69,8 @@ sgl::builtins::texture::shape_axes sgl::builtins::texture::axes_of(check::textur
 bool sgl::builtins::texture::takes_sampler(op o)
 {
     return o == op::sample || o == op::sample_level || o == op::sample_bias || o == op::sample_grad || o == op::gather
-        || o == op::sample_compare || o == op::sample_compare_level || o == op::gather_compare;
+        || o == op::sample_compare || o == op::sample_compare_level || o == op::gather_compare || o == op::lod
+        || o == op::lod_unclamped;
 }
 
 sgl::builtins::texture::argument_layout sgl::builtins::texture::layout_of(call const& c)
@@ -108,8 +109,10 @@ sgl::builtins::texture::argument_layout sgl::builtins::texture::layout_of(call c
     }
     if (takes_sampler(c.what))
         result.sampler = next++;
+    // a level of detail is the same in every layer, so it names none
     if (s.is_array && c.what != op::size && c.what != op::layer_count && c.what != op::level_count
-        && c.what != op::sample_count && c.what != op::image_size && c.what != op::image_layer_count)
+        && c.what != op::sample_count && c.what != op::image_size && c.what != op::image_layer_count
+        && c.what != op::lod && c.what != op::lod_unclamped)
         result.layer = next++;
     switch (c.what)
     {
@@ -242,9 +245,15 @@ written hlsl_call(call const& c, call_context const& ctx)
     auto const l = layout_of(c);
     auto const& t = argument(ctx, 0);
     auto const smp = l.sampler >= 0 ? argument(ctx, l.sampler) : cc::string();
-    auto const coord = takes_sampler(c.what) ? hlsl_sample_coordinate(c, ctx, l) : cc::string();
+    auto const coord = takes_sampler(c.what) && l.layer >= 0 ? hlsl_sample_coordinate(c, ctx, l)
+                     : takes_sampler(c.what)                 ? cc::string(argument(ctx, 1))
+                                                             : cc::string();
     switch (c.what)
     {
+    case op::lod:
+        return {.text = cc::format("{}.CalculateLevelOfDetail({}, {})", t, smp, coord)};
+    case op::lod_unclamped:
+        return {.text = cc::format("{}.CalculateLevelOfDetailUnclamped({}, {})", t, smp, coord)};
     case op::sample:
         return {.text = cc::format("{}.Sample({}, {}{})", t, smp, coord, hlsl_offset(l, ctx))};
     case op::sample_level:
@@ -326,6 +335,13 @@ cc::string wgsl_gradient(shape_traits const& s, cc::string const& g)
     return s.dim == 1 ? cc::format("vec2f({}, 0.0)", g) : cc::string(g);
 }
 
+/// A level-of-detail helper's name, one per shape and clamping since WGSL has no overloads.
+cc::string wgsl_lod_name(call const& c)
+{
+    return cc::format("sgl_lod{}_{}", c.what == op::lod_unclamped ? "_unclamped" : "",
+                      traits_of(c.where).is_array ? "2d_array" : "2d");
+}
+
 written wgsl_call(call const& c, call_context const& ctx)
 {
     auto const& s = traits_of(c.where);
@@ -342,6 +358,10 @@ written wgsl_call(call const& c, call_context const& ctx)
     { return {.text = c.is_depth ? cc::move(text) : narrowed(cc::move(text), c.width)}; };
     switch (c.what)
     {
+    case op::lod:
+    case op::lod_unclamped:
+        // WGSL has no level-of-detail query: a helper computes it from derivatives, and takes no sampler
+        return {.text = cc::format("{}({}, {})", wgsl_lod_name(c), t, coord)};
     case op::sample:
         return texel(cc::format("textureSample({}, {}, {}{}{})", t, smp, coord, layer, offset));
     case op::sample_level:
@@ -431,6 +451,10 @@ written msl_call(call const& c, call_context const& ctx)
                                                      : cc::format("uint{}({})", s.dim, coord);
     switch (c.what)
     {
+    case op::lod:
+        return {.text = cc::format("{}.calculate_clamped_lod({}, {})", t, smp, coord)};
+    case op::lod_unclamped:
+        return {.text = cc::format("{}.calculate_unclamped_lod({}, {})", t, smp, coord)};
     case op::sample:
         return texel(cc::format("{}.sample({}, {}{}{})", t, smp, coord, layer, offset));
     case op::sample_level:
@@ -499,10 +523,27 @@ written msl_call(call const& c, call_context const& ctx)
 // Every name a texture call writes, one list per target for the whole family.
 constexpr cc::string_view k_textures_hlsl[] = {"sgl_layers", "sgl_levels", "sgl_samples", "sgl_size"};
 constexpr cc::string_view k_textures_wgsl[] = {
-    "textureDimensions",  "textureGather",        "textureGatherCompare",      "textureLoad",
-    "textureNumLayers",   "textureNumLevels",     "textureNumSamples",         "textureSample",
-    "textureSampleBias",  "textureSampleCompare", "textureSampleCompareLevel", "textureSampleGrad",
-    "textureSampleLevel", "textureStore",
+    "dpdx",
+    "dpdy",
+    "log2",
+    "sgl_lod_2d",
+    "sgl_lod_2d_array",
+    "sgl_lod_unclamped_2d",
+    "sgl_lod_unclamped_2d_array",
+    "textureDimensions",
+    "textureGather",
+    "textureGatherCompare",
+    "textureLoad",
+    "textureNumLayers",
+    "textureNumLevels",
+    "textureNumSamples",
+    "textureSample",
+    "textureSampleBias",
+    "textureSampleCompare",
+    "textureSampleCompareLevel",
+    "textureSampleGrad",
+    "textureSampleLevel",
+    "textureStore",
 };
 constexpr cc::string_view k_textures_msl[] = {"bias", "component", "gradient2d", "gradient3d", "gradientcube", "level"};
 
@@ -590,6 +631,26 @@ cc::string size_helper(helper_context const& h)
     }
 }
 
+// ---- WGSL's level of detail, which it has no query for, as a helper the text declares -----------------------------
+
+/// The longer of the coordinate's two derivatives in texels of level 0, as `log2`, then clamped to the levels for `lod`.
+/// It ignores the sampler's bias and clamps, and a GPU's anisotropic level differs from it.
+cc::string lod_helper(helper_context const& h)
+{
+    if (h.target != language::wgsl)
+        return {};
+    auto const c = call::unpack(h.data);
+    auto const unclamped = cc::string_view("0.5 * log2(max(dot(dx, dx), dot(dy, dy)))");
+    auto const level = c.what == op::lod ? cc::format("clamp({}, 0.0, f32(textureNumLevels(t) - 1u))", unclamped)
+                                         : cc::string(unclamped);
+    return cc::format("fn {}(t: {}, uv: vec2f) -> f32\n{{\n"
+                      "    let size = vec2f(textureDimensions(t, 0));\n"
+                      "    let dx = dpdx(uv) * size;\n"
+                      "    let dy = dpdy(uv) * size;\n"
+                      "    return {};\n}}\n",
+                      wgsl_lod_name(c), h.argument_types[0], level);
+}
+
 // ---- the records -------------------------------------------------------------------------------------------------
 
 cc::string coordinate_type(shape_traits const& s, bool is_float)
@@ -640,6 +701,13 @@ emitted texture_record(call const& c, cc::string_view texture_type, bool with_sa
         attributes += " @stages(.pixel)";
         uses_derivatives = true;
         break;
+    case op::lod:
+    case op::lod_unclamped:
+        result_type = "float";
+        attributes += " @stages(.pixel)";
+        uses_derivatives = true;
+        helper = lod_helper;
+        break;
     case op::sample_level:
         // WGSL takes a depth texture's level as an integer, so every target is given one
         params.appendf("{}, .level: {}", s.is_array ? ", .layer: int" : "", c.is_depth ? "int" : "float");
@@ -681,7 +749,8 @@ emitted texture_record(call const& c, cc::string_view texture_type, bool with_sa
     }
     if (c.has_offset)
         params.appendf(", .offset: {}", offset_type(s));
-    auto const width = c.is_depth ? 1 : result_type == "float4" ? 4 : c.width;
+    auto const is_lod = c.what == op::lod || c.what == op::lod_unclamped;
+    auto const width = c.is_depth || is_lod ? 1 : result_type == "float4" ? 4 : c.width;
     auto const kind = result_type == "float4" || c.is_depth ? value_kind::scalar_float : c.kind;
     return {.signature = cc::format("{} fun {}({}) -> {}", attributes,
                                     c.what == op::sample_level || c.what == op::sample_bias || c.what == op::sample_grad
@@ -691,6 +760,8 @@ emitted texture_record(call const& c, cc::string_view texture_type, bool with_sa
                                     : c.what == op::sample_compare       ? cc::string_view("sample_compare")
                                     : c.what == op::gather_compare       ? cc::string_view("gather_compare")
                                     : c.what == op::load                 ? cc::string_view("load")
+                                    : c.what == op::lod                  ? cc::string_view("lod")
+                                    : c.what == op::lod_unclamped        ? cc::string_view("lod_unclamped")
                                                                          : cc::string_view("sample"),
                                     params, result_type),
             .evaluate = zeros_of(width, kind),
@@ -776,6 +847,14 @@ void add_sampled_shape(registry& r, shape_traits const& s)
                         sampled.has_offset = true;
                         add_texture_call(r, sampled, texture_type);
                     }
+                }
+            // a level-of-detail query of the 2D shapes, whose spelling every target shares
+            if (kind == value_kind::scalar_float && (s.s == texture_shape::d2 || s.s == texture_shape::d2_array))
+                for (auto const o : {op::lod, op::lod_unclamped})
+                {
+                    auto queried = base;
+                    queried.what = o;
+                    add_texture_call(r, queried, texture_type);
                 }
             // a gather reads four texels of 2D or cube shapes on every target
             if (s.dim >= 2 && (s.s == texture_shape::d2 || s.s == texture_shape::d2_array || s.is_cube))

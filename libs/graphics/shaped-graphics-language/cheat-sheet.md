@@ -864,6 +864,8 @@ ops[i](mut v)                                            // raygen, miss, closes
 - **`@sampler(name)` on a texture member names a sampler of the same binding, or a file-scope one** (CHK-279), which a method call then leaves out: `material.albedo.sample(uv)`.
   A member of that name hides a file-scope sampler of it.
   A call without a sampler on a texture without one is `missing-sampler`.
+- **`t.lod(uv, smp)` is the level a `sample` would read, clamped to `t`'s levels, and `t.lod_unclamped(uv, smp)` the same unclamped** (CHK-535): pixel stage, derivatives as `sample`'s.
+  `texture_2d` and `texture_2d_array` of floats, an array's without a layer; WebGPU's is a polyfill from `dpdx`/`dpdy` that ignores the sampler's bias and clamps.
 - **A `sampler name:` at file scope is a static sampler of the pipeline layout** (CHK-314), handed to a builtin by its name: `tex.sample(uv, name)`.
   It joins the layout of every entry point whose inlined code reaches it, at its position among the file's samplers (EMIT-133).
   An entry point reaching one at position 16 or later is `too-many-samplers`, and unreached samplers declared above it count.

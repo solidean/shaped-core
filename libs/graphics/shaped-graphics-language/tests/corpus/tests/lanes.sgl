@@ -108,6 +108,23 @@ test {scene}:
     scene.pyramid.sample(p * 0.25 + float2(0.125), scene.linear) == 1.0
     scene.pyramid.sample(p * 0.5 + float2(0.25), scene.linear) == 2.0
 
+// a level-of-detail query is the level such a sample picks, clamped to the texture's levels or not (EVAL-149)
+test {scene}:
+    // 4 by 4 at level 0, and 3 levels
+    scene.pyramid.test_texel(int2(3, 3), 1.0)
+    scene.pyramid.test_texel(int2(0, 0), 3.0, 2)
+    let lane = test_lane()
+    let p = float2((lane % 2) as float, ((lane / 2) % 2) as float)
+    scene.pyramid.lod(p * 0.25, scene.linear) == 0.0
+    scene.pyramid.lod(p * 0.5, scene.linear) == 1.0
+    scene.pyramid.lod_unclamped(p * 0.5, scene.linear) == 1.0
+    // 16 texels a pixel is level 4, past the last
+    scene.pyramid.lod(p * 4.0, scene.linear) == 2.0
+    scene.pyramid.lod_unclamped(p * 4.0, scene.linear) == 4.0
+    // half a texel a pixel magnifies, below level 0
+    scene.pyramid.lod(p * 0.125, scene.linear) == 0.0
+    scene.pyramid.lod_unclamped(p * 0.125, scene.linear) == -1.0
+
 // every lane reaches a subgroup operation together, or none does (CHK-377)
 @expect(error = "non-uniform-control-flow")
 test:

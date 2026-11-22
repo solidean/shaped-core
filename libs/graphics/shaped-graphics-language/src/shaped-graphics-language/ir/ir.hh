@@ -504,6 +504,9 @@ enum class sgl::ir::op : sgl::u16
     image_gather,
     /// Operands: sampled image, coordinate, reference.
     image_gather_compare,
+    /// Operands: sampled image, coordinate, without a layer; gives a float2 of the clamped level and the unclamped one.
+    /// A pixel stage's alone, as `sample_implicit` is.
+    image_query_lod,
     image_read,
     /// Operands: image, coordinate, texel.
     image_write,

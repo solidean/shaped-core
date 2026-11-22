@@ -54,6 +54,7 @@ enum class rule_kind : u8
     image_gather,
     image_write,
     image_size,
+    image_query_lod,
     subgroup,
     ray_query,
     ray_stage,
@@ -182,6 +183,7 @@ constexpr op_rule k_rules[] = {
     {op::image_gather_compare, rule_kind::image_gather, spv::ImageDrefGather},
     {op::image_write, rule_kind::image_write, spv::ImageWrite},
     {op::image_size, rule_kind::image_size, 0},
+    {op::image_query_lod, rule_kind::image_query_lod, spv::ImageQueryLod},
     {op::subgroup, rule_kind::subgroup, 0},
     {op::trace_ray, rule_kind::ray_stage, 0},
     {op::execute_callable, rule_kind::ray_stage, 0},
@@ -719,6 +721,9 @@ void writer::instruction_of(u32 index)
             return emit(_code, spv::ImageQuerySizeLod,
                         {id_of(i.type), id, id_of_raw(operands[0]), id_of_raw(operands[1])});
         return emit(_code, spv::ImageQuerySize, {id_of(i.type), id, id_of_raw(operands[0])});
+    case rule_kind::image_query_lod:
+        require(spv::ImageQuery);
+        return emit(_code, rule.opcode, {id_of(i.type), id, id_of_raw(operands[0]), id_of_raw(operands[1])});
     case rule_kind::subgroup:
         return group(i, id);
     case rule_kind::ray_query:

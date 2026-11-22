@@ -881,3 +881,67 @@ TEST("sgl emit - an unbounded binding array is `name[]` in HLSL, a table its gro
     CHECK(msl.contains("    auto const scene_albedo = &scene_group.scene_albedo->entries[0];\n")).dump("text", msl);
     CHECK(msl.contains("scene_albedo[p.material].sample(")).dump("text", msl);
 }
+
+TEST("sgl emit - a level-of-detail query is each target's own, and WGSL's a helper per shape from derivatives")
+{
+    // two textures of one WGSL type, which share a helper; an array's query names no layer
+    constexpr auto queried = "binding set:\n"
+                             "    a: texture_2d[float4]\n"
+                             "    b: texture_2d[float2]\n"
+                             "    arr: texture_2d_array[float4]\n"
+                             "    smp: sampler\n"
+                             "\n"
+                             "struct pixel_input:\n"
+                             "    @position position: hpos4\n"
+                             "    uv: float2\n"
+                             "\n"
+                             "@pixel struct target:\n"
+                             "    color: float4\n"
+                             "\n"
+                             "@pixel fun ps(p: pixel_input){set} -> target:\n"
+                             "    let x = set.a.lod(p.uv, set.smp) + set.b.lod(p.uv, set.smp)\n"
+                             "    let y = set.a.lod_unclamped(p.uv, set.smp)\n"
+                             "    let z = set.arr.lod(p.uv, set.smp) + set.arr.lod_unclamped(p.uv, set.smp)\n"
+                             "    return {color = float4(x, y, z, 1.0)}\n";
+
+    for (auto const t : {target::hlsl_dx12, target::hlsl_vulkan})
+    {
+        auto const hlsl = text_of(queried, t);
+        CHECK(hlsl.contains("set_a.CalculateLevelOfDetail(set_smp, p.uv) + set_b.CalculateLevelOfDetail(set_smp, "
+                            "p.uv)"));
+        CHECK(hlsl.contains("set_a.CalculateLevelOfDetailUnclamped(set_smp, p.uv)"));
+        CHECK(hlsl.contains("set_arr.CalculateLevelOfDetail(set_smp, p.uv) + "
+                            "set_arr.CalculateLevelOfDetailUnclamped(set_smp, p.uv)"));
+    }
+
+    auto const msl = text_of(queried, target::msl);
+    CHECK(msl.contains("set_a.calculate_clamped_lod(set_smp, p.uv) + set_b.calculate_clamped_lod(set_smp, p.uv)"));
+    CHECK(msl.contains("set_a.calculate_unclamped_lod(set_smp, p.uv)"));
+    CHECK(msl.contains("set_arr.calculate_clamped_lod(set_smp, p.uv) + set_arr.calculate_unclamped_lod(set_smp, "
+                       "p.uv)"));
+
+    auto const wgsl = text_of(queried, target::wgsl);
+    CHECK(wgsl.contains("diagnostic(off, derivative_uniformity);\n"));
+    CHECK(wgsl.contains("sgl_lod_2d(set_a, p.uv) + sgl_lod_2d(set_b, p.uv)"));
+    CHECK(wgsl.contains("sgl_lod_unclamped_2d(set_a, p.uv)"));
+    CHECK(wgsl.contains("sgl_lod_2d_array(set_arr, p.uv) + sgl_lod_unclamped_2d_array(set_arr, p.uv)"));
+    CHECK(wgsl.contains("fn sgl_lod_2d(t: texture_2d<f32>, uv: vec2f) -> f32\n"
+                        "{\n"
+                        "    let size = vec2f(textureDimensions(t, 0));\n"
+                        "    let dx = dpdx(uv) * size;\n"
+                        "    let dy = dpdy(uv) * size;\n"
+                        "    return clamp(0.5 * log2(max(dot(dx, dx), dot(dy, dy))), 0.0, f32(textureNumLevels(t) - "
+                        "1u));\n"
+                        "}\n"));
+    CHECK(wgsl.contains("fn sgl_lod_unclamped_2d_array(t: texture_2d_array<f32>, uv: vec2f) -> f32\n"
+                        "{\n"
+                        "    let size = vec2f(textureDimensions(t, 0));\n"
+                        "    let dx = dpdx(uv) * size;\n"
+                        "    let dy = dpdy(uv) * size;\n"
+                        "    return 0.5 * log2(max(dot(dx, dx), dot(dy, dy)));\n"
+                        "}\n"));
+    // the two textures of one WGSL type declare their helper once
+    auto const first = wgsl.find("fn sgl_lod_2d(");
+    REQUIRE(first >= 0);
+    CHECK(!cc::string_view(wgsl).subview({.start = first + 1, .end = wgsl.size()}).contains("fn sgl_lod_2d("));
+}

@@ -173,6 +173,7 @@ constexpr op_rule k_rules[] = {
     {op::image_fetch, rule_kind::texture},
     {op::image_gather, rule_kind::texture},
     {op::image_gather_compare, rule_kind::texture},
+    {op::image_query_lod, rule_kind::texture},
     {op::image_read, rule_kind::texture},
     {op::image_write, rule_kind::texture},
     {op::image_size, rule_kind::image_size},

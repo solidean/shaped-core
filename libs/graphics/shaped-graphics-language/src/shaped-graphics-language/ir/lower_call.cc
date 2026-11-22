@@ -736,6 +736,17 @@ value_ref lowering::texture_call(flat_call const& c, builtins::function_record c
         auto const reference = expr(arguments[layout.first]);
         return add(ir::op::image_gather_compare, texels, {with_image(sampler), at, reference});
     }
+    case op::lod:
+    case op::lod_unclamped:
+    {
+        auto const sampler = sampler_handle();
+        if (!is_valid(sampler))
+            return value_ref::none;
+        // an array's level of detail takes no layer, which its layout leaves out
+        auto const at = coordinate(expr(arguments[1]));
+        auto const both = add(ir::op::image_query_lod, vector_type(_float, 2), {with_image(sampler), at});
+        return extracted(both, _float, shape.what == op::lod ? 0 : 1);
+    }
     case op::image_load:
         return narrowed(add(ir::op::image_read, texels, {image, coordinate(expr(arguments[1]))}));
     case op::image_store:

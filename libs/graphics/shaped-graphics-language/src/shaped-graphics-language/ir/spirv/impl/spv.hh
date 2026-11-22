@@ -71,6 +71,7 @@ enum op_code : u32
     ImageWrite = 99,
     ImageQuerySizeLod = 103,
     ImageQuerySize = 104,
+    ImageQueryLod = 105,
     ImageQueryLevels = 106,
     ImageQuerySamples = 107,
     ConvertFToU = 109,
