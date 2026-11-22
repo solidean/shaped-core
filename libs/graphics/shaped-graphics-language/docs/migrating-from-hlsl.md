@@ -73,6 +73,8 @@ That is an implicit `sample`, `ddx` or `t.lod` under a branch on a per-pixel val
   A port that did this got the same image and a faster pass.
 - **A branch on `quad_any(b)` or `quad_all(b)` reaches each quad whole, helpers included**, so a derivative may stand under it (CHK-533).
   `subgroup_any` does not give that: a helper invocation may sit out a subgroup operation.
+- **`ddx`, `ddy` and `fwidth` are coarse on every target** (EVAL-144), where HLSL leaves a plain `ddx` to the implementation; WGSL writes `fwidthCoarse`.
+  A port that needs the fine form writes `abs(ddx_fine(v)) + abs(ddy_fine(v))`.
 - **A branch on what a subgroup agrees on, `subgroup_any(b)` or `subgroup_all(b)`, reaches each subgroup whole**, so a subgroup operation may stand under it (CHK-537).
   A derivative and a barrier still may not.
 
@@ -96,6 +98,7 @@ SGL's own DXIL and SPIR-V routes, `--target dxil` and `--target spirv`, round as
 
 **A local array indexed by a run-time value is memory, not registers**, which no compile error flags.
 DXC keeps `float4 lo[3]` indexed by a subset as an `alloca` whether HLSL or SGL wrote it, so such an array costs both languages alike.
+HLSL's matrix is no way around it: DXC keeps a `uint2x4` whose row is chosen at run time, or a `uint4` whose component is, as an `alloca` too.
 Separate locals chosen by branches keep the values in registers, and a texture encoder restructured so ran faster than its HLSL, with byte-identical output.
 Profile any port that indexes local arrays with something other than a loop counter SGL unrolls.
 
