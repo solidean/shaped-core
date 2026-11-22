@@ -50,8 +50,13 @@ def main() -> int:
         _link(link, SHAPED_CORE)
         git = ["git", "-c", "user.name=template-self-test", "-c", "user.email=template-self-test@invalid"]
         _run(["git", "init", "-q", "-b", "main"], base)
+        # A repository made on GitHub starts with a README, which the layout keeps.
+        readme = "# sample-app\n"
+        (base / "README.md").write_text(readme, encoding="utf-8")
         _run(["uv", "run", str(link / "tools" / "project-template" / "new-project.py"),
-              "--name", "sample-app", "--lib", "sample-core", "--namespace", "sample"], base)
+              "--name", "sample-app", "--lib", "sample-core", "--namespace", "sample", "--skip-existing"], base)
+        if (base / "README.md").read_text(encoding="utf-8") != readme:
+            raise SystemExit("template-self-test: FAILED: --skip-existing rewrote the README it should have kept")
         # `check` scopes itself against a base, so the project needs a commit; the linked checkout stays out of it.
         (base / ".git" / "info" / "exclude").write_text("extern/\n", encoding="utf-8")
         _run([*git, "add", "-A"], base)

@@ -10,7 +10,8 @@ Run from the new project's root, with shaped-core already at extern/shaped-core:
 
     uv run extern/shaped-core/tools/project-template/new-project.py --name <project>
 
-It writes only files that do not exist yet, and refuses before writing anything if one does.
+It writes only files that do not exist yet, and refuses before writing anything if one does, unless `--skip-existing` keeps those.
+It also sets the submodule's `.gitmodules` entry to follow `main` and to merge on `git submodule update`.
 What needs judgement, the CLAUDE.md and the skills above all, is docs/guides/starting-a-project.md's, not this script's.
 """
 
@@ -18,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -80,12 +82,27 @@ def _plan(root: Path, names: dict[str, str]) -> list[tuple[Path, str]]:
     return files
 
 
+def _configure_submodule(root: Path) -> None:
+    """Point the shaped-core entry of `.gitmodules` at `main`, merging on update, where it does not say otherwise already."""
+    if not (root / ".gitmodules").is_file():
+        return
+    for key, value in (("branch", "main"), ("update", "merge")):
+        name = f"submodule.extern/shaped-core.{key}"
+        current = subprocess.run(["git", "config", "-f", ".gitmodules", "--get", name], cwd=root, capture_output=True, text=True)
+        if current.returncode == 0 and current.stdout.strip():
+            continue
+        subprocess.run(["git", "config", "-f", ".gitmodules", name, value], cwd=root, check=True)
+        print(f".gitmodules: {name} = {value}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--name", required=True, help="the project's name, kebab-case: also its CMake project()")
     parser.add_argument("--lib", help="the sample library's name, kebab-case (default: the project's name)")
     parser.add_argument("--namespace", help="the sample library's namespace (default: the library's name, snake_case)")
     parser.add_argument("--root", type=Path, default=Path.cwd(), help="the project's root (default: the current directory)")
+    parser.add_argument("--skip-existing", action="store_true",
+                        help="keep files that exist already, such as the README a new GitHub repository starts with, and write the rest")
     args = parser.parse_args()
 
     lib = args.lib or args.name
@@ -103,16 +120,21 @@ def main() -> int:
     names = {"__project__": args.name, "__lib__": lib, "__ns__": namespace}
     files = _plan(root, names)
     existing = [dst for dst, _ in files if dst.exists()]
-    if existing:
-        print("new-project: these exist already, so nothing was written:", file=sys.stderr)
+    if existing and not args.skip_existing:
+        print("new-project: these exist already, so nothing was written (--skip-existing keeps them and writes the rest):",
+              file=sys.stderr)
         for dst in existing:
             print(f"  {dst.relative_to(root).as_posix()}", file=sys.stderr)
         return 1
+    files = [(dst, text) for dst, text in files if not dst.exists()]
+    for dst in existing:
+        print(f"new-project: kept {dst.relative_to(root).as_posix()}, which existed already", file=sys.stderr)
 
     for dst, text in files:
         dst.parent.mkdir(parents=True, exist_ok=True)
         dst.write_text(text, encoding="utf-8", newline="\n")
         print(dst.relative_to(root).as_posix())
+    _configure_submodule(root)
     print("new-project: done; extern/shaped-core/docs/guides/starting-a-project.md is what comes next", file=sys.stderr)
     return 0
 
