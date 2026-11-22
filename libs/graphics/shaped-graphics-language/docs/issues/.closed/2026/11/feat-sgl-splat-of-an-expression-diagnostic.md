@@ -2,6 +2,8 @@
 created: 2026-11-22
 priority: next
 tags: [porting-feedback]
+closed: 2026-11-22
+resolution: fixed
 ---
 
 # misplaced-splat on a splat of an expression offers the parenthesized form

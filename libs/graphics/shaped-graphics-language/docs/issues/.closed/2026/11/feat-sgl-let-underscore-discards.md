@@ -2,6 +2,8 @@
 created: 2026-11-22
 priority: next
 tags: [porting-feedback]
+closed: 2026-11-22
+resolution: fixed
 ---
 
 # let _ = discards a value
