@@ -182,3 +182,52 @@ test:
     counters.hits.store(3)
     bump_twice(mut counters.hits) == 4
     counters.hits.load() == 5
+
+// a vertex, geometry or tessellation stage takes every atomic too, where the device writes storage from it: vulkan asks
+// the device for that, and WebGPU's vertex stage has none, so such a stage needs vertex_pipeline_stores (CHK-531)
+binding appended:
+    count: mut buffer[atomic[uint]]
+    records: mut buffer[uint]
+
+@expect(error = "feature-not-declared")
+@vertex fun counting_vertex(@vertex_index v: int){appended} -> covered:
+    appended.count[0].add(1u)
+    return {position = hpos4(0.0, 0.0, 0.0, 1.0)}
+
+@vertex fun highest_vertex(@vertex_index v: int){appended} -> covered:
+    require vertex_pipeline_stores
+    appended.count[0].max(v as uint)
+    return {position = hpos4(0.0, 0.0, 0.0, 1.0)}
+
+// a geometry stage appends a record per primitive, at the slot its add claims
+@geometry(max_vertices = 1)
+fun appending_geometry(pt: covered[1], @primitive_id primitive: int, stream: mut point_stream[covered]){appended}:
+    require geometry_shader, vertex_pipeline_stores
+    let slot = appended.count[0].add(1u)
+    appended.records[slot] = primitive as uint
+    stream.emit(pt[0])
+
+// a branch that `has` takes needs no require, since a device without the feature never takes it
+@vertex fun maybe_counting_vertex(@vertex_index v: int){appended} -> covered:
+    const if has(.vertex_pipeline_stores):
+        appended.count[0].add(1u)
+    return {position = hpos4(0.0, 0.0, 0.0, 1.0)}
+
+// the feature follows the stage that reaches the atomic, through a function both a pixel and a vertex stage call
+fun count_appended(){appended}:
+    appended.count[1].add(1u)
+
+@pixel fun counting_pixel(p: covered){appended} -> shade:
+    count_appended()
+    return {color = float4(1.0)}
+
+@expect(error = "feature-not-declared")
+@vertex fun counting_through_vertex(@vertex_index v: int){appended} -> covered:
+    count_appended()
+    return {position = hpos4(0.0, 0.0, 0.0, 1.0)}
+
+// a load is an atomic too, so it needs the feature as an update does
+@expect(error = "feature-not-declared")
+@vertex fun loading_vertex(@vertex_index v: int){appended} -> covered:
+    let n = appended.count[0].load()
+    return {position = hpos4(n as float, 0.0, 0.0, 1.0)}

@@ -455,7 +455,7 @@ TEST("sgl describe - a texture's sample type and a sampler's binding type, as th
     CHECK(set.members[0].host_name == "set.f");
 }
 
-TEST("sgl describe - an image store is refused in a vertex stage, which core WebGPU gives no writable storage")
+TEST("sgl describe - an image store in a vertex stage needs vertex_pipeline_stores, which core WebGPU lacks (CHK-531)")
 {
     auto const error = error_of(R"(binding tex:
     dst: out image_2d[.rgba8_unorm]
@@ -470,8 +470,8 @@ struct link:
     tex.dst.store(int2(0, 0), float4(1.0, 1.0, 1.0, 1.0))
     return { p = hpos4(..v.p, 1.0) }
 )");
-    CHECK(error.contains("stage-not-allowed"));
-    CHECK(error.contains("store is @stages without it"));
+    CHECK(error.contains("feature-not-declared"));
+    CHECK(error.contains("vs needs vertex_pipeline_stores"));
 }
 
 TEST("sgl describe - workgroup memory has no host side, so the host is told nothing of it")

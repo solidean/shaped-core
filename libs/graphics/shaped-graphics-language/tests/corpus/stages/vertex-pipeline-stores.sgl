@@ -1,0 +1,83 @@
+// a vertex, geometry or tessellation stage writes through a binding only where the device writes storage from it:
+// vulkan asks the device for that, and WebGPU's vertex stage has none, so each such store needs vertex_pipeline_stores,
+// as an atomic there does (CHK-531)
+binding written:
+    values: mut buffer[uint]
+    raw: mut bytes
+    marks: out image_2d[.rgba8_unorm]
+
+struct covered:
+    @position position: hpos4
+
+// a buffer's element, a bytes store and an image store each need it
+@expect(error = "feature-not-declared")
+@vertex fun storing_vertex(@vertex_index v: int){written} -> covered:
+    written.values[v] = 1u
+    return {position = hpos4(0.0, 0.0, 0.0, 1.0)}
+
+@expect(error = "feature-not-declared")
+@vertex fun storing_bytes_vertex(@vertex_index v: int){written} -> covered:
+    written.raw.store((v as uint) * 4u, 1u)
+    return {position = hpos4(0.0, 0.0, 0.0, 1.0)}
+
+@expect(error = "feature-not-declared")
+@vertex fun storing_image_vertex(@vertex_index v: int){written} -> covered:
+    written.marks.store(int2(v, 0), float4(1.0))
+    return {position = hpos4(0.0, 0.0, 0.0, 1.0)}
+
+// with the feature, every one of them stands
+@vertex fun storing_all_vertex(@vertex_index v: int){written} -> covered:
+    require vertex_pipeline_stores
+    written.values[v] = 1u
+    written.raw.store((v as uint) * 4u, 1u)
+    written.marks.store(int2(v, 0), float4(1.0))
+    return {position = hpos4(0.0, 0.0, 0.0, 1.0)}
+
+// a geometry stage's store needs it too
+@expect(error = "feature-not-declared")
+@geometry(max_vertices = 1)
+fun storing_geometry(pt: covered[1], @primitive_id primitive: int, stream: mut point_stream[covered]){written}:
+    require geometry_shader
+    written.values[primitive] = 1u
+    stream.emit(pt[0])
+
+@geometry(max_vertices = 1)
+fun storing_geometry_granted(pt: covered[1], @primitive_id primitive: int, stream: mut point_stream[covered]){written}:
+    require geometry_shader, vertex_pipeline_stores
+    written.values[primitive] = 1u
+    stream.emit(pt[0])
+
+// a branch that `has` takes needs no require
+@vertex fun maybe_storing_vertex(@vertex_index v: int){written} -> covered:
+    const if has(.vertex_pipeline_stores):
+        written.values[v] = 1u
+    return {position = hpos4(0.0, 0.0, 0.0, 1.0)}
+
+// a function that stores is judged by the stage that reaches it
+fun mark(i: int){written}:
+    written.values[i] = 2u
+
+@pixel struct shade:
+    color: float4
+
+@pixel fun marking_pixel(p: covered){written} -> shade:
+    mark(0)
+    return {color = float4(1.0)}
+
+@expect(error = "feature-not-declared")
+@vertex fun marking_vertex(@vertex_index v: int){written} -> covered:
+    mark(v)
+    return {position = hpos4(0.0, 0.0, 0.0, 1.0)}
+
+// a local is no binding, and needs nothing
+fun local_mark(i: int) -> uint:
+    let mut xs = [0u, 0u]
+    xs[i & 1] = 1u
+    return xs[1]
+
+test:
+    local_mark(1) == 1u
+    local_mark(2) == 0u
+
+@vertex fun local_vertex(@vertex_index v: int) -> covered:
+    return {position = hpos4(local_mark(v) as float, 0.0, 0.0, 1.0)}

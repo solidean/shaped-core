@@ -246,7 +246,7 @@ They apply in order, so a later setting overrides what an earlier one set, `filt
 | `sample_compare(…, reference = r, level = 0.0)` | the same, and every stage | a comparison at level 0, the one level every target compares at |
 | `gather_compare(…, reference = r)` | a 2D or cube depth texture | the comparisons of four texels |
 | `load(xy, level)` | every texture but a cube | one texel, with no sampler; a multisampled one takes `sample = s` instead |
-| `load(xy)`, `store(xy, value)` | an image | one texel of an image the shader may read, or write; a store in a pixel, compute, raygen, closest-hit, miss or callable stage |
+| `load(xy)`, `store(xy, value)` | an image | one texel of an image the shader may read, or write; a store in a pixel, compute, raygen, closest-hit, miss or callable stage, and behind `vertex_pipeline_stores` in a vertex, geometry or tessellation stage |
 | `img[xy]`, `img[xy] = value` | an image | the same `load` and `store`, as a subscript ([CHK-367](semantics/checking.md#bindings)) |
 | `size(level)`, `layer_count()`, `level_count()`, `sample_count()` | textures and images | what the shape has |
 
@@ -255,7 +255,7 @@ An offset, `offset = int2(1, -1)`, is a constant from -8 to 7 on a 2D, 2D array 
 A cube and a multisampled texture take none, and neither does a 1D one, which Metal samples with no offset.
 A gather's component, an offset and a comparison's level are constants, because some target takes each only as written (CHK-280).
 
-A store is refused in a vertex stage, where core WebGPU has no writable storage.
+A store in a vertex, geometry or tessellation stage needs `vertex_pipeline_stores`, which core WebGPU lacks, as a buffer's store and an atomic there do (CHK-531).
 It is refused in a traversal's decision too: an any hit, an intersection, or what an inline trace calls as one.
 Those run any number of times per ray and in any order, so a decision writes no memory through a binding (CHK-404).
 Every target writes storage images from the other ray-tracing stages, dx12, vulkan and metal alike, and WebGPU has no ray-tracing pipeline to refuse.
@@ -318,6 +318,7 @@ An entry point must declare each of those itself: by its file, by a binding it l
 | `@coherent` on a member ([Coherent memory](#coherent-memory)) | `sg::feature::device_coherence`, which WebGPU lacks |
 | `@atomic` on an image member ([Atomics](#atomics)) | `sg::feature::image_atomics`, which core WebGPU lacks |
 | `compare_exchange_strong` in a pixel stage ([Atomics](#atomics)) | `sg::feature::helper_lane_query`, which WebGPU lacks |
+| a store or an atomic through a binding in a vertex, geometry or tessellation stage ([Atomics](#atomics)) | `sg::feature::vertex_pipeline_stores`, which WebGPU lacks; a polyfilled stage needs none (CHK-531) |
 | a `@layer` field of a vertex stage's result ([CHK-419](semantics/checking.md#entry-points)) | `sg::feature::vertex_layer_output`, which WebGPU lacks |
 | `@view_index` in a vertex or pixel stage ([CHK-437](semantics/checking.md#entry-points)) | `sg::feature::view_instancing`, which WebGPU lacks |
 
@@ -493,8 +494,10 @@ stats.hits[slot].max(7)
 Its operations are builtins that take it first, called as methods: `add`, `subtract`, `min`, `max`, `bit_and`, `bit_or`, `bit_xor` and `exchange` each give the value before,
 `load()` reads it, and `store(v)` writes it.
 `and` and `or` are keywords, so the bitwise updates carry the `bit_` their operators lack.
-Every one is relaxed, the one ordering WGSL has, and a vertex stage has none, since WebGPU has no writable storage there (CHK-296).
+Every one is relaxed, the one ordering WGSL has (CHK-296).
 A pixel and a compute stage take them, and so do the ray-tracing stages that run once per launch, ray or call: a raygen, a miss, a closest hit and a callable.
+A vertex, a geometry and a tessellation stage take them behind `vertex_pipeline_stores`, which WebGPU lacks, since its vertex stage writes no storage (CHK-531).
+Vulkan may run any of those stages more than once per vertex or primitive, so a count there is at least the vertices' or primitives', and a `max` there means the same however often it runs.
 An any hit and an intersection run as often as the traversal decides, so they write no memory through a binding, and an atomic there is `stage-not-allowed` as a store is (CHK-404).
 So is one in a decision an inline trace calls, in any stage.
 The host holds a buffer of atomics as the plain integers it is.
@@ -506,7 +509,7 @@ Everywhere else it is the bits of a `uint` atomic, and its `add` reads them, add
 Either way it is exact once per update and in no promised order.
 A helper invocation's atomics have no effect, so a pixel stage would never leave that loop, and its `add` takes no pixel stage.
 **An `atomic[ulong]` and an `atomic[long]` have every operation an `atomic[uint]` has**, behind `shader_int64_atomics`, and stand in a `mut buffer` alone (CHK-296).
-dx12 and vulkan have them, metal and WebGPU do not; workgroup memory's and a vertex stage are [the incubator's](incubator/atomics.md).
+dx12 and vulkan have them, metal and WebGPU do not; in workgroup memory they need `shader_shared_int64_atomics` besides (CHK-510).
 
 **`add_reduced(mut slot, key, v)` adds where many invocations add to one slot**, as every pixel a splat covers adds to the splat's gradient.
 Where every active invocation of the subgroup names the same `key`, it adds the subgroup's sum once, from the first of them, and otherwise each adds its own.

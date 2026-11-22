@@ -114,10 +114,11 @@ void sgl::builtins::register_bytes(registry& r)
             .write = spell(false),
             .bytes_words = words,
         });
-        // As an image store: no writable storage in a vertex stage on WebGPU, and none where a ray stage may run any
-        // number of times per ray.
+        // As an image store: a vertex, geometry or tessellation stage needs vertex_pipeline_stores (CHK-531), and none
+        // where a ray stage may run any number of times per ray.
         r.add(function_record{
-            .signature = cc::format("@stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun "
+            .signature = cc::format("@stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, "
+                                    ".tessellation_evaluation, .raygen, .closest_hit, .miss, .callable) fun "
                                     "store(b: mut bytes, offset: uint, value: {})",
                                     type),
             .doc = words == 1

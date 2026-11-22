@@ -41,7 +41,7 @@ Each file has the same shape, so an idea can be picked up cold:
 | [uniformity.md](uniformity.md) | SGL's own uniformity analysis after inlining, refusing a derivative sample in divergent control flow with a fix to offer |
 | [stage-polyfills.md](stage-polyfills.md) | every raster stage on every target: metal's own tessellation, and a compute pass or a mesh stage where a device lacks one |
 | [gpu-driven-work.md](gpu-driven-work.md) | work lists native where a target has them, polyfills from indirect compute to raygen with SER, and why work graphs are left out |
-| [atomics.md](atomics.md) | 64-bit and vertex-stage atomics, each behind the sg feature its missing target needs |
+| [atomics.md](atomics.md) | the atomics left past the floor, each behind the sg feature its missing target needs |
 | [beyond-shaders.md](beyond-shaders.md) | SGL as a test run for a general-purpose language, and what that asks of today's decisions |
 | [testing.md](testing.md) | tests on the GPU against the interpreter, resource values in tests, captured constants and message matching |
 | [compute-throughput.md](compute-throughput.md) | matrix fragments as a feature, which a fast compute kernel such as a denoise network needs beside the 16-bit float |

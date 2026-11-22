@@ -841,11 +841,12 @@ void add_image_shape(registry& r, shape_traits const& s)
             });
             auto store = c;
             store.what = op::image_store;
-            // Core WebGPU has no writable storage in a vertex stage.
+            // A vertex, geometry or tessellation stage needs vertex_pipeline_stores, which WebGPU lacks (CHK-531).
             // The ray-tracing stages that run once per ray or call store as compute does; an any hit and an
             // intersection run any number of times per ray, in any order, so a store there has no defined result.
             r.add(function_record{
-                .signature = cc::format("@stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun "
+                .signature = cc::format("@stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, "
+                                        ".tessellation_evaluation, .raygen, .closest_hit, .miss, .callable) fun "
                                         "store(i: out {}[{}], xy: {}, value: {}{})",
                                         s.image, texel, coordinate_type(s, false), texel, layer),
                 .evaluate = nothing,

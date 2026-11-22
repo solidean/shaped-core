@@ -210,10 +210,12 @@ constexpr cc::string_view k_atomics_msl[] = {
     "simd_is_helper_thread",     "atomic_min_explicit",       "atomic_max_explicit",
 };
 
-/// CHK-296: every stage that writes memory once per invocation the program can count.
-/// A vertex stage has no writable storage in WebGPU, and any-hit and intersection stages run as often as traversal decides.
+/// CHK-296: every stage that writes memory through a binding; any-hit and intersection stages run as often as traversal
+/// decides.
+/// A vertex, geometry or tessellation stage needs `vertex_pipeline_stores` for one, which WebGPU lacks (CHK-531).
 constexpr cc::string_view k_atomic_stages
-    = "@stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable)";
+    = "@stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, "
+      ".raygen, .miss, .closest_hit, .callable)";
 
 /// A compare-exchange writes statements in every target (EMIT-161).
 bool every_language(language)
@@ -553,7 +555,9 @@ cc::string float_atomic_helper(helper_context const& c)
 }
 
 /// An add stands in a loop, which a helper invocation, whose atomics have no effect, would never leave.
-constexpr cc::string_view k_float_add_stages = "@stages(.compute, .raygen, .miss, .closest_hit, .callable)";
+constexpr cc::string_view k_float_add_stages
+    = "@stages(.vertex, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .raygen, .miss, "
+      ".closest_hit, .callable)";
 
 written write_float_atomic(call_context const& ctx)
 {

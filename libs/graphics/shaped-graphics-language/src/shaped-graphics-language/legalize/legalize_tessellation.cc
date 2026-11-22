@@ -72,6 +72,8 @@ void make_compute_header(flat_entry_point& e, local_id thread, bool is_by_thread
     e.is_auto_workgroup = is_by_threads;
     e.legalized = nullptr;
     e.features.remove(feature::tessellation_shader);
+    // a compute stage writes storage on every device (CHK-531)
+    e.features.remove(feature::vertex_pipeline_stores);
 }
 } // namespace
 
@@ -235,6 +237,7 @@ cc::result<flat_entry_point, cc::string> sgl::check::tessellation_as_compute(che
     make_compute_header(e, thread, true);
     merge_stage_into(e, v);
     e.features.remove(feature::tessellation_shader);
+    e.features.remove(feature::vertex_pipeline_stores);
     return compacted(m, e, body);
 }
 
