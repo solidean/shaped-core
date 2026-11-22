@@ -852,7 +852,8 @@ A plain buffer store was taken in those stages with no feature at all, so it nee
 Before, it wrote WGSL that WebGPU refuses, and a vulkan pipeline that a device without the feature refuses.
 WebGPU and Metal draw a geometry or a tessellation stage as a compute pass or a mesh stage, where a write is free, so the feature costs only a native stage that needs it.
 How often those stages run is another matter, which the feature leaves to the program.
-Vulkan runs each of them at least once per vertex, output point or primitive, never exactly once, and names the vertex and the evaluation stage as ones whose count of writing invocations is undefined.
+Vulkan runs each of them at least once per vertex, output point or primitive, with no promise of exactly once.
+It names the vertex and the evaluation stage as ones whose count of writing invocations is undefined.
 So a counter in any of them holds a number no spec defines, as CHK-404 says of a decision, and only a polyfill, a compute pass of one thread each, counts exactly.
 An update that means the same however often it runs, a `max` or a store of what the invocation was given, is what these stages are for.
 They are not refused for a count, since a count is still what a device ran, which is what a profiling counter wants, and an append through a counter still records every primitive.
