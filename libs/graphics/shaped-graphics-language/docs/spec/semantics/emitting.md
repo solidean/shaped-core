@@ -921,7 +921,7 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
 | `subgroup_shuffle_xor`, `_up`, `_down` | `WaveReadLaneAt` of the lane `WaveGetLaneIndex()` gives | `subgroupShuffleXor`, `subgroupShuffleUp`, `subgroupShuffleDown` | `simd_shuffle_xor`, `simd_shuffle_up`, `simd_shuffle_down` |
 | `quad_swap_x`, `quad_swap_y`, `quad_swap_diagonal` | `QuadReadAcrossX`, `QuadReadAcrossY`, `QuadReadAcrossDiagonal` | `quadSwapX`, `quadSwapY`, `quadSwapDiagonal` | `quad_shuffle_xor` by 1, 2 and 3 |
 | `quad_broadcast` | `QuadReadLaneAt` | `quadBroadcast` | `quad_broadcast` |
-| `quad_any`, `quad_all` | `QuadAny`, `QuadAll`, Shader Model 6.7 | none: `target-lacks-feature` | `quad_any`, `quad_all` |
+| `quad_any`, `quad_all` | dx12 `sgl_quad_any` and `sgl_quad_all`, the bit or-ed or and-ed over `QuadReadAcrossX`, `Y` and `Diagonal`; vulkan `QuadAny` and `QuadAll` | none: `target-lacks-feature` | `quad_any`, `quad_all` |
 
 ## Layout
 

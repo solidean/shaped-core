@@ -44,7 +44,7 @@ r.value().needs_nvapi_header               // an nvapi fill's text includes nvHL
 // fills (EMIT-265): .fills = {{.f = feature::shader_execution_reordering, .how = fill::nvapi}} on the text_request
 //   .core = {.draw_start = fill::root_constant, .wave_size = fill::none} is what a dx12 host targeting 6.6 asks
 sgl::emit::fills_of(target, f)             // what a target offers, most demanding first: dx12 SER/micromaps native, nvapi
-sgl::check::dxil_shader_model_of(f, how)   // native SER, micromaps 6.9, clustered_geometry 6.10, draw_start/wave_size 6.8; quad_control 6.7; else 6.6
+sgl::check::dxil_shader_model_of(f, how)   // native SER, micromaps 6.9, clustered_geometry 6.10, draw_start/wave_size 6.8; else 6.6
 sgl::variant_key::of(fills, core)          // canonical: fills in feature order, a feature named twice refused; == compares that
   .value().to_string()                     // "shader_execution_reordering=nvapi;draw_start=root_constant;wave_size=none"
 r.value().footprint                        // check::slot_footprint per TOUCHED slot: host_name, view (constants/read_only/storage), reads, writes

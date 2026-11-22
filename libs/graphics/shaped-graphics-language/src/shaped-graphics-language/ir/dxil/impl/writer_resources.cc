@@ -793,15 +793,19 @@ void writer::subgroup_op(u32 index, instruction const& i)
         }
         return define(index);
     }
-    // CHK-533: `QuadVoteOpKind`, 0 any and 1 all, over the quad its helpers included (Shader Model 6.7)
+    // CHK-533: the vote's bit and its three neighbours' over `quadOp`, which D3D's helpers take part in, at 6.6
     case subgroup::quad_any:
     case subgroup::quad_all:
     {
-        _uses.quad_votes = true;
-        auto const vote = leaf_at(value);
-        ll_value const args[] = {number(dx_op::quad_vote), vote, _m.constant_i8(what == subgroup::quad_any ? 0 : 1)};
-        // the validator names it `dx.op.quadVote.i1`, overloaded on the vote it takes
-        return define_one(index, call(dx_op::quad_vote, _m.type_of(vote), args));
+        auto const bit = _m.cast(cast_op::zext, leaf_at(value), _m.int_type());
+        auto const combine = what == subgroup::quad_any ? binary_op::bit_or : binary_op::bit_and;
+        auto folded = bit;
+        for (auto axis = u32(0); axis < 3; ++axis)
+        {
+            ll_value const args[] = {number(dx_op::quad_op), bit, _m.constant_i8(axis)};
+            folded = _m.binary(combine, folded, call(dx_op::quad_op, _m.int_type(), args));
+        }
+        return define_one(index, _m.compare(predicate::i_ne, folded, _m.constant_i32(0)));
     }
     case subgroup::quad_swap:
     {

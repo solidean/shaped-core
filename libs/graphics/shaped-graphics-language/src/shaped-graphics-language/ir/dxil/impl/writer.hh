@@ -124,8 +124,6 @@ struct writer_uses
     bool int64_shared_atomics = false;
     /// A hit object or a regrouping, which Shader Model 6.9 brought.
     bool reorders = false;
-    /// `quadVote`, which Shader Model 6.7 brought (CHK-533).
-    bool quad_votes = false;
 };
 
 class writer

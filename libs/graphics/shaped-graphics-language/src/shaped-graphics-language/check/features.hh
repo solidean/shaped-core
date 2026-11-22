@@ -83,7 +83,7 @@ enum class sgl::check::feature : sgl::u8
     /// No program names it: the prelude asks it with `has`, so a device without it needs no capability of it.
     clustered_geometry,
     /// `quad_any` and `quad_all`, whose result every invocation of a quad agrees on, helpers included (CHK-533).
-    /// dx12 has them on Shader Model 6.7, vulkan through VK_KHR_shader_quad_control; WebGPU's helpers may sit out.
+    /// dx12 reads them across the quad, vulkan through VK_KHR_shader_quad_control; WebGPU's helpers may sit out.
     quad_control,
 };
 
@@ -232,8 +232,6 @@ inline constexpr cc::string_view k_core_construct_names[] = {"draw_start", "wave
         return {.major = 6, .minor = 9};
     case feature::clustered_geometry:
         return {.major = 6, .minor = 10};
-    case feature::quad_control:
-        return {.major = 6, .minor = 7};
     default:
         return {};
     }
