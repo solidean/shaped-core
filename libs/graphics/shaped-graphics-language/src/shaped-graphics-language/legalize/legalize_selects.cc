@@ -23,8 +23,8 @@ stmt_list ids_of(flat_entry_point const& e, ast::range_of<flat_stmt_id> range)
     return result;
 }
 
-/// Whether `local` of `e` is lowered: a `.select` array of one dimension and at most CHK-538's elements.
-bool is_lowered(checked_module const& m, flat_entry_point const& e, flat_local const& local)
+/// Whether `local` is lowered: a `.select` array of one dimension and at most CHK-538's elements.
+bool is_lowered(checked_module const& m, flat_local const& local)
 {
     if (local.indexing != local_indexing::select || local.kind == local_kind::parameter || local.kind == local_kind::index)
         return false;
@@ -439,7 +439,7 @@ struct selector
 bool sgl::check::impl::has_selected_arrays(checked_module const& m, flat_entry_point const& e)
 {
     for (auto const& local : e.locals)
-        if (is_lowered(m, e, local))
+        if (is_lowered(m, local))
             return true;
     return false;
 }
@@ -487,7 +487,7 @@ stmt_list sgl::check::impl::lower_selected_arrays(flat_builder& out, stmt_list c
     for (auto i = isize(0); i < s.parts.size(); ++i)
     {
         auto const local = out.e.locals[i];
-        if (!is_lowered(out.m, out.e, local) || written_through[i])
+        if (!is_lowered(out.m, local) || written_through[i])
             continue;
         auto const& t = out.m.at(local.type);
         for (auto k = 0; k < t.count; ++k)
