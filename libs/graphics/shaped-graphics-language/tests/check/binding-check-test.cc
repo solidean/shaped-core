@@ -3,7 +3,7 @@
 using namespace sgl_test;
 
 // The binding model of libs/graphics/shaped-graphics-language/docs/spec/bindings.md, as far as the compiler carries it.
-// Buffers, bytes, textures, images and samplers are built; separate constant buffers parse and are reported.
+// Buffers, bytes, constant buffers of their own, textures, images and samplers are built.
 
 namespace
 {
@@ -59,9 +59,46 @@ TEST("sgl check - bytes and mut bytes are binding members, loaded and stored a w
               .contains("no-matching-overload"));
 }
 
-TEST("sgl check - a separate constant buffer is not built yet")
+TEST("sgl check - a constants[T] member is a constant buffer of its own, read as the T it holds")
 {
-    CHECK(reports_for(listing("    params: constants[dispatch_params]\n")).contains("type arguments"));
+    constexpr auto params = "struct params:\n    scale: float4\n    bias: float4\n\n";
+    // CHK-539: it reads as a plain member of type T does, whole or by field
+    auto const checked = check_sources(read_prelude(), cc::string(params)
+                                                           + listing("    factor: float\n    p: constants[params]\n    "
+                                                                     "q: constants[params]\n",
+                                                                     "    let whole = work.p\n    let x = "
+                                                                     "work.q.scale.x + whole.bias.y * work.factor\n"));
+    REQUIRE(reports_of(checked) == "");
+    auto members = cc::span<sgl::check::member_info const>();
+    for (auto const& b : checked.module.bindings)
+        if (checked.module.at(b.symbol).name == "work")
+            members = checked.module.at(b.members);
+    REQUIRE(members.size() == 3);
+    CHECK(!members[0].is_constants_buffer);
+    CHECK(members[1].is_constants_buffer);
+    CHECK(checked.module.name_of(members[1].type) == "params");
+    CHECK(checked.module.takes_own_slot(members[1]));
+    CHECK(!checked.module.takes_own_slot(members[0]));
+
+    // a constant is never written, as a plain member is not
+    CHECK(reports_for(cc::string(params) + listing("    p: constants[params]\n", "    work.p.scale = float4(0.0)\n"))
+              .contains("not-assignable"));
+    // nor is it marked as written
+    CHECK(reports_for(cc::string(params) + listing("    p: mut constants[params]\n"))
+              .contains("`constants[T]` is never `mut` or `out`"));
+    // it holds one struct, which is what the host lays out
+    CHECK(reports_for(listing("    p: constants[float4]\n")).contains("a constant buffer holds a struct"));
+    CHECK(reports_for(cc::string(params) + listing("    p: constants[params, params]\n"))
+              .contains("a constant buffer holds one struct"));
+    CHECK(reports_for(listing("    p: constants[not_a_type]\n")).contains("unknown-name"));
+    // a binding's member alone is one
+    CHECK(reports_for(cc::string(params) + "struct holder:\n    p: constants[params]\n")
+              .contains("stands as a binding member alone"));
+    // an @inline block and workgroup memory hold no constant buffer of their own
+    CHECK(reports_for(cc::string(params) + "@inline binding c:\n    p: constants[params]\n")
+              .contains("an @inline binding is one block of constants"));
+    CHECK(reports_for(cc::string(params) + "@workgroup binding w:\n    p: constants[params]\n")
+              .contains("a @workgroup binding holds values the workgroup shares"));
 
     // `mut` says a resource may be written, so it says nothing about a value.
     CHECK(reports_for(listing("    wrong: mut float\n")).contains("only a resource may be `mut`"));

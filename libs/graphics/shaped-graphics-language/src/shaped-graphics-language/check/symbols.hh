@@ -438,6 +438,9 @@ struct sgl::check::member_info
     bool is_non_filtering = false;
     /// Carries `@coherent`: a `mut` buffer or image whose writes reach every workgroup of the dispatch (CHK-368).
     bool is_coherent = false;
+    /// Declared `constants[T]`: a constant buffer of its own, at a slot of its own, holding one `T` the host binds.
+    /// `type` is `T`, so the member reads as a plain one does; only where it is bound differs (CHK-539).
+    bool is_constants_buffer = false;
     /// A buffer member's `@padding(.none)`: its elements are placed as C++ places them (CHK-369).
     padding_kind padding = padding_kind::natural;
     /// A `sampler name:` block of a binding, as a position in `checked_module::samplers`; -1 for any other member.

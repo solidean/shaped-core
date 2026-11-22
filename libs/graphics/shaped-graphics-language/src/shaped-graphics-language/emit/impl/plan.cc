@@ -533,7 +533,7 @@ struct planner
             auto const& b = p.m.bindings[s.info];
             if (b.is_inline || b.is_workgroup)
                 continue; // sg addresses the inline constants itself, so they take no group of their own
-            auto slot = first_resource_slot(p.m, b);
+            auto const slots = member_slots(p.m, b);
             auto const members = p.m.at(b.members);
             for (auto i = isize(0); i < members.size(); ++i)
             {
@@ -541,7 +541,7 @@ struct planner
                 auto const& whole = p.m.at(members[i].type);
                 auto const is_array = whole.kind == type_kind::array;
                 auto const& t = is_array ? p.m.at(whole.element) : whole;
-                if (!check::is_resource(t.kind))
+                if (members[i].is_constants_buffer || !check::is_resource(t.kind))
                     continue;
                 auto const count = is_array ? whole.count : 1;
                 p.resources.push_back({.binding = id,
@@ -554,9 +554,8 @@ struct planner
                                        .is_mut = t.is_mut,
                                        .is_coherent = members[i].is_coherent,
                                        .group = group,
-                                       .slot = slot,
+                                       .slot = slots[i],
                                        .count = count});
-                slot += count;
             }
             ++group;
         }
@@ -642,7 +641,32 @@ struct planner
                 }
                 auto next = 0;
                 for (auto const& member : p.m.at(b.members))
-                    planned.block_member_of.push_back(p.m.takes_slots(member.type) ? -1 : next++);
+                    planned.block_member_of.push_back(p.m.takes_own_slot(member) ? -1 : next++);
+                p.group_blocks.push_back(cc::move(planned));
+            }
+            // CHK-539: each `constants[T]` is a block of that one value, at its own slot
+            auto const slots = member_slots(p.m, b);
+            auto const members = p.m.at(b.members);
+            for (auto i = isize(0); i < members.size(); ++i)
+            {
+                if (!members[i].is_constants_buffer)
+                    continue;
+                auto const held = cc::vector<member_info>::create_copy_of(members.subspan({.offset = i, .size = 1}));
+                auto planned = planned_constants{
+                    .symbol = id,
+                    .member = i32(i),
+                    .name = p.names.mint(cc::format("{}_{}", s.name, members[i].name)),
+                    .host_name = cc::format("{}.{}", p.m.qualified_name_of(id), members[i].name),
+                    .block_name = p.names.mint(cc::format("{}_{}_data", s.name, members[i].name)),
+                    .members = members_of(held, false),
+                    .group = group,
+                    .slot = slots[i],
+                };
+                auto const placed = place_block(p.m, held, block_space(b));
+                planned.members[0].offset = placed.offsets[0];
+                planned.members[0].size = placed.sizes[0];
+                for (auto k = isize(0); k < members.size(); ++k)
+                    planned.block_member_of.push_back(k == i ? 0 : -1);
                 p.group_blocks.push_back(cc::move(planned));
             }
             ++group;
@@ -723,7 +747,7 @@ struct planner
         auto const form_of_block = [&](planned_constants& block)
         {
             auto const& b = p.m.bindings[p.m.at(block.symbol).info];
-            block.form = memory_form_of(p.m, plain_members_of(p.m, b), block_space(b), 0, p.which);
+            block.form = memory_form_of(p.m, members_of_block(p.m, block), block_space(b), 0, p.which);
             if (block.form.has_value())
                 block.form.value().name = block.block_name;
         };
@@ -1127,12 +1151,22 @@ void sgl::emit::impl::validate_binding(check::checked_module const& m, check::sy
     if (!is_placed)
         return;
 
+    // EMIT-274: sg binds a constant buffer in whole 16-byte rows, and the host's view of `T` is `T` itself
+    for (auto const& member : m.at(b.members))
+        if (auto const size = member.is_constants_buffer ? place_struct(m, member.type, block_space(b)).size : 0;
+            size % 16 != 0)
+            report(error_kind::unsupported, cc::format("constants[{}] in '{}.{}', whose {} bytes are no whole number "
+                                                       "of 16-byte rows; a constant buffer is bound in rows, so pad "
+                                                       "'{}' to {} bytes",
+                                                       m.name_of(member.type), s.name, member.name, size,
+                                                       m.name_of(member.type), (size + 15) / 16 * 16));
+
     // EMIT-154: every target reads a packed block from its memory form, and HLSL has no expression that builds a
     // struct value out of the fields
     if (block_space(b) == address_space::packed_constants)
-        for (auto const& member : plain_members_of(m, b))
-            if (member.type != check::checked_module::void_type && m.builtin_type_of(member.type) == nullptr
-                && m.at(member.type).kind == check::type_kind::structure)
+        for (auto const& member : m.at(b.members))
+            if (!m.takes_slots(member.type) && member.type != check::checked_module::void_type
+                && m.builtin_type_of(member.type) == nullptr && m.at(member.type).kind == check::type_kind::structure)
                 report(error_kind::unsupported,
                        cc::format("a struct member in a @padding(.none) block: '{}.{}'", s.name, member.name));
     // C++ aligns a `tg::vec4f` at 4, and no target declares an array anywhere but at the start of a row
@@ -1269,14 +1303,43 @@ cc::vector<sgl::check::member_info> sgl::emit::impl::plain_members_of(check::che
 {
     auto result = cc::vector<check::member_info>();
     for (auto const& member : m.at(b.members))
-        if (!m.takes_slots(member.type))
+        if (!m.takes_own_slot(member))
             result.push_back(member);
     return result;
+}
+
+cc::vector<sgl::check::member_info> sgl::emit::impl::members_of_block(check::checked_module const& m,
+                                                                      planned_constants const& block)
+{
+    auto const& b = m.bindings[m.at(block.symbol).info];
+    if (block.member < 0)
+        return b.is_inline ? cc::vector<check::member_info>::create_copy_of(m.at(b.members)) : plain_members_of(m, b);
+    return cc::vector<check::member_info>::create_copy_of(
+        m.at(b.members).subspan({.offset = isize(block.member), .size = 1}));
 }
 
 sgl::i32 sgl::emit::impl::first_resource_slot(check::checked_module const& m, check::binding_info const& b)
 {
     return !b.is_inline && !plain_members_of(m, b).empty() ? 1 : 0;
+}
+
+cc::vector<sgl::i32> sgl::emit::impl::member_slots(check::checked_module const& m, check::binding_info const& b)
+{
+    auto result = cc::vector<i32>();
+    auto slot = first_resource_slot(m, b);
+    for (auto const& member : m.at(b.members))
+    {
+        if (b.is_inline || !m.takes_own_slot(member))
+        {
+            result.push_back(-1);
+            continue;
+        }
+        result.push_back(slot);
+        // a binding array takes a slot per element (CHK-299)
+        auto const& t = m.at(member.type);
+        slot += !member.is_constants_buffer && t.kind == check::type_kind::array ? t.count : 1;
+    }
+    return result;
 }
 
 cc::vector<sgl::emit::impl::planned_member> sgl::emit::impl::declared_members(planned_struct const& s)
@@ -1346,14 +1409,25 @@ cc::string_view sgl::emit::impl::row_vector_of(plan const& p, check::type_id ele
     }
 }
 
-sgl::emit::impl::planned_constants const* sgl::emit::impl::block_of(plan const& p, check::symbol_id binding)
+sgl::emit::impl::planned_constants const* sgl::emit::impl::block_of(plan const& p, check::symbol_id binding, i32 member)
 {
-    if (p.constants.has_value() && p.constants.value().symbol == binding)
-        return &p.constants.value();
-    for (auto const& block : p.group_blocks)
-        if (block.symbol == binding)
+    for (auto const& block : blocks_of(p, binding))
+        if (member >= 0 && member < block.block_member_of.size() && block.block_member_of[member] >= 0)
             return &block;
     return nullptr;
+}
+
+cc::span<sgl::emit::impl::planned_constants const> sgl::emit::impl::blocks_of(plan const& p, check::symbol_id binding)
+{
+    if (p.constants.has_value() && p.constants.value().symbol == binding)
+        return cc::span<planned_constants const>(&p.constants.value(), 1);
+    auto first = isize(0);
+    while (first < p.group_blocks.size() && p.group_blocks[first].symbol != binding)
+        ++first;
+    auto last = first;
+    while (last < p.group_blocks.size() && p.group_blocks[last].symbol == binding)
+        ++last;
+    return cc::span<planned_constants const>(p.group_blocks).subspan({.offset = first, .size = last - first});
 }
 
 sgl::emit::impl::block_placement sgl::emit::impl::place_block(check::checked_module const& m,
@@ -1873,10 +1947,10 @@ cc::vector<sgl::emit::emitted_layout> sgl::emit::impl::layouts_of(plan const& p)
     auto const block = [&](planned_constants const& c)
     {
         auto const& b = p.m.bindings[p.m.at(c.symbol).info];
-        auto const plain = plain_members_of(p.m, b);
+        auto const held = members_of_block(p.m, c);
         result.push_back({.global = c.name,
                           .fields = c.form.has_value() ? fields_of(c.form.value())
-                                                       : fields_of(p, c.members, {}, plain, block_space(b))});
+                                                       : fields_of(p, c.members, {}, held, block_space(b))});
     };
     if (p.constants.has_value())
         block(p.constants.value());

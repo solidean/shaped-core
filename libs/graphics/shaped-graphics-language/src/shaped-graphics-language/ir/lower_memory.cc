@@ -504,7 +504,7 @@ cc::optional<place> lowering::chain_of(flat_expr_id id, cc::vector<u32>& chain)
             return place{.pointer = bound_workgroup(found), .type = x.type};
         if (emit::impl::resource_of(_plan, b->binding, b->member) >= 0)
             return {};
-        auto const* const block = emit::impl::block_of(_plan, b->binding);
+        auto const* const block = emit::impl::block_of(_plan, b->binding, b->member);
         if (block == nullptr)
             return {};
         chain.push_back(u32(uint_constant(u32(block->block_member_of[b->member]))));

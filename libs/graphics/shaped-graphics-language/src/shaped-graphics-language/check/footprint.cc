@@ -25,8 +25,8 @@ struct footprint_builder
         slots.push_back({.binding = binding, .member = member, .host_name = {}, .reads = reads, .writes = writes});
     }
 
-    /// A binding member standing in the tree, reached with `reads` / `writes`: a resource names its own slot, and a
-    /// plain member is its binding's constant block.
+    /// A binding member standing in the tree, reached with `reads` / `writes`: a resource and a `constants[T]` name
+    /// their own slot, and a plain member is its binding's constant block.
     void touch_member(flat_binding_member const& b, bool reads, bool writes)
     {
         auto const& info = m.bindings[m.at(b.binding).info];
@@ -37,7 +37,7 @@ struct footprint_builder
         auto const kind = m.at(member.type).kind;
         if (kind == type_kind::sampler)
             return;
-        touch(b.binding, m.takes_slots(member.type) ? b.member : -1, reads, writes);
+        touch(b.binding, m.takes_own_slot(member) ? b.member : -1, reads, writes);
     }
 };
 
@@ -197,8 +197,9 @@ cc::vector<slot_footprint> footprint_of(checked_module const& m, flat_entry_poin
                             element = m.at(element).element;
                         auto const& type = m.at(element);
                         slot.host_name = cc::format("{}.{}", m.qualified_name_of(binding), members[member].name);
-                        slot.view
-                            = type.kind == type_kind::image || type.is_mut ? slot_view::storage : slot_view::read_only;
+                        slot.view = members[member].is_constants_buffer          ? slot_view::constants
+                                  : type.kind == type_kind::image || type.is_mut ? slot_view::storage
+                                                                                 : slot_view::read_only;
                     }
                     ordered.push_back(cc::move(slot));
                 }

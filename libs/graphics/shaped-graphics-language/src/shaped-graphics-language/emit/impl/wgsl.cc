@@ -139,17 +139,17 @@ public:
 
     void write_group(cc::string& out,
                      plan const& p,
-                     planned_constants const* block,
+                     cc::span<planned_constants const> blocks,
                      cc::span<planned_resource const> buffers) const override
     {
         for (auto const& b : buffers)
             if (b.element_form.has_value())
                 write_form(out, b.element_form.value());
-        if (block != nullptr)
+        for (auto const& block : blocks)
         {
-            write_block_struct(out, p, *block);
-            out.appendf("@group({}) @binding({}) var<uniform> {}: {};\n", block->group, block->slot, block->name,
-                        block->block_name);
+            write_block_struct(out, p, block);
+            out.appendf("@group({}) @binding({}) var<uniform> {}: {};\n", block.group, block.slot, block.name,
+                        block.block_name);
         }
         for (auto const& b : buffers)
             write_resource(out, p, b);

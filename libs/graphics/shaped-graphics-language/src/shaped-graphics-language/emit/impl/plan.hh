@@ -148,21 +148,25 @@ struct memory_access
     bool is_raw = false;
 };
 
-/// A block of constants: the one `@inline binding` of the entry point, or the plain members of one of its groups.
+/// A block of constants: the one `@inline binding` of the entry point, the plain members of one of its groups, or one
+/// `constants[T]` member of a group, a block holding that one value (CHK-539).
 struct planned_constants
 {
     check::symbol_id symbol = check::symbol_id::none;
+    /// The `constants[T]` member it holds alone, a position in the binding's `members`; -1 for a block of plain members.
+    i32 member = -1;
     /// The global a member is read through, minted like any other name.
     cc::string name;
-    /// What the host binds the block by: the binding's own name.
+    /// What the host binds the block by: the binding's own name, and `binding.member` for a `constants[T]`.
     cc::string host_name;
     /// The struct type of the block, which SGL has no name for, so it is minted.
     cc::string block_name;
     /// The plain members only, each at the offset `place_block` gave it.
     cc::vector<planned_member> members;
-    /// Parallel to the binding's members: a position in `members`, or -1 for a buffer.
+    /// Parallel to the binding's members: a position in `members`, or -1 for a member this block does not hold.
     cc::vector<i32> block_member_of;
-    /// A group's block is the first resource of its group, at slot 0; -1 for the `@inline` block, which takes no group.
+    /// A group's block of plain members is the first resource of its group, at slot 0, and a `constants[T]` takes the
+    /// slot its declaration gives it; -1 for the `@inline` block, which takes no group.
     i32 group = -1;
     i32 slot = -1;
     /// The block as its target has to declare it to reach SGL's offsets, named `block_name`; absent where it declares
@@ -306,7 +310,8 @@ struct plan
     cc::string patch_function;
     cc::string point_index;
     cc::optional<planned_constants> constants;
-    /// The constant blocks of the entry point's groups, one per group with a plain member, in group order.
+    /// The constant blocks of the entry point's groups, in group then slot order: one per group with a plain member, and
+    /// one per `constants[T]` member.
     cc::vector<planned_constants> group_blocks;
     /// The resources the entry point's bindings declare, in group then slot order.
     cc::vector<planned_resource> resources;
@@ -361,15 +366,25 @@ struct plan
 /// The position of the file-scope sampler `symbol` among the module's, in declaration order: its index in every layout.
 [[nodiscard]] i32 file_sampler_index(check::checked_module const& m, check::symbol_id symbol);
 
-/// The block `binding` is read through: the `@inline` one, or its group's; null for a group with no plain member.
-[[nodiscard]] planned_constants const* block_of(plan const& p, check::symbol_id binding);
+/// The block member `member` of `binding` is read through: the `@inline` one, its group's, or its own where it is a
+/// `constants[T]`; null for a member no block holds.
+[[nodiscard]] planned_constants const* block_of(plan const& p, check::symbol_id binding, i32 member);
+/// Every block of `binding`, in slot order, a run of `p.group_blocks` or the `@inline` block; empty where it has none.
+[[nodiscard]] cc::span<planned_constants const> blocks_of(plan const& p, check::symbol_id binding);
 
-/// The members of a binding that are values rather than resources, which is every member of an `@inline` one.
+/// The members of a binding that are values in its own block, which is every member of an `@inline` one.
+/// A resource takes a slot of its own, and so does a `constants[T]` (CHK-539).
 [[nodiscard]] cc::vector<check::member_info> plain_members_of(check::checked_module const& m,
                                                               check::binding_info const& b);
+/// What `block` holds, as the binding declares it: its `constants[T]` member alone, or the binding's plain members.
+[[nodiscard]] cc::vector<check::member_info> members_of_block(check::checked_module const& m,
+                                                              planned_constants const& block);
 
 /// The slot a group's first resource takes: 1 behind a constant block, which takes 0, and 0 without one.
 [[nodiscard]] i32 first_resource_slot(check::checked_module const& m, check::binding_info const& b);
+/// Parallel to the binding's members: the first slot of each that takes slots of its own, a resource, a binding array or
+/// a `constants[T]`, in declaration order after the block of plain members; -1 for a plain member.
+[[nodiscard]] cc::vector<i32> member_slots(check::checked_module const& m, check::binding_info const& b);
 
 /// How the target of `p` spells the builtin type named `name`, such as the texel of an image format.
 [[nodiscard]] cc::string_view builtin_spelling(plan const& p, cc::string_view name);

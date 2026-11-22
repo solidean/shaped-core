@@ -138,7 +138,7 @@ void sgl::emit::impl::plan_memory_accesses(plan& p)
             if (resource_of(p, b->binding, b->member) >= 0 || workgroup_of(p, b->binding, b->member) >= 0)
                 continue;
             // a memory form addresses its fields itself (EMIT-113)
-            auto const& block = *block_of(p, b->binding);
+            auto const& block = *block_of(p, b->binding, b->member);
             if (!block.form.has_value())
                 p.accesses[i] = access_of(p, block.members, block.block_member_of[b->member], true);
         }

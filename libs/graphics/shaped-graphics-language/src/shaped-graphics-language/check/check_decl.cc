@@ -373,6 +373,57 @@ type_id checker::resolve_buffer(i32 file, ast::expr_id expr, ast::index const& n
     return buffer_type(element, false);
 }
 
+bool checker::is_constants_buffer_type(i32 file, ast::expr_id expr) const
+{
+    if (!ast::is_valid(expr))
+        return false;
+    auto const& e = ast_of(file).at(expr);
+    if (auto const* const q = e.node.try_as<ast::qualified_type>())
+        return is_constants_buffer_type(file, q->type);
+    auto const* const applied = e.node.try_as<ast::index>();
+    return applied != nullptr && is_named(file, applied->object, "constants");
+}
+
+type_id checker::resolve_constants_buffer(i32 file, ast::expr_id expr, bool is_workgroup)
+{
+    auto const where = span_of(file, expr);
+    auto const& e = ast_of(file).at(expr);
+    if (e.node.is<ast::qualified_type>())
+    {
+        report(diagnostic_kind::wrong_kind_of_name, file, where,
+               "a constant buffer is only read, so `constants[T]` is never `mut` or `out`");
+        return checked_module::error_type;
+    }
+    if (is_workgroup)
+    {
+        report(diagnostic_kind::wrong_kind_of_name, file, where,
+               "a @workgroup binding holds values the workgroup shares, and `constants[T]` is a constant buffer the "
+               "host binds");
+        return checked_module::error_type;
+    }
+    auto const arguments = ast_of(file).at(e.node.as<ast::index>().arguments);
+    if (arguments.size() != 1 || !arguments[0].name.empty() || arguments[0].is_splat)
+    {
+        report(diagnostic_kind::wrong_kind_of_name, file, where,
+               "a constant buffer holds one struct: `constants[view_params]`");
+        return checked_module::error_type;
+    }
+    auto const held = resolve_type(file, arguments[0].value);
+    if (held == checked_module::error_type)
+        return held;
+    auto const& t = out.at(held);
+    if (out.builtin_type_of(held) != nullptr || t.kind != type_kind::structure || t.is_opaque)
+    {
+        report(diagnostic_kind::wrong_kind_of_name, file, span_of(file, arguments[0].value),
+               cc::format("a constant buffer holds a struct the host lays out, and {} is none; a plain member holds "
+                          "any other value",
+                          out.name_of(held)));
+        return checked_module::error_type;
+    }
+    set_type(file, expr, held);
+    return held;
+}
+
 type_id checker::resolve_type(i32 file, ast::expr_id expr, function_scope const* scope)
 {
     if (!ast::is_valid(expr))
@@ -483,6 +534,10 @@ type_id checker::resolve_type(i32 file, ast::expr_id expr, function_scope const*
         }
         else if (is_named(file, applied->object, "tangent"))
             result = resolve_tangent(file, expr, *applied, scope);
+        // CHK-539: a binding member's constant buffer, which compile_members resolves before any type reaches here
+        else if (is_named(file, applied->object, "constants") && !is_valid(generic_named(file, applied->object)))
+            report(diagnostic_kind::wrong_kind_of_name, file, where,
+                   "`constants[T]` is a constant buffer of a binding, and stands as a binding member alone");
         else if (auto const generic = generic_named(file, applied->object); is_valid(generic))
         {
             // CHK-339: `ring[4, float]`, an instance of a generic struct, one argument per parameter and of its kind
@@ -766,7 +821,10 @@ ast::range_of<member_info> checker::compile_members(i32 file,
         }
 
         auto type = checked_module::error_type;
-        if (ast::is_valid(f.type))
+        auto const is_constants_buffer = !is_struct && is_constants_buffer_type(file, f.type);
+        if (is_constants_buffer)
+            type = resolve_constants_buffer(file, f.type, is_workgroup);
+        else if (ast::is_valid(f.type))
             type = is_struct ? resolve_value_type(file, f.type) : resolve_type(file, f.type);
         else
             report(diagnostic_kind::missing_type, file, f.name, name);
@@ -1049,6 +1107,7 @@ ast::range_of<member_info> checker::compile_members(i32 file,
             .is_unfilterable = unfilterable != nullptr,
             .is_non_filtering = non_filtering != nullptr,
             .is_coherent = is_coherent,
+            .is_constants_buffer = is_constants_buffer && type != checked_module::error_type,
             .padding = member_padding,
         });
         // CHK-526: where a field stands in one target's record, which a struct with a target layout alone says
@@ -1899,6 +1958,13 @@ void checker::compile_binding(symbol_id id)
             if (auto const* const smp = ast_of(file).at(member).node.try_as<ast::sampler_decl>())
                 report(diagnostic_kind::wrong_kind_of_name, file, smp->name,
                        "an @inline binding holds constants only, and a sampler is none");
+    // CHK-539: an `@inline` binding is one block sg sets, and a constant buffer of its own is a slot no group has there
+    if (is_inline)
+        for (auto const& m : out.at(members))
+            if (m.is_constants_buffer)
+                report(diagnostic_kind::wrong_kind_of_name, file, span_of(file, ast_of(file).at(m.field).type),
+                       "an @inline binding is one block of constants, and `constants[T]` is a constant buffer of its "
+                       "own; a plain member holds the value there");
     // CHK-387: an `@inline` binding is a vulkan push constant, where a 16-bit member needs a bit of its own, and a
     // 64-bit one is a layout no test has shown yet
     if (is_inline)

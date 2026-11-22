@@ -467,6 +467,13 @@ struct sgl::check::checked_module
         return is_resource(t.kind) || (t.kind == type_kind::array && is_resource(at(t.element).kind));
     }
 
+    /// What takes a slot of its group rather than a place in the group's constant block: a resource, a binding array
+    /// of one, or a `constants[T]`, whose type is the value it holds (CHK-539).
+    [[nodiscard]] bool takes_own_slot(member_info const& member) const
+    {
+        return member.is_constants_buffer || takes_slots(member.type);
+    }
+
     [[nodiscard]] cc::string_view name_of(type_id id) const
     {
         auto const& t = at(id);

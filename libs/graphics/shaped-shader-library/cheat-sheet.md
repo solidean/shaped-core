@@ -393,6 +393,8 @@ auto const d = cmd.compute.declare_array_texture_access(shaders::frame_bindings:
 //   a buffer<int> does not compile. A plain member is a plain field (`scale: float` -> float): the group's own
 //   constant buffer, which create_binding_group allocates with the scope's lifetime: a transient one is uploaded
 //   inline into the `cmd` it is given, a persistent one through ctx.upload.
+//   a `constants[T]` member is a constant buffer the caller binds: `view: constants[view_params]` ->
+//   sg::constants_buffer_view<view_params>, the generated struct, so `.view = view_buffer.as_constants_buffer()`.
 //   sg::declared_binding_set, NOT declared_binding_group: no group_index, because SGL numbers a group by its
 //   position in each entry point's list. Bind it at the index the pipeline has it at:
 auto const layout = ctx.cached.acquire_binding_group_layout<shaders::compute::work>();

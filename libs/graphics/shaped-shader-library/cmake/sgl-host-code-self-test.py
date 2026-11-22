@@ -743,6 +743,28 @@ def a_modules_struct_and_the_files_own_of_one_bare_name_are_two_cpp_types():
 
 
 @test
+def a_constants_member_is_a_constant_buffer_view_the_caller_binds():
+    # CHK-539: its own slot and its own buffer, which the caller fills; the group's block keeps slot 0
+    memory = {"view_params": ("view_params", 32)}
+    group = {"name": "frame", "inline": False, "block_size": 4, "block_slot": 0, "block_host_name": "frame",
+             "members": [
+                 {"kind": "constant", "name": "gain", "type": "float", "offset": 0, "size": 4},
+                 resource("constants", name="view", type="view_params", host_name="frame.view", slot=1, size=32,
+                          access="read"),
+                 resource("buffer", name="out", type="float", host_name="frame.out", slot=2, stride=4,
+                          access="read_write"),
+             ]}
+    header = sgl_host_code.emit_group("pkg", memory, "ns", FILE, group)
+    expect_in("sg::constants_buffer_view<view_params> view; ///< `constants[view_params]`", header, "its field")
+    source = sgl_host_code.emit_group_impl("pkg", memory, "ns", FILE, group)
+    expect_in('{.name = "frame.view", .index = 1u, .count = 1u, .type = sg::binding_type::constants_buffer, '
+              ".block_size = 32}", source, "its binding, at its slot")
+    # gathered as a view at its position among the declared bindings, after the block
+    expect_in("views.push_back({.slot = sg::binding_slot(1), .view = view});", source, "its view")
+    expect_in("views.reserve(2);", source, "the views a caller supplies")
+
+
+@test
 def a_mat3_is_gpu_mat3_at_48_bytes_and_tg_mat3f_packed():
     natural = [{"name": "basis", "type": "mat3", "offset": 0, "size": 48}]
     packed = [{"name": "basis", "type": "mat3", "offset": 0, "size": 36}]

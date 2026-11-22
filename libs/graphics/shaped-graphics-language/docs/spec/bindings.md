@@ -53,6 +53,36 @@ The table is the one sg already commits to.
 **sg and SGL name the same two things: the resource, and what the shader does with it.**
 The type is the kind, and the access word is `sg::access_mode`, so every row above is one-to-one.
 
+## Constant buffers of their own
+
+**`constants[T]` is a constant buffer the host fills and binds itself, holding one `T`** ([CHK-539](semantics/checking.md#bindings)).
+It is for a block that comes from somewhere else: shared by several groups, written once per frame, or ported from a shader that had one.
+A group holds any number of them beside its plain members, and each takes its slot in declaration order, as a resource does:
+
+```sgl
+struct view_params:
+    view_projection: mat4
+    eye: float4
+
+struct light_params:
+    color: float3
+    intensity: float
+
+binding frame:
+    exposure: float                  // slot 0: the block of the plain members
+    view: constants[view_params]     // slot 1
+    shadow: texture_2d_depth         // slot 2
+    light: constants[light_params]   // slot 3
+```
+
+* **It reads as the `T` it holds**: `frame.view.eye` reads a field in place, and `frame.view` the whole value.
+  It is a constant, so a write to it is `not-assignable`, and `mut` or `out` on it is refused.
+* **`T` is a struct of the program**, laid out as a constant block holds it, by the binding's `@padding`.
+  The host writes the struct a package generates for `T`, which is the bytes the shader reads, and binds `sg::constants_buffer_view<T>`.
+  Any other value is a plain member, which the block of the plain members holds.
+* **`T` fills whole 16-byte rows**, since sg binds a constant buffer in rows; a struct that ends inside one is refused and told its size ([EMIT-274](semantics/emitting.md#bindings)).
+* **An `@inline` binding holds none**, since it is one block sg sets, and **neither does `@workgroup` memory**, which no host fills.
+
 ## Access
 
 Three spellings, and a resource takes the ones it has.
@@ -612,6 +642,7 @@ It costs every access to the member, and it needs `device_coherence`, which WebG
 ## How a group reaches sg
 
 **The slots of a group are its members in declaration order**, after the constant block at slot 0 when the group has plain members.
+A `constants[T]` takes its slot as a resource does, wherever it stands among them ([Constant buffers of their own](#constant-buffers-of-their-own)).
 A group-scope static sampler takes a slot like any sampler, since sg matches it by name to a sampler binding.
 
 **SGL states every fact of a binding itself.**
@@ -656,8 +687,9 @@ A binding's access is what its layout permits, and a group is declared once and 
 One entry point usually does less: a `mut buffer` it only loads from is a read to it, and a member it never names is untouched.
 sg places barriers by the footprint, so that difference is a barrier a pipeline does not pay.
 
-**A slot is one resource member, or a binding's constant block as a whole.**
+**A slot is one resource member, one `constants[T]`, or a binding's constant block as a whole.**
 The plain members of a group share one constant buffer, so reading any of them reads the block, spelled by the binding's name alone.
+A `constants[T]` is a buffer of its own, so reading it, whole or by field, reads `binding.member`.
 A sampler is no slot: nothing orders against one.
 An `@inline` binding is none either, since sg sets it as constants rather than binding it.
 
@@ -705,6 +737,7 @@ Everything not named here is the diagnostic `unsupported-yet`, never a guess.
 * Any resource handed to a function of the program, which takes it as a parameter of exactly its type ([CHK-366](semantics/checking.md#bindings)).
   A buffer parameter is subscripted as its member is, `values[i]`, and a body in a target's own text names it as `$values`.
 * A plain member of a group, as a field of the constant buffer the group owns, for a type whose place in a block every target agrees on.
+* `constants[T]`, a constant buffer of its own for a struct `T`, at the slot its declaration gives it ([Constant buffers of their own](#constant-buffers-of-their-own)).
 * The positional group numbering, and `@inline` last.
 * Binding arrays of textures, images and buffers, under `require binding_arrays`, with `nonuniform` and `uniform`.
 * `@workgroup` bindings, which take no group.
@@ -717,14 +750,14 @@ Every target writes a group.
 WGSL gives each resource its own `@group`/`@binding`, and HLSL declares each at file scope with `register(<class>slot, spaceN)` on dx12 and `[[vk::binding(slot, N)]]` on vulkan.
 MSL writes the group as one argument buffer whose member `[[id(slot)]]` is each slot, as [MSL](#how-a-group-reaches-sg) below shows and EMIT-89 states.
 A group's plain members are one constant buffer at the group's slot 0, named after the binding, and its resources follow it in declaration order.
+A `constants[T]` is a constant buffer of a one-member struct holding its `T`, named `<binding>_<member>` and declared as that block is.
+That is `ConstantBuffer<…>` at `register(b<slot>, space<group>)` on dx12, and the same at `[[vk::binding(slot, group)]]` on vulkan.
+WGSL writes it as a `var<uniform>`, and MSL as a `constant` pointer of the group's argument buffer.
 A file-scope sampler stands where sg binds a pipeline layout's static sampler of its index, i ([EMIT-133](semantics/emitting.md#bindings)):
 `register(s<i>, space10)` on dx12, `[[vk::binding(i + 1, 3)]]` on vulkan, `@group(3) @binding(i + 1)` in WGSL, and a `[[sampler(i)]]` parameter in MSL.
 
-`constants[T]` parses and is then reported.
-A struct element type is placed by the storage rule of [the layout rules](semantics/emitting.md#layout).
-That is deliberate.
-The shape is decided, so it is written down here and the AST constructs it.
-A shader using one then gets a diagnostic that names the feature, rather than a parse error that names nothing.
+A buffer's struct element is placed by the storage rule of [the layout rules](semantics/emitting.md#layout), and a `constants[T]`'s `T` by the constant-block rule.
+SGL's own SPIR-V writes a `constants[T]` as a `Uniform` variable of a `Block` struct, and its own DXIL as a CBV read through `cbufferLoadLegacy`, as either writes a group's block.
 
 ## Open
 

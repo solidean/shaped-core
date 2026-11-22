@@ -406,20 +406,20 @@ public:
 
     /// Each resource of a group carries its final address: `space` is the group and the register is the slot on
     /// dx12, `[[vk::binding(slot, group)]]` on vulkan.
-    /// A group's block is a `ConstantBuffer` of a struct declared ahead of it.
+    /// A group's block is a `ConstantBuffer` of a struct declared ahead of it, and so is each `constants[T]`.
     void write_group(cc::string& out,
                      plan const& p,
-                     planned_constants const* block,
+                     cc::span<planned_constants const> blocks,
                      cc::span<planned_resource const> buffers) const override
     {
-        if (block != nullptr)
-            write_block_struct(out, p, *block);
+        for (auto const& block : blocks)
+            write_block_struct(out, p, block);
         for (auto const& b : buffers)
             if (b.element_form.has_value())
                 write_form(out, b.element_form.value());
-        if (block != nullptr)
-            write_addressed(out, cc::format("ConstantBuffer<{}>", block->block_name), block->name, 'b', block->group,
-                            block->slot, {});
+        for (auto const& block : blocks)
+            write_addressed(out, cc::format("ConstantBuffer<{}>", block.block_name), block.name, 'b', block.group,
+                            block.slot, {});
         for (auto const& b : buffers)
             write_resource(out, p, b);
         out += "\n";

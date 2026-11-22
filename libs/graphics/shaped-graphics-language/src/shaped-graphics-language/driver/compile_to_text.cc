@@ -26,7 +26,7 @@ bool is_reached(check::checked_module const& m, check::flat_entry_point const& l
         auto const* const b = x.node.try_as<check::flat_binding_member>();
         if (b == nullptr || b->binding != binding)
             continue;
-        auto const is_resource = !info.is_inline && m.takes_slots(members[b->member].type);
+        auto const is_resource = !info.is_inline && m.takes_own_slot(members[b->member]);
         if ((is_resource ? b->member : -1) == member)
             return true;
     }
@@ -72,6 +72,18 @@ cc::vector<interface_binding> interface_of(check::checked_module const& m,
             auto const& member = described.members[i];
             if (member.kind == described_member_kind::constant)
                 continue;
+            // CHK-539: a block of its own, which every target and sg take as any constant buffer
+            if (member.kind == described_member_kind::constants_buffer)
+            {
+                result.push_back({.name = member.host_name,
+                                  .emitted = emitted_of(member.host_name),
+                                  .kind = described_member_kind::constant,
+                                  .group = group,
+                                  .slot = member.slot,
+                                  .is_used = is_reached(m, legal, id, i32(i)),
+                                  .block_size = member.size});
+                continue;
+            }
             result.push_back({.name = member.host_name,
                               .emitted = emitted_of(cc::format("{}.{}", m.qualified_name_of(id), member.name)),
                               .kind = member.kind,

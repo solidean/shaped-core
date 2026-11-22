@@ -607,6 +607,12 @@ fun shade(k: float) -> float:
   `buffer[float3]` strides by 16 where `tg::vec3f` takes 12, and `buffer[mat3]` by 48 where `tg::mat3f` takes 36; without either it is `padding-not-stated`, naming both strides.
   `@padding(.natural)` keeps the natural layout (EMIT-110) and `@padding(.none)` takes the host's.
   A host that writes its own values sees no generated struct, so a padding that would surprise it is never implicit; a struct's element is the generated struct the host writes, and needs no statement.
+* **CHK-539** A binding member `m: constants[T]` is a constant buffer of its own, holding one `T` ([bindings.md](../bindings.md#constant-buffers-of-their-own)).
+  `binding.m` is an expression of type `T`, read whole or by field as a plain member is.
+  It takes a slot of its group as a resource does, in declaration order, and its footprint names `binding.m`; it is no field of the group's block of plain members.
+  `T` is a struct of the program, laid out as a constant block holds it under the binding's `@padding`; a builtin or any other type is `wrong-kind-of-name`, and so is anything but one argument.
+  It is a constant: an assignment to it or into it is `not-assignable`, and `mut` or `out` on it is `wrong-kind-of-name`.
+  In an `@inline` binding, in a `@workgroup` binding, and anywhere but a binding member's type it is `wrong-kind-of-name`.
 
 ```sgl
 @inline binding constants:
@@ -1986,7 +1992,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `unknown-module`, `use-of-own-module` | CHK-347 |
 | `module-cycle` | CHK-349 |
 | `unknown-name` | CHK-24, CHK-62, CHK-245, CHK-330 |
-| `wrong-kind-of-name` | CHK-24, CHK-54, CHK-79, CHK-237, CHK-247, CHK-199, CHK-200, CHK-202, CHK-203, CHK-205, CHK-279, CHK-285, CHK-286, CHK-292, CHK-296, CHK-297, CHK-299, CHK-300, CHK-315, CHK-317, CHK-320, CHK-338, CHK-339, CHK-347, CHK-368, CHK-372, CHK-373, CHK-374, CHK-390, CHK-536, CHK-538 |
+| `wrong-kind-of-name` | CHK-24, CHK-54, CHK-79, CHK-237, CHK-247, CHK-199, CHK-200, CHK-202, CHK-203, CHK-205, CHK-279, CHK-285, CHK-286, CHK-292, CHK-296, CHK-297, CHK-299, CHK-300, CHK-315, CHK-317, CHK-320, CHK-338, CHK-339, CHK-347, CHK-368, CHK-372, CHK-373, CHK-374, CHK-390, CHK-536, CHK-538, CHK-539 |
 | `padding-not-stated` | CHK-532 |
 | `indexing-not-stated` | CHK-538 |
 | `unexpected-keyword` | CHK-315 |
@@ -1999,7 +2005,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `binding-not-listed` | CHK-45, CHK-131, CHK-228 |
 | `as-precedence` | CHK-411 |
 | `type-mismatch` | CHK-52, CHK-56, CHK-77, CHK-112 to CHK-118, CHK-121, CHK-167, CHK-210, CHK-214, CHK-219, CHK-236, CHK-243, CHK-275, CHK-276, CHK-279, CHK-281, CHK-287, CHK-329, CHK-344, CHK-362, CHK-375, CHK-392, CHK-429, CHK-433, CHK-434 |
-| `not-assignable` | CHK-112, CHK-236, CHK-316, CHK-352, CHK-367, CHK-514, CHK-536 |
+| `not-assignable` | CHK-112, CHK-236, CHK-316, CHK-352, CHK-367, CHK-514, CHK-536, CHK-539 |
 | `read-before-assignment` | CHK-55 |
 | `missing-return` | CHK-125, CHK-236 |
 | `unreachable-code` | CHK-126, CHK-162, CHK-430 |

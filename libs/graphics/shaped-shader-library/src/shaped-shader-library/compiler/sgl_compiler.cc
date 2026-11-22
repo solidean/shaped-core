@@ -136,6 +136,7 @@ static_assert(
     switch (b.kind)
     {
     case sgl::described_member_kind::constant:
+    case sgl::described_member_kind::constants_buffer:
         result.type = sg::binding_type::constants_buffer;
         // A block is read in rows of 16 bytes, which is the size every target's compiler states it as.
         result.block_size = isize((b.block_size + 15) / 16 * 16);

@@ -543,6 +543,7 @@ if(SC_BUILD_TESTS)
         tests/emit/tessellation-polyfill-emit-test.cc
         tests/emit/mesh-polyfill-emit-test.cc
         tests/emit/buffer-emit-test.cc
+        tests/emit/constants-buffer-emit-test.cc
         tests/emit/bytes-emit-test.cc
         tests/emit/texture-emit-test.cc
         tests/emit/auto-workgroup-test.cc

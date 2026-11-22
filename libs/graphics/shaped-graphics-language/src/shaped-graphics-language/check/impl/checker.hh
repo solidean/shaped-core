@@ -1013,6 +1013,10 @@ struct checker
     [[nodiscard]] type_id buffer_type(type_id element, bool is_mut);
     /// `buffer[T]` in a type position, which is the `index` node `buffer` heads.
     [[nodiscard]] type_id resolve_buffer(i32 file, ast::expr_id expr, ast::index const& node, function_scope const* scope);
+    /// Whether `expr` is written `constants[T]`, bare or under an access word, which only a binding member is (CHK-539).
+    [[nodiscard]] bool is_constants_buffer_type(i32 file, ast::expr_id expr) const;
+    /// The `T` of a binding member's `constants[T]`, which is its type; the error type where it is refused (CHK-539).
+    [[nodiscard]] type_id resolve_constants_buffer(i32 file, ast::expr_id expr, bool is_workgroup);
     /// `T[N]` and `T[a, b]` in a type position; the caller has ruled out `buffer` and every resource.
     [[nodiscard]] type_id resolve_array(i32 file, ast::expr_id expr, ast::index const& node, function_scope const* scope);
     /// The interned `element[count]`, spelled outermost first.

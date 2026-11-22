@@ -445,6 +445,7 @@ if(SC_BUILD_TESTS)
             tests/compute/compute-coherence-test.cc
             tests/compute/compute-float-specials-test.cc
             tests/compute/compute-affine-memory-test.cc
+            tests/compute/compute-constant-buffers-test.cc
             tests/compute/compute-diagnostic-routes-test.cc
             tests/compute/compute-diagnostics-test.cc
             tests/compute/compute-assert-billing-test.cc
@@ -505,6 +506,7 @@ if(SC_BUILD_TESTS)
                 module_twin.sgl:*
                 double_values.sgl:*
                 affine_memory.sgl:*
+                constant_buffers.sgl:*
                 quads.sgl:*
                 textures.sgl:*
                 ping_pong.sgl:*

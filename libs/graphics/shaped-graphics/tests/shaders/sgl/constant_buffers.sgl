@@ -1,0 +1,28 @@
+// One group holding plain members, its own block at slot 0, and two constant buffers of their own (CHK-539).
+// The buffers stand between the group's resources, so each takes the slot its declaration gives it.
+
+struct view_params:
+    scale: float4
+    offset: float4
+
+struct light_params:
+    color: float3
+    intensity: float
+
+binding blocks:
+    factor: float
+    bias: float
+    view: constants[view_params]
+    results: mut buffer[float4]
+    light: constants[light_params]
+
+@compute fun read_blocks(@thread_id id: int3){blocks}:
+    let i = id.x
+    let v = blocks.view
+    let lit = blocks.light.color * blocks.light.intensity
+    if i == 0:
+        blocks.results[i] = v.scale * blocks.factor + blocks.view.offset
+    else if i == 1:
+        blocks.results[i] = float4(lit.x, lit.y, lit.z, blocks.bias)
+    else:
+        blocks.results[i] = float4(blocks.factor, blocks.bias, blocks.light.intensity, v.offset.w)

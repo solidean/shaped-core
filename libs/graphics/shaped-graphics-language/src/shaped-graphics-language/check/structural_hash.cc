@@ -43,6 +43,9 @@ void fold_members(cc::byte_stream_builder& b, checked_module const& m, cc::span<
         b.add_bool(member.is_unfilterable);
         b.add_bool(member.is_non_filtering);
         b.add_pod(u8(member.padding));
+        // folded only where set, so every shape hashed before `constants[T]` existed keeps its hash
+        if (member.is_constants_buffer)
+            b.add_string("constants");
         b.add_bool(member.static_sampler >= 0);
         if (member.static_sampler >= 0)
             fold_sampler(b, m.samplers[member.static_sampler]);

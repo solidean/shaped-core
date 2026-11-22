@@ -288,6 +288,14 @@ A binding that is not `@inline` is a group.
   The constant block is a pointer at slot 0, and a binding array is a C array over as many ids as it has elements.
   The body reads each resource and the block through a local the top of the function binds under the name EMIT-85 minted, so it reads as the other targets' does.
 * **EMIT-90** A group's resources — buffers, textures, images and samplers — take the slots after its constant buffer, in declaration order, from 1, or from 0 when it has no plain member.
+  A `constants[T]` (CHK-539) takes its slot among them in the same order.
+* **EMIT-274** A `constants[T]` is a constant buffer of its own: a struct minted from `<binding>_<member>_data` whose one member is the `T`, and a block of it minted from `<binding>_<member>`.
+  Every target declares it as it declares the block of a group's plain members, at its own slot.
+  That is HLSL's `ConstantBuffer`, WGSL's `var<uniform>` and a `constant` pointer of MSL's argument buffer.
+  SGL's own SPIR-V writes a `Uniform` variable of a `Block` struct, and its own DXIL a CBV.
+  So a read of `binding.m.f` is `<binding>_<member>.m.f`, and a read of the whole is `<binding>_<member>.m`.
+  `T` stands at offset 0, so the buffer the host binds is `T`'s bytes, and MSL's argument buffer lists the slots in slot order.
+  A `T` whose size is no whole number of 16-byte rows is `unsupported`, and the detail names the size to pad it to: sg binds a constant buffer in rows, and the host's view of `T` is `T` itself.
 * **EMIT-97** A texture, an image and a sampler member are each one global minted as a buffer's is, by EMIT-85, and each has its target's own type by the table below.
 * **EMIT-98** `hlsl-vulkan` states an image's format as `[[vk::image_format]]`, in DXC's spelling, which DXC makes a typed image of.
   `hlsl-dx12` states none, since dx12 takes the format from the view, and neither does `bgra8_unorm` on vulkan, which SPIR-V has no name for.
@@ -1044,7 +1052,7 @@ The C++ struct a package generates is that layout byte for byte, padding include
 |---|---|
 | `module-has-errors` | EMIT-10 |
 | `unknown-entry-point` | EMIT-11 |
-| `unsupported` | EMIT-12, EMIT-33, EMIT-34, EMIT-38, EMIT-39, EMIT-67, EMIT-81, EMIT-107, EMIT-128, EMIT-154, EMIT-265 |
+| `unsupported` | EMIT-12, EMIT-33, EMIT-34, EMIT-38, EMIT-39, EMIT-67, EMIT-81, EMIT-107, EMIT-128, EMIT-154, EMIT-265, EMIT-274 |
 | `reserved-entry-point-name` | none: retired by EMIT-21 |
 | `system-value-semantic` | EMIT-32 |
 | `layout-mismatch` | none: retired by EMIT-41 |

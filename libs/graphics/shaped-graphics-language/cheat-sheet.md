@@ -92,6 +92,7 @@ sgl::describe({.library = files, .module = "view"});   // module `view` instead 
                                            // in the module's own description too (CHK-171), and every struct by its host name,
                                            // `view.particle` for a module's (a memory struct of one carries `module` too)
 d.value().bindings                         // name, is_inline, members (constant: offset + size; buffer: slot + host_name `work.values`; a binding array: `count` slots from `slot`), block_size
+                                           // a `constants[T]` member is kind constants_buffer: its slot, host_name, and size, T's bytes
                                            // texture / image / sampler members also carry the sg enum values of their binding:
                                            // texture_dimension, sample_type, image_format + access, sampler_type, static_sampler
 d.value().structs                          // the @vertex / @pixel structs: name, edge, members with their location
@@ -931,6 +932,8 @@ ops[i](mut v)                                            // raygen, miss, closes
   Its resource at `slot` is `register(<class>slot, spaceN)` in dx12, `[[vk::binding(slot, N)]]` in vulkan, `@group(N) @binding(slot)` in WGSL.
   An entry point lists at most three groups besides its `@inline` binding, as sg binds; a fourth is `too-many-groups` on every target.
   MSL has no globals, so there it is the entry point's parameter `constant T& name [[buffer(4)]]`.
+- **`view: constants[view_params]` is a constant buffer of its own** (CHK-539, EMIT-274): its own slot in declaration order, read as the struct it holds, `frame.view.eye`.
+  The host binds `sg::constants_buffer_view<view_params>`; the struct fills whole 16-byte rows, and `@inline` and `@workgroup` bindings hold none.
 - **GPU memory is placed at natural alignment, the same on every target, because that is what loads fastest** (EMIT-110).
   A vector aligns to its size and a 3-vector to 16, a scalar may fill a 3-vector's tail, and a struct nested in a constant block takes whole rows.
   So `buffer[float3]` strides by 16, and the host writes it as `slib::gpu_padded<tg::vec3f, 16>`; the generated structs carry every padding field.

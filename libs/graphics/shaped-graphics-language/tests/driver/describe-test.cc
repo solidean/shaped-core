@@ -119,6 +119,39 @@ binding raw:
     CHECK(raw.members[1].slot == 3);
 }
 
+TEST("sgl describe - a constants[T] is a constant buffer of its own, numbered among the resources (CHK-539)")
+{
+    auto const d = described(R"(struct view_params:
+    scale: float4
+
+binding frame:
+    gain: float
+    views: buffer[float]
+    view: constants[view_params]
+
+@compute fun main(@thread_id id: int3){frame}:
+    let x = frame.view.scale.x * frame.gain + frame.views[0]
+)");
+
+    REQUIRE(d.bindings.size() == 1);
+    auto const& frame = d.bindings[0];
+    // the block of plain members keeps slot 0, and holds the plain members alone
+    CHECK(frame.block_slot == 0);
+    CHECK(frame.block_size == 4);
+    REQUIRE(frame.members.size() == 3);
+    CHECK(frame.members[1].slot == 1);
+    auto const& view = frame.members[2];
+    CHECK(view.kind == sgl::described_member_kind::constants_buffer);
+    CHECK(view.type == "view_params");
+    CHECK(view.slot == 2);
+    CHECK(view.size == 16);
+    CHECK(view.access == "read");
+    CHECK(view.host_name == "frame.view");
+    // the struct is laid out as a constant block holds it, which the host's generated type is
+    REQUIRE(d.memory_structs.size() == 1);
+    CHECK(d.memory_structs[0].space == "constants");
+}
+
 TEST("sgl describe - an entry point and a pipeline name the sg features a device needs for them")
 {
     // Both stages may use the image format the file requires, and only the pixel stage lists what does.

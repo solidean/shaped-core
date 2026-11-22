@@ -41,6 +41,8 @@ cc::string_view kind_name(sgl::described_member_kind k)
         return "sampler";
     case sgl::described_member_kind::acceleration_structure:
         return "acceleration_structure";
+    case sgl::described_member_kind::constants_buffer:
+        return "constants";
     }
     return "constant";
 }
@@ -94,6 +96,9 @@ void write_binding(babel::json::object_writer& o, sgl::described_binding const& 
         mo.write("slot", m.slot);
         if (m.kind == sgl::described_member_kind::buffer)
             mo.write("stride", m.stride);
+        // the bytes a constant buffer's view must hold, which the host's `T` is
+        if (m.kind == sgl::described_member_kind::constants_buffer)
+            mo.write("size", m.size);
         // a binding array's length, 0 where unbounded (CHK-490), and 1 for any other resource
         if (m.count != 1)
             mo.write("count", m.count);

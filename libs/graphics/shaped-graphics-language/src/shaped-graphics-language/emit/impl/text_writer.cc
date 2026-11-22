@@ -813,7 +813,7 @@ struct writer
         {
             if (resource_of(p, b->binding, b->member) >= 0 || workgroup_of(p, b->binding, b->member) >= 0)
                 return {};
-            auto const& block = *block_of(p, b->binding);
+            auto const& block = *block_of(p, b->binding, b->member);
             if (!block.form.has_value())
                 return {};
             return memory_ref{.form = &block.form.value(),
@@ -1468,7 +1468,7 @@ struct writer
                     result = {.text = p.workgroup[found].name};
                     return;
                 }
-                auto const& block = *block_of(p, b.binding);
+                auto const& block = *block_of(p, b.binding, b.member);
                 result = {.text = cc::format("{}.{}", block.name, block.members[block.block_member_of[b.member]].name)};
                 result = read_as_value(id, result);
             },
@@ -1921,21 +1921,23 @@ void sgl::emit::impl::write_buffers(cc::string& out, plan const& p, dialect cons
         auto last = first;
         while (last < p.resources.size() && p.resources[last].binding == id)
             ++last;
-        auto const* const block = block_of(p, id);
-        auto const is_group_block = block != nullptr && block->group >= 0;
-        if (is_group_block || last > first)
-            d.write_group(out, p, is_group_block ? block : nullptr,
+        // the `@inline` block takes no group, and its target declares it apart from them
+        auto blocks = blocks_of(p, id);
+        if (!blocks.empty() && blocks[0].group < 0)
+            blocks = {};
+        if (!blocks.empty() || last > first)
+            d.write_group(out, p, blocks,
                           cc::span<planned_resource const>(p.resources).subspan({.offset = first, .size = last - first}));
         first = last;
     }
     // legalize's own bindings stand behind every group's, and a target declares each like any other resource
     if (first < p.resources.size())
         d.write_group(
-            out, p, nullptr,
+            out, p, {},
             cc::span<planned_resource const>(p.resources).subspan({.offset = first, .size = p.resources.size() - first}));
     for (auto const& block : p.group_blocks)
         if (block.is_reserved)
-            d.write_group(out, p, &block, {});
+            d.write_group(out, p, cc::span<planned_constants const>(&block, 1), {});
     for (auto const& s : p.samplers)
         d.write_file_sampler(out, p, s);
     if (!p.samplers.empty())

@@ -700,10 +700,26 @@ sgl::described_binding sgl::driver::impl::describe_binding(check::checked_module
         result.block_slot = 0;
         result.block_host_name = host;
     }
-    auto slot = sgl::emit::impl::first_resource_slot(m, b);
+    auto const slots = sgl::emit::impl::member_slots(m, b);
     auto next_constant = isize(0);
-    for (auto const& whole : members)
+    for (auto i = isize(0); i < members.size(); ++i)
     {
+        auto const& whole = members[i];
+        auto const slot = slots[i];
+        // CHK-539: a block of its own, which holds the one value it names
+        if (whole.is_constants_buffer)
+        {
+            auto const held = sgl::emit::impl::place_block(m, members.subspan({.offset = i, .size = 1}),
+                                                           sgl::emit::impl::block_space(b));
+            result.members.push_back({.name = whole.name,
+                                      .kind = described_member_kind::constants_buffer,
+                                      .type = host_type_name_of(m, whole.type),
+                                      .size = held.size,
+                                      .slot = slot,
+                                      .host_name = cc::format("{}.{}", host, whole.name),
+                                      .access = cc::string("read")});
+            continue;
+        }
         // a binding array is described as its element, taking one slot per element
         auto member = whole;
         auto count = 1;
@@ -725,7 +741,6 @@ sgl::described_binding sgl::driver::impl::describe_binding(check::checked_module
                  .stride = sgl::emit::impl::element_stride(m, t.element, sgl::emit::impl::element_space(b, member)),
                  .host_name = cc::format("{}.{}", host, member.name),
                  .access = cc::string(t.is_mut ? "read_write" : "read")});
-            slot += count;
             continue;
         }
         if (check::is_resource(t.kind))
@@ -733,7 +748,6 @@ sgl::described_binding sgl::driver::impl::describe_binding(check::checked_module
             auto described = describe_resource(m, member, slot, cc::format("{}.{}", host, member.name));
             described.count = count;
             result.members.push_back(cc::move(described));
-            slot += count;
             continue;
         }
         result.members.push_back({.name = member.name,

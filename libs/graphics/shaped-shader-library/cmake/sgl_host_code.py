@@ -571,6 +571,11 @@ def emit_group(package: str, memory: dict[str, int], namespace: str, file: SglFi
             out.append(f"    {cpp} {member['name']}; ///< `{member['type']}`, "
                        f"at byte {member['offset']} of the group's constant buffer\n")
             continue
+        if member["kind"] == "constants":
+            # a constant buffer of its own, which the host fills and binds as it does a buffer (CHK-539)
+            block = host_type(package, memory, where, member["type"])
+            out.append(f"    sg::constants_buffer_view<{block}> {member['name']}; ///< `constants[{member['type']}]`\n")
+            continue
         if member["kind"] == "texture":
             out.append(f"    {array(f'sg::texture_view_{view_shape(member)}')} {member['name']}; ///< `{member['type']}`\n")
             continue
@@ -741,6 +746,9 @@ def binding_entry(member: dict) -> str:
     if kind == "bytes":
         access = "" if member["access"] == "read" else f", .access = sg::access_mode::{member['access']}"
         return head + f".type = sg::binding_type::bytes{access}}}"
+    if kind == "constants":
+        # a constant buffer is bound in whole 16-byte rows, which `T` fills (EMIT-274)
+        return head + f".type = sg::binding_type::constants_buffer, .block_size = {member['size']}}}"
     if kind == "texture":
         return head + (f".type = sg::binding_type::texture, "
                        f".texture_dimension = sg::texture_view_dimension::{member['texture_dimension']}, "
@@ -759,7 +767,8 @@ def emit_group_impl(package: str, memory: dict[str, int], namespace: str, file: 
     name = binding["name"]
     qualified = f"{namespace}::{name}"
     resources = [m for m in binding["members"] if m["kind"] != "constant"]
-    views = [m for m in resources if m["kind"] in ("buffer", "bytes", "texture", "image", "acceleration_structure")]
+    views = [m for m in resources
+             if m["kind"] in ("constants", "buffer", "bytes", "texture", "image", "acceleration_structure")]
     statics = [m for m in resources if m["kind"] == "sampler" and "static_sampler" in m]
     dynamic = [m for m in resources if m["kind"] == "sampler" and "static_sampler" not in m]
     out = [f"\n// `binding {name}` of {file.path}: the table the shader's resources were numbered from.\n"]

@@ -251,7 +251,7 @@ public:
     /// Its constant block is a pointer at slot 0, and a binding array is a C array over consecutive ids.
     void write_group(cc::string& out,
                      plan const& p,
-                     planned_constants const* block,
+                     cc::span<planned_constants const> blocks,
                      cc::span<planned_resource const> buffers) const override
     {
         // a reserved binding is no group of the argument table, and the function head declares it
@@ -260,8 +260,8 @@ public:
         for (auto const& b : buffers)
             if (b.element_form.has_value())
                 write_form(out, b.element_form.value());
-        if (block != nullptr)
-            write_block_struct(out, p, *block);
+        for (auto const& block : blocks)
+            write_block_struct(out, p, block);
 
         auto const type_of = [&](planned_resource const& b)
         {
@@ -283,12 +283,19 @@ public:
                 out.appendf("struct {}\n{{\n{}uint count;\n{}uint sgl_pad;\n{}{} entries[1];\n}};\n\n", table_of(b),
                             k_indent, k_indent, k_indent, type_of(b));
 
-        auto const group = block != nullptr ? block->group : buffers[0].group;
+        auto const group = !blocks.empty() ? blocks[0].group : buffers[0].group;
         out.appendf("struct {}\n{{\n", argument_buffer_of(p, group).struct_name);
-        if (block != nullptr)
-            out.appendf("{}constant {}* {} [[id({})]];\n", k_indent, block->block_name, block->name, block->slot);
+        // in slot order, a `constants[T]` between the resources its declaration stands between
+        auto next_block = isize(0);
+        auto const write_blocks_before = [&](i32 slot)
+        {
+            for (; next_block < blocks.size() && blocks[next_block].slot < slot; ++next_block)
+                out.appendf("{}constant {}* {} [[id({})]];\n", k_indent, blocks[next_block].block_name,
+                            blocks[next_block].name, blocks[next_block].slot);
+        };
         for (auto const& b : buffers)
         {
+            write_blocks_before(b.slot);
             if (b.count == 0)
             {
                 out.appendf("{}constant {}* {} [[id({})]];\n", k_indent, table_of(b), b.name, b.slot);
@@ -299,8 +306,11 @@ public:
                 out.appendf("[{}]", b.count);
             out += ";\n";
         }
+        write_blocks_before(2147483647);
         // EMIT-195: each slot's byte length, which sg writes behind the slots, a buffer's and zero for anything else
-        auto slots = block != nullptr ? block->slot + 1 : 0;
+        auto slots = 0;
+        for (auto const& block : blocks)
+            slots = cc::max(slots, block.slot + 1);
         for (auto const& b : buffers)
             slots = cc::max(slots, b.slot + cc::max(b.count, 1));
         out.appendf("{}uint sgl_lengths [[id({})]][{}];\n", k_indent, slots, slots);

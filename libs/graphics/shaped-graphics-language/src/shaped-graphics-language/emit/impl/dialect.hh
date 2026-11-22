@@ -104,10 +104,11 @@ public:
     virtual void write_declarations(cc::string& out, plan const& p) const = 0;
 
     /// The resources of one binding, which is one group, each declared at file scope with its own address.
-    /// One group: its constant block when it has one, then its resources; never called for a group with neither.
+    /// One group: its constant blocks in slot order, the block of its plain members first, then its resources; never
+    /// called for a group with neither.
     virtual void write_group(cc::string& out,
                              plan const& p,
-                             planned_constants const* block,
+                             cc::span<planned_constants const> blocks,
                              cc::span<planned_resource const> buffers) const = 0;
 
     /// One file-scope sampler, a line of its own at the address of the pipeline layout's static samplers (EMIT-133).

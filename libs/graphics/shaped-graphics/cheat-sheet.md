@@ -534,6 +534,7 @@ buf.element_count()                        // isize — size_in_bytes / sizeof(T
 buf.size_in_bytes() / buf.usage()          // isize / sg::buffer_usages
 // view factories infer the element type from T (no <T> spelled), else identical to raw_buffer's:
 buf.as_constants_buffer(element_index=0)     // -> constants_buffer_view<T>    (binds ONE element as a cbuffer; byte offset element_index*sizeof(T) must be 256-aligned; only where T is a constants_element)
+                                           //   a buffer of constants_buffer usage spans whole 256-byte units on dx12, so a view of a 32-byte T at its end is a legal CBV
 buf.as_readonly_buffer({.offset=,.size=})  // -> readonly_buffer_view<T>   (only where T is a view_element; range in elements of T)
 buf.as_readwrite_buffer({.offset=,.size=}) // -> readwrite_buffer_view<T>  (only where T is a view_element)
 //   these are SUBRANGES: byte offset (= range.offset * sizeof(T)) must be 256-aligned, byte size a multiple of 4

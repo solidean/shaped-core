@@ -19,7 +19,10 @@ D3D12_RESOURCE_DESC buffer_resource_desc(isize size_in_bytes, sg::buffer_usages 
 
     D3D12_RESOURCE_DESC desc = {};
     desc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
-    desc.Width = UINT64(size_in_bytes);
+    // A CBV spans whole 256-byte units, so a constants buffer of any size must reach the end of the last one it starts.
+    auto const width
+        = usage.has(sg::buffer_usage::constants_buffer) ? (size_in_bytes + 255) & ~isize(255) : size_in_bytes;
+    desc.Width = UINT64(width);
     desc.Height = 1;
     desc.DepthOrArraySize = 1;
     desc.MipLevels = 1;

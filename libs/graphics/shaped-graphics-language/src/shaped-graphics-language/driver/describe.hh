@@ -43,6 +43,8 @@ enum class sgl::described_member_kind : sgl::u8
     sampler,
     /// `acceleration_structure[.geometry]`: the TLAS a trace runs against, which the host binds as a `tlas_view`.
     acceleration_structure,
+    /// `constants[T]`: a constant buffer of its own, at its own slot, which the host binds as a view of `T` (CHK-539).
+    constants_buffer,
 };
 
 /// A static sampler's settings, named as `sg::sampler`'s fields and enum values name them.
@@ -79,11 +81,12 @@ struct sgl::described_binding_member
 {
     cc::string name;
     described_member_kind kind = described_member_kind::constant;
-    /// A constant's type, a buffer's element, and any other resource's whole spelling: `out image_2d[.rgba8_unorm]`.
+    /// A constant's type, a buffer's element, a `constants[T]`'s `T`, and any other resource's whole spelling:
+    /// `out image_2d[.rgba8_unorm]`.
     cc::string type;
     /// A constant's byte offset in its block; -1 for a resource.
     i32 offset = -1;
-    /// A constant's size in bytes; 0 for a resource.
+    /// A constant's size in bytes, and the bytes a `constants[T]` reads of its buffer; 0 for any other resource.
     i32 size = 0;
     /// A resource's position among its binding's resources; -1 for a constant.
     /// A binding array takes `count` consecutive slots from this one.

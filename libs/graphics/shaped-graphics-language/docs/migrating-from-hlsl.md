@@ -54,6 +54,28 @@ An HLSL bindless renderer's `ResourceDescriptorHeap[i]` is an SGL binding array:
   A resource chosen at run time, `if c => a.x else a.y`, is refused; branch around its uses instead.
 - Per-dispatch arguments as root constants are an `@inline binding`.
 
+**Several `cbuffer`s or `ConstantBuffer<T>`s in one register space are one binding, each a `constants[T]` member** (CHK-539).
+The values that were loose in a `cbuffer` become plain members, which SGL lays out as one block of its own; a `ConstantBuffer<T>` keeps its struct as `T`:
+
+```sgl sketch
+// HLSL: cbuffer Frame : register(b0, space1) { float time; float exposure; }
+//       ConstantBuffer<View> view : register(b1, space1);
+//       ConstantBuffer<Light> light : register(b2, space1);
+//       Texture2D<float4> albedo : register(t3, space1);
+binding frame:
+    time: float
+    exposure: float
+    view: constants[view_params]
+    light: constants[light_params]
+    albedo: texture_2d[float4]
+```
+
+- **A binding carries no number: its group is its position in the entry point's binding list** (EMIT-82), so `space1` is whichever place the entry point lists `frame` at.
+- **Its slots are the block of plain members first, then every other member in declaration order** (EMIT-90): above, `time` and `exposure` are slot 0, `view` 1, `light` 2 and `albedo` 3.
+- **So the host's layout follows SGL's, not the HLSL registers'**: a port reorders its host-side bindings once rather than its members to match old registers.
+  `sgl describe` gives every number, each member's slot and host name, `frame.view`, and the generated group binds a `constants[T]` as an `sg::constants_buffer_view<T>`.
+- **`T` fills whole 16-byte rows** (EMIT-274), as HLSL rounds a constant buffer; a struct that ends inside one is refused and told the size to pad it to.
+
 ## Memory layout
 
 **SGL places GPU memory at natural alignment on every target, which is not HLSL's structured-buffer packing** (EMIT-110).
