@@ -4153,6 +4153,8 @@ struct exchange_result[T]:
 @builtin @stages(.pixel, .compute) fun subgroup_any(b: bool) -> bool
 /// Bit `i` set where invocation `i`'s `b` holds.
 @builtin @stages(.pixel, .compute) fun subgroup_ballot(b: bool) -> uint4
+/// Whether this is the lowest-indexed active invocation of the subgroup, which exactly one is.
+@builtin @stages(.pixel, .compute) fun subgroup_elect() -> bool
 /// The sum of `x` over the subgroup.
 @builtin @stages(.pixel, .compute) fun subgroup_add(x: float) -> float
 /// The sum of `x` over the subgroup.

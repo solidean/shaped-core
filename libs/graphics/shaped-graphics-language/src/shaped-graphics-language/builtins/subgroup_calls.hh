@@ -9,6 +9,7 @@ enum class sgl::builtins::subgroup_op : sgl::u8
     all,
     any,
     ballot,
+    elect,
     add,
     mul,
     min,

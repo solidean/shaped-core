@@ -810,6 +810,9 @@ value_ref lowering::subgroup_call(flat_call const& c, builtins::function_record 
     using builtins::subgroup_op;
     auto const arguments = cc::vector<flat_expr_id>::create_copy_of(cc::span<flat_expr_id const>(_e.at(c.arguments)));
     auto const what = subgroup_op(record.write.data);
+    // the one operation that takes no value
+    if (what == subgroup_op::elect)
+        return add(op::subgroup, result, cc::span<u32 const>(), u8(subgroup::elect));
     auto const value = expr(arguments[0]);
     auto const type = _out.type_of(value);
     auto const scalar = _out.at(scalar_of(type));
@@ -880,6 +883,8 @@ value_ref lowering::subgroup_call(flat_call const& c, builtins::function_record 
         return add(op::subgroup, result, {value}, u8(subgroup::quad_any));
     case subgroup_op::quad_all:
         return add(op::subgroup, result, {value}, u8(subgroup::quad_all));
+    case subgroup_op::elect:
+        break;
     }
     return value_ref::none;
 }

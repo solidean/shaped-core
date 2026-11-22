@@ -227,6 +227,8 @@ enum class group_form : u8
     folded,
     /// The quad votes of SPV_KHR_quad_control, which take the predicate alone, with no scope.
     quad_vote,
+    /// The scope alone, and no value.
+    scope_only,
 };
 
 struct group_rule
@@ -264,8 +266,9 @@ constexpr group_rule k_groups[] = {
     {spv::GroupNonUniformQuadSwap, group_form::with_id, spv::GroupNonUniformQuad},               // quad_swap
     {spv::GroupNonUniformQuadAnyKHR, group_form::quad_vote, spv::QuadControlKHR},                // quad_any
     {spv::GroupNonUniformQuadAllKHR, group_form::quad_vote, spv::QuadControlKHR},                // quad_all
+    {spv::GroupNonUniformElect, group_form::scope_only, spv::GroupNonUniform},                   // elect
 };
-static_assert(sizeof(k_groups) / sizeof(k_groups[0]) == sizeof(char[isize(subgroup::quad_all) + 1]));
+static_assert(sizeof(k_groups) / sizeof(k_groups[0]) == sizeof(char[isize(subgroup::elect) + 1]));
 } // namespace
 
 void writer::ext_inst(instruction const& i, u32 id)
@@ -318,12 +321,16 @@ void writer::group(instruction const& i, u32 id)
     auto const operands = _p.operands_of(i);
     auto const scope = literal_id(k_scope_subgroup);
     auto const type = id_of(i.type);
-    auto const value = id_of_raw(operands[0]);
     auto const& rule = k_groups[i.sub];
     require(spv::GroupNonUniform);
     require(rule.capability);
+    if (rule.form == group_form::scope_only)
+        return emit(_code, rule.opcode, {type, id, scope});
+    auto const value = id_of_raw(operands[0]);
     switch (rule.form)
     {
+    case group_form::scope_only:
+        return;
     case group_form::quad_vote:
         // CHK-533: the entry point states that its derivatives are its quads', which a quad vote keeps uniform
         require_extension("SPV_KHR_quad_control");

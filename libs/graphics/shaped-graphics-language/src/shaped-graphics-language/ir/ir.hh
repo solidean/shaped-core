@@ -275,6 +275,7 @@ enum class sgl::ir::subgroup : sgl::u8
     quad_swap,
     quad_any,
     quad_all,
+    elect,
 };
 
 /// How a subgroup reduction folds: over the subgroup, up to and including this invocation, or up to it alone.

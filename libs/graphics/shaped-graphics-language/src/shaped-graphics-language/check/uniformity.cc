@@ -41,15 +41,31 @@ struct divergence
     /// It differs only between quads: every invocation of a quad, its helpers included, agrees (CHK-533).
     /// A derivative and a quad operation stand in such control flow, and a barrier or a subgroup operation does not.
     bool agrees_in_quad = false;
+    /// It differs only between subgroups: every active invocation of a subgroup agrees, a helper perhaps not (CHK-537).
+    /// A subgroup operation stands in such control flow, and a barrier, a derivative or a quad operation does not.
+    bool agrees_in_subgroup = false;
 
     [[nodiscard]] static divergence none() { return {}; }
 };
 
-/// The one that says more: a difference within a quad before one between quads alone, a proven difference before an
-/// unproven one, and any before none.
+/// The one that says more: a difference within a quad and a subgroup before one between quads or subgroups alone, a
+/// proven difference before an unproven one, and any before none.
+/// The two partial kinds are independent (CHK-537): a quad's agreement says nothing of the other quads of its subgroup,
+/// and a subgroup's nothing of its helpers, so a quad's and a subgroup's together differ within both.
 divergence first_of(divergence const& a, divergence const& b)
 {
-    auto const rank = [](divergence const& d) { return !d.is ? 0 : d.agrees_in_quad ? 1 : d.varies ? 3 : 2; };
+    auto const is_partial = [](divergence const& d) { return d.agrees_in_quad || d.agrees_in_subgroup; };
+    if (is_partial(a) && is_partial(b) && a.agrees_in_quad != b.agrees_in_quad)
+    {
+        auto joined = b.varies && !a.varies ? b : a;
+        joined.agrees_in_quad = false;
+        joined.agrees_in_subgroup = false;
+        return joined;
+    }
+    auto const rank = [&](divergence const& d)
+    {
+        return !d.is ? 0 : is_partial(d) ? (d.varies ? 2 : 1) : d.varies ? 4 : 3;
+    };
     return rank(b) > rank(a) ? b : a;
 }
 
@@ -150,9 +166,11 @@ struct uniformity_pass
     /// A local takes `stored`, in control flow `flow`.
     void settle_local(local_id id, divergence const& stored, divergence const& flow)
     {
-        auto const d = first_of(stored, set_under(flow));
         auto& slot = locals[index_of(id)];
-        if ((d.is && !slot.is) || (d.varies && !slot.varies))
+        // what says more replaces the slot, which a quad's agreement then a subgroup's leave plainly divergent
+        auto const d = first_of(slot, first_of(stored, set_under(flow)));
+        if (d.is != slot.is || d.varies != slot.varies || d.agrees_in_quad != slot.agrees_in_quad
+            || d.agrees_in_subgroup != slot.agrees_in_subgroup)
         {
             slot = d;
             is_changed = true;
@@ -170,12 +188,14 @@ struct uniformity_pass
                     .varies = flow.varies,
                     .where = flow.tested_where,
                     .why = flow.tested_why,
-                    .agrees_in_quad = flow.agrees_in_quad};
+                    .agrees_in_quad = flow.agrees_in_quad,
+                    .agrees_in_subgroup = flow.agrees_in_subgroup};
         return {.is = true,
                 .varies = flow.varies,
                 .where = flow.where,
                 .why = cc::string("is set where the control flow differs"),
-                .agrees_in_quad = flow.agrees_in_quad};
+                .agrees_in_quad = flow.agrees_in_quad,
+                .agrees_in_subgroup = flow.agrees_in_subgroup};
     }
 
     [[nodiscard]] builtins::function_record const* record_of(flat_call const& c) const
@@ -306,8 +326,7 @@ struct uniformity_pass
         auto const is_judged
             = reconverges ? record->uses_derivatives || record->is_subgroup_operation : record->is_barrier;
         if (is_judged && flow.is && is_reporting && !c.is_active_lanes
-            && !needs_only_its_quad(flow, record->uses_derivatives, record->is_quad_operation,
-                                    record->is_subgroup_operation))
+            && !reaches_whole(flow, record->uses_derivatives, record->is_quad_operation, record->is_subgroup_operation))
             violations.push_back({.call = id, .flow = flow});
         // CHK-533: every invocation of the quad agrees on it, so it differs between quads alone
         if (record->agrees_in_quad)
@@ -318,8 +337,12 @@ struct uniformity_pass
                       .agrees_in_quad = true};
         // CHK-377: what the subgroup agrees on may still differ between the subgroups of a workgroup
         // CHK-399: so it is unproven however much its argument varied, and `uniform` may say it is the same
+        // CHK-537: and it differs between subgroups alone
         else if (record->agrees_in_subgroup)
-            result = {.is = true, .where = e.at(id).from, .why = cc::format("is what {} gave", record->name)};
+            result = {.is = true,
+                      .where = e.at(id).from,
+                      .why = cc::format("is what {} gave", record->name),
+                      .agrees_in_subgroup = true};
         else if (record->is_subgroup_operation && !result.is)
             result = {.is = true, .where = e.at(id).from, .why = cc::format("is what {} gave", record->name)};
         // what another thread did to it first is what an atomic gives
@@ -343,8 +366,9 @@ struct uniformity_pass
     {
         auto const& info = m.functions[m.at(c.callee).info];
         auto const is_judged = reconverges ? info.uses_derivatives || info.is_subgroup_operation : info.is_barrier;
+        // a body in a target's text may hold a quad operation, which a subgroup's agreement does not reach whole
         if (is_judged && flow.is && is_reporting
-            && !needs_only_its_quad(flow, info.uses_derivatives, false, info.is_subgroup_operation))
+            && (flow.agrees_in_subgroup || !reaches_whole(flow, info.uses_derivatives, false, info.is_subgroup_operation)))
             violations.push_back({.call = id, .flow = flow});
         if ((!info.is_pure || info.is_subgroup_operation) && !result.is)
             result = {.is = true,
@@ -454,18 +478,25 @@ struct uniformity_pass
                 .tested_where = d.where,
                 .tested_why = d.why,
                 .through = through,
-                .agrees_in_quad = d.agrees_in_quad};
+                .agrees_in_quad = d.agrees_in_quad,
+                .agrees_in_subgroup = d.agrees_in_subgroup};
     }
 
-    /// CHK-533: a derivative or a quad operation needs only its quad to reach it whole, which control flow that differs
-    /// between quads alone gives it; a barrier and a subgroup operation need more.
-    [[nodiscard]] static bool needs_only_its_quad(divergence const& flow,
-                                                  bool uses_derivatives,
-                                                  bool is_quad_operation,
-                                                  bool is_subgroup_operation)
+    /// Whether control flow that differs between quads alone, or between subgroups alone, reaches a call whole.
+    /// CHK-533: a derivative or a quad operation needs only its quad, helpers included.
+    /// CHK-537: a subgroup operation needs only its subgroup's active invocations, and a helper may not be among them,
+    /// so a derivative or a quad operation needs more there.
+    /// A barrier needs the whole workgroup in either.
+    [[nodiscard]] static bool reaches_whole(divergence const& flow,
+                                            bool uses_derivatives,
+                                            bool is_quad_operation,
+                                            bool is_subgroup_operation)
     {
-        return flow.agrees_in_quad && (uses_derivatives || is_quad_operation)
-            && (!is_subgroup_operation || is_quad_operation);
+        if (flow.agrees_in_quad)
+            return (uses_derivatives || is_quad_operation) && (!is_subgroup_operation || is_quad_operation);
+        if (flow.agrees_in_subgroup)
+            return is_subgroup_operation && !is_quad_operation && !uses_derivatives;
+        return false;
     }
 
     flow_out statements(ast::range_of<flat_stmt_id> range, divergence flow)

@@ -299,3 +299,117 @@ TEST("sgl check - a branch on quad_any or quad_all keeps a derivative in uniform
                               "require subgroups, quad_control\n\n"))
               .contains("stage-not-allowed"));
 }
+
+TEST("sgl check - a branch on what the subgroup agrees on keeps a subgroup operation in uniform control flow, and "
+     "nothing more (CHK-537)")
+{
+    // every active invocation of the subgroup goes one way, so the subgroup reaches the sum whole
+    CHECK(reports_for(compute("    if subgroup_any(work.input[li] > 0.0):\n"
+                              "        work.output[li] = subgroup_add(work.input[li])\n"))
+          == "");
+    // a reduction and a broadcast of a constant lane agree as a vote does, and a branch nested in one stays the subgroup's
+    CHECK(reports_for(compute("    let total = subgroup_add(work.input[li])\n"
+                              "    if total > subgroup_broadcast(work.input[li], 0):\n"
+                              "        if subgroup_all(work.input[li] < 4.0):\n"
+                              "            work.output[li] = subgroup_max(work.input[li])\n"))
+          == "");
+    // a value set under such a branch differs between subgroups alone too
+    CHECK(reports_for(compute("    let mut level = 0.0\n"
+                              "    if subgroup_any(work.input[li] > 0.0):\n"
+                              "        level = 1.0\n"
+                              "    if level > 0.5:\n"
+                              "        work.output[li] = subgroup_add(work.input[li])\n"))
+          == "");
+
+    // a barrier waits for the whole workgroup, whose subgroups may go different ways
+    CHECK(reports_for(compute("    if subgroup_any(work.input[li] > 0.0):\n"
+                              "        workgroup_barrier()\n"))
+              .contains(non_uniform));
+    // a quad operation is refused too: a helper may sit out the vote and go the other way
+    CHECK(reports_for(compute("    if subgroup_any(work.input[li] > 0.0):\n"
+                              "        work.output[li] = quad_swap_x(work.input[li])\n"))
+              .contains(non_uniform));
+    // a value that differs within the subgroup, joined with a vote, differs within the subgroup
+    CHECK(reports_for(compute("    if subgroup_any(work.input[li] > 0.0) and li > 3:\n"
+                              "        work.output[li] = subgroup_add(work.input[li])\n"))
+              .contains(non_uniform));
+    // and a vote in control flow that differs within the subgroup is itself refused
+    CHECK(reports_for(compute("    if li > 3:\n"
+                              "        if subgroup_any(work.input[li] > 0.0):\n"
+                              "            work.output[li] = subgroup_add(work.input[li])\n"))
+              .contains(non_uniform));
+    // a scan, a shuffle and an election give each invocation its own, so a branch on one diverges
+    CHECK(reports_for(compute("    if subgroup_exclusive_add(1) == 0:\n"
+                              "        work.output[li] = subgroup_add(work.input[li])\n"))
+              .contains(non_uniform));
+    CHECK(reports_for(compute("    if subgroup_elect():\n"
+                              "        work.output[li] = subgroup_add(work.input[li])\n"))
+              .contains(non_uniform));
+}
+
+TEST("sgl check - a subgroup's agreement keeps no derivative, and a quad's with a subgroup's keeps neither (CHK-537)")
+{
+    auto const pixel = [](cc::string_view body)
+    {
+        return cc::format("require subgroups, quad_control\n"
+                          "\n"
+                          "binding res:\n"
+                          "    t: texture_2d[float4]\n"
+                          "    smp: sampler\n"
+                          "\n"
+                          "struct vary:\n"
+                          "    @position position: hpos4\n"
+                          "    uv: float2\n"
+                          "\n"
+                          "@pixel struct target:\n"
+                          "    color: float4\n"
+                          "\n"
+                          "@pixel fun ps(v: vary){{res}} -> target:\n"
+                          "{}"
+                          "    return {{color = float4(0.0)}}\n",
+                          body);
+    };
+
+    // a pixel stage's subgroup operation stands under a subgroup's vote, as a compute stage's does
+    CHECK(reports_for(pixel("    if subgroup_any(v.uv.x > 0.5):\n"
+                            "        return {color = float4(subgroup_add(v.uv.x))}\n"))
+          == "");
+    // a derivative does not: the helpers of the quad may sit out the vote
+    CHECK(reports_for(pixel("    if subgroup_any(v.uv.x > 0.5):\n"
+                            "        return {color = float4(ddx(v.uv.x))}\n"))
+              .contains(non_uniform));
+
+    // a quad's agreement says nothing of the other quads of the subgroup, and a subgroup's nothing of the helpers
+    constexpr auto both = "    let q = quad_any(v.uv.x > 0.5)\n"
+                          "    let s = subgroup_any(v.uv.y > 0.5)\n"
+                          "    if q and s:\n"
+                          "        return {{color = {}}}\n";
+    CHECK(reports_for(pixel(cc::format(both, "float4(subgroup_add(v.uv.x))"))).contains(non_uniform));
+    CHECK(reports_for(pixel(cc::format(both, "res.t.sample(v.uv, res.smp)"))).contains(non_uniform));
+    CHECK(reports_for(pixel(cc::format(both, "float4(quad_swap_x(v.uv.x))"))).contains(non_uniform));
+    // each alone keeps what it keeps
+    CHECK(reports_for(pixel("    let q = quad_any(v.uv.x > 0.5)\n"
+                            "    if q:\n"
+                            "        return {color = res.t.sample(v.uv, res.smp)}\n"))
+          == "");
+    // and a local the two set in turn is neither's
+    CHECK(reports_for(pixel("    let mut k = 0.0\n"
+                            "    if quad_any(v.uv.x > 0.5):\n"
+                            "        k = 1.0\n"
+                            "    if subgroup_any(v.uv.y > 0.5):\n"
+                            "        k = 2.0\n"
+                            "    if k > 0.5:\n"
+                            "        return {color = float4(subgroup_add(v.uv.x)) + res.t.sample(v.uv, res.smp)}\n"))
+              .contains(non_uniform));
+}
+
+TEST("sgl check - subgroup_elect needs subgroups, and what it gives differs within the subgroup")
+{
+    // CHK-376
+    CHECK(reports_for(compute("    if subgroup_elect() => work.counter[0].add(1u)\n", ""))
+              .contains("feature-not-declared user:[cs] cs needs subgroups"));
+    CHECK(reports_for(compute("    if subgroup_elect() => work.counter[0].add(1u)\n")) == "");
+    CHECK(reports_for(compute("    if li > 3:\n"
+                              "        work.output[li] = if subgroup_elect() => 1.0 else 0.0\n"))
+              .contains(non_uniform));
+}

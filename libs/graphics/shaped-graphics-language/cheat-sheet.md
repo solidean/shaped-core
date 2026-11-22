@@ -863,6 +863,9 @@ ops[i](mut v)                                            // raygen, miss, closes
   A barrier, or a call that takes derivatives implicitly (`sample` without `level`, `ddx`), in non-uniform control flow is `non-uniform-control-flow`.
   A branch on `quad_any(b)` or `quad_all(b)` reaches each quad whole, helpers included, so a derivative stands under it (CHK-533); `subgroup_any` does not.
   The votes need `require subgroups, quad_control`, which WebGPU lacks.
+  A branch on a vote, a reduction or a constant-lane broadcast reaches each subgroup whole, so a subgroup operation stands under it (CHK-537).
+  A barrier, a derivative and a quad operation do not.
+  `subgroup_elect()` is true in the lowest-indexed active invocation of the subgroup alone, so a branch on it diverges.
 - **`@sampler(name)` on a texture member names a sampler of the same binding, or a file-scope one** (CHK-279), which a method call then leaves out: `material.albedo.sample(uv)`.
   A member of that name hides a file-scope sampler of it.
   A call without a sampler on a texture without one is `missing-sampler`.

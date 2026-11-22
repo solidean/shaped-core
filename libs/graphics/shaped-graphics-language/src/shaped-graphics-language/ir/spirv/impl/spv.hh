@@ -169,6 +169,7 @@ enum op_code : u32
     Switch = 251,
     Return = 253,
     Unreachable = 255,
+    GroupNonUniformElect = 333,
     GroupNonUniformAll = 334,
     GroupNonUniformAny = 335,
     GroupNonUniformBroadcast = 337,

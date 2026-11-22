@@ -707,8 +707,14 @@ void writer::subgroup_op(u32 index, instruction const& i)
 
     _uses.waves = true;
     auto const operands = _p.operands_of(i);
-    auto const value = value_ref(operands[0]);
     auto const what = subgroup(i.sub);
+    // the one operation that takes no value
+    if (what == subgroup::elect)
+    {
+        ll_value const args[] = {_m.constant_i32(k_dx_ops[isize(dx_op::wave_is_first_lane)].number)};
+        return define_one(index, call(dx_op::wave_is_first_lane, _m.void_type(), args));
+    }
+    auto const value = value_ref(operands[0]);
     auto const number = [&](dx_op op) { return _m.constant_i32(k_dx_ops[isize(op)].number); };
 
     _scratch.clear();

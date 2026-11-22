@@ -230,3 +230,39 @@ TEST("sgl emit - the rest of the subgroup family, with a lane converted to the t
     CHECK(msl.contains("    const uint d = simd_shuffle_down(x, ushort(2));\n"));
     CHECK(msl.contains("    const uint o = simd_or(x);\n"));
 }
+
+TEST("sgl emit - subgroup_elect is each target's own, and stands under a branch on a subgroup's vote")
+{
+    // CHK-537: the branch on the vote needs no guard, and the election is the target's call with no argument
+    constexpr auto elected = "require subgroups\n"
+                             "\n"
+                             "binding work:\n"
+                             "    input: buffer[float]\n"
+                             "    counter: mut buffer[atomic[uint]]\n"
+                             "\n"
+                             "@compute(64) fun cs(@local_thread_index li: int){work}:\n"
+                             "    let v = work.input[li]\n"
+                             "    if subgroup_any(v > 0.0):\n"
+                             "        let n = subgroup_add(1u)\n"
+                             "        let first = subgroup_elect()\n"
+                             "        if first => work.counter[0].add(n)\n";
+    auto const dx12 = text_of(elected, target::hlsl_dx12);
+    CHECK(dx12.contains("    if (WaveActiveAnyTrue(v > 0.0))\n")).dump("text", dx12);
+    CHECK(dx12.contains("        const bool first = WaveIsFirstLane();\n")).dump("text", dx12);
+    CHECK(text_of(elected, target::hlsl_vulkan).contains("        const bool first = WaveIsFirstLane();\n"));
+
+    auto const wgsl = text_of(elected, target::wgsl);
+    CHECK(wgsl.contains("        let first: bool = subgroupElect();\n")).dump("text", wgsl);
+
+    auto const msl = text_of(elected, target::msl);
+    CHECK(msl.contains("        const bool first = simd_is_first();\n")).dump("text", msl);
+
+    // SGL's own SPIR-V and DXIL write it as well
+    for (auto const t : {target::hlsl_dx12, target::hlsl_vulkan})
+    {
+        auto const native = sgl::compile_to_text(
+            {.source = elected, .entry_point = "cs", .target = t, .native = sgl::emit::native_route::require});
+        REQUIRE(native.has_value());
+        CHECK((t == target::hlsl_dx12 ? !native.value().dxil.empty() : !native.value().spirv.empty()));
+    }
+}

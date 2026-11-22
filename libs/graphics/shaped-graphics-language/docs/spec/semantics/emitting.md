@@ -921,6 +921,7 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
 |---|---|---|---|
 | `subgroup_all`, `subgroup_any` | `WaveActiveAllTrue`, `WaveActiveAnyTrue` | `subgroupAll`, `subgroupAny` | `simd_all`, `simd_any` |
 | `subgroup_ballot` | `WaveActiveBallot` | `subgroupBallot` | `simd_ballot` |
+| `subgroup_elect` | `WaveIsFirstLane` | `subgroupElect` | `simd_is_first` |
 | `subgroup_add`, `subgroup_mul` | `WaveActiveSum`, `WaveActiveProduct` | `subgroupAdd`, `subgroupMul` | `simd_sum`, `simd_product` |
 | `subgroup_min`, `subgroup_max` | `WaveActiveMin`, `WaveActiveMax` | `subgroupMin`, `subgroupMax` | `simd_min`, `simd_max` |
 | `subgroup_bit_and`, `subgroup_bit_or`, `subgroup_bit_xor` | `WaveActiveBitAnd`, `WaveActiveBitOr`, `WaveActiveBitXor` | `subgroupAnd`, `subgroupOr`, `subgroupXor` | `simd_and`, `simd_or`, `simd_xor` |

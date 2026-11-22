@@ -125,6 +125,21 @@ test {scene}:
     scene.pyramid.lod(p * 0.125, scene.linear) == 0.0
     scene.pyramid.lod_unclamped(p * 0.125, scene.linear) == -1.0
 
+// a branch on what the subgroup agrees on is taken by every lane or by none, so a subgroup operation stands in it (CHK-537)
+test:
+    let lane = test_lane()
+    let n = test_lane_count()
+    let mut total = -1
+    if subgroup_any(lane == n - 1):
+        total = subgroup_add(1)
+    total == n
+
+// the lowest-indexed lane is the one elected, and only it
+test:
+    let elected = subgroup_elect()
+    elected == (test_lane() == 0)
+    subgroup_add(if elected => 1 else 0) == 1
+
 // every lane reaches a subgroup operation together, or none does (CHK-377)
 @expect(error = "non-uniform-control-flow")
 test:

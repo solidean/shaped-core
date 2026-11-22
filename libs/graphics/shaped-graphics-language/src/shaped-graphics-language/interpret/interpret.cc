@@ -819,6 +819,10 @@ struct machine
                 result.leaves.push_back(scalar::of_uint(w));
             break;
         }
+        // every lane of a run is active, so the lowest-indexed one is lane 0
+        case subgroup_op::elect:
+            result.leaves.push_back(scalar::of(lane == 0));
+            break;
         case subgroup_op::exclusive_add:
         case subgroup_op::exclusive_mul:
         case subgroup_op::inclusive_add:

@@ -32,6 +32,8 @@ enum class operand : u8
     integer,
     /// A number and an `int` naming an invocation or an offset.
     number_and_int,
+    /// Nothing: what it gives follows from which invocations are active alone.
+    nothing,
 };
 
 struct subgroup_info
@@ -54,6 +56,8 @@ constexpr subgroup_info k_operations[] = {
      "/// Whether `b` holds in any invocation of the subgroup."},
     {subgroup_op::ballot, "subgroup_ballot", operand::vote, "", "WaveActiveBallot", "subgroupBallot",
      "sgl_subgroup_ballot", "/// Bit `i` set where invocation `i`'s `b` holds."},
+    {subgroup_op::elect, "subgroup_elect", operand::nothing, "", "WaveIsFirstLane", "subgroupElect", "simd_is_first",
+     "/// Whether this is the lowest-indexed active invocation of the subgroup, which exactly one is."},
     {subgroup_op::add, "subgroup_add", operand::number, "", "WaveActiveSum", "subgroupAdd", "simd_sum",
      "/// The sum of `x` over the subgroup."},
     {subgroup_op::mul, "subgroup_mul", operand::number, "", "WaveActiveProduct", "subgroupMul", "simd_product",
@@ -110,6 +114,7 @@ constexpr cc::string_view k_hlsl_names[] = {
     "WaveActiveAllTrue",
     "WaveActiveAnyTrue",
     "WaveActiveBallot",
+    "WaveIsFirstLane",
     "WaveActiveSum",
     "WaveActiveProduct",
     "WaveActiveMin",
@@ -138,6 +143,7 @@ constexpr cc::string_view k_wgsl_names[] = {
     "subgroupAll",
     "subgroupAny",
     "subgroupBallot",
+    "subgroupElect",
     "subgroupAdd",
     "subgroupMul",
     "subgroupMin",
@@ -165,6 +171,7 @@ constexpr cc::string_view k_msl_names[] = {
     "simd_any",
     "simd_ballot",
     "sgl_subgroup_ballot",
+    "simd_is_first",
     "simd_sum",
     "simd_product",
     "simd_min",
@@ -237,8 +244,10 @@ bool is_agreeing(subgroup_op op)
 written write_subgroup(call_context const& ctx)
 {
     auto const& info = k_operations[ctx.data];
-    auto const& x = ctx.arguments[0].text;
     auto const name = ctx.target == language::hlsl ? info.hlsl : ctx.target == language::wgsl ? info.wgsl : info.msl;
+    if (info.takes == operand::nothing)
+        return {.text = cc::format("{}()", name)};
+    auto const& x = ctx.arguments[0].text;
     // CHK-533: dx12 reads the vote across the quad at Shader Model 6.6, as DXC's own fallback for QuadAny does;
     // vulkan's QuadAny is what makes DXC state QuadDerivativesKHR
     if (ctx.target == language::hlsl && !ctx.is_vulkan
@@ -332,7 +341,9 @@ void sgl::builtins::register_subgroups(registry& r)
     for (auto i = u32(0); i < u32(sizeof(k_operations) / sizeof(k_operations[0])); ++i)
     {
         auto const& info = k_operations[i];
-        auto const types = info.takes == operand::vote    ? cc::span<cc::string_view const>(votes)
+        // an operation that takes nothing is registered once, as a vote is
+        auto const types = info.takes == operand::vote || info.takes == operand::nothing
+                             ? cc::span<cc::string_view const>(votes)
                          : info.takes == operand::integer ? cc::span<cc::string_view const>(integers)
                                                           : cc::span<cc::string_view const>(numbers);
         for (auto const type : types)
@@ -340,9 +351,11 @@ void sgl::builtins::register_subgroups(registry& r)
             auto const is_quad_vote = info.op == subgroup_op::quad_any || info.op == subgroup_op::quad_all;
             auto const result = info.op == subgroup_op::ballot ? cc::string_view("uint4")
                               : info.op == subgroup_op::all || info.op == subgroup_op::any || is_quad_vote
+                                        || info.takes == operand::nothing
                                   ? cc::string_view("bool")
                                   : type;
-            auto const parameters = info.takes == operand::vote ? cc::format("b: {}", type)
+            auto const parameters = info.takes == operand::nothing ? cc::string()
+                                  : info.takes == operand::vote    ? cc::format("b: {}", type)
                                   : info.takes == operand::number_and_int
                                       ? cc::format("x: {}, {}: int", type, info.second)
                                       : cc::format("x: {}", type);
@@ -365,6 +378,7 @@ void sgl::builtins::register_subgroups(registry& r)
                 .agrees_in_subgroup = is_agreeing(info.op),
                 .is_quad_operation = info.name.starts_with("quad_"),
                 .agrees_in_quad = is_quad_vote,
+                .differs_between_invocations = info.op == subgroup_op::elect,
                 .constant_lane_below = info.op == subgroup_op::broadcast || info.op == subgroup_op::shuffle_xor
                                             || info.op == subgroup_op::shuffle_up || info.op == subgroup_op::shuffle_down
                                          ? 128

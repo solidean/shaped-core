@@ -1376,6 +1376,7 @@ The stage inputs `@subgroup_size` and `@subgroup_invocation_id` (CHK-271) are it
   A number is a numeric scalar of the prelude, and every operation that takes a number takes a vector of numbers too, componentwise.
   A lane that names no invocation of the subgroup, at run time, gives a value the language does not specify, whichever operation names it.
 * **CHK-377** A subgroup operation stands only in uniform control flow, judged as CHK-282 judges a barrier, and its result is non-uniform ([why](why/checking.md#chk-377)).
+  Control flow that differs between subgroups alone is uniform enough for it (CHK-537).
 * **CHK-378** The lane of `subgroup_broadcast` is a constant `int` from 0 to 127, and the lane of `quad_broadcast` a constant from 0 to 3, or each is `invalid-constant-argument`.
   So are the mask of `subgroup_shuffle_xor` and the delta of `subgroup_shuffle_up` and `subgroup_shuffle_down`, from 0 to 127, which WGSL and MSL require every invocation to share.
   A constant is an `int` literal or the name of an `int` `const`; 128 is the most invocations a subgroup holds on any target, and WGSL refuses a lane past it.
@@ -1388,11 +1389,19 @@ The stage inputs `@subgroup_size` and `@subgroup_invocation_id` (CHK-271) are it
   A quad vote differs between quads alone, so control flow that branches on one, and on nothing else that differs, reaches each quad whole.
   There a derivative and a quad operation stand as in uniform control flow (CHK-282); a barrier and any other subgroup operation do not.
   A `subgroup_any` gives no such thing: on WebGPU a helper may sit out a subgroup operation, which is why `quad_control` is a feature WebGPU lacks.
+* **CHK-537** A vote, a reduction and a broadcast of a constant lane give every active invocation of the subgroup the same value, so each differs between subgroups alone.
+  Control flow that branches on such a value, and on nothing else that differs, is taken the same way by every active invocation of each subgroup.
+  There a subgroup operation stands as in uniform control flow (CHK-377); a barrier, a derivative and a quad operation do not.
+  A barrier waits for the whole workgroup, whose subgroups may go different ways.
+  A derivative and a quad operation read the quad's helpers, which a target may leave out of the vote, so a helper may go the other way.
+  A quad's agreement (CHK-533) and a subgroup's are independent: control flow that branches on both differs within the quad and within the subgroup, as any other divergence does.
+  `subgroup_elect`, a scan and a shuffle give each invocation its own value, so a branch on one is divergent.
 
 | operation | gives |
 |---|---|
 | `subgroup_all(b)`, `subgroup_any(b)` | whether the `bool` `b` holds in every invocation, or in any |
 | `subgroup_ballot(b)` | a `uint4` whose bit `i` is set where invocation `i`'s `b` holds |
+| `subgroup_elect()` | whether this is the lowest-indexed active invocation, which exactly one invocation of the subgroup is |
 | `subgroup_add(x)`, `subgroup_mul(x)`, `subgroup_min(x)`, `subgroup_max(x)` | the sum, the product, the minimum or the maximum of the number `x` over the subgroup |
 | `subgroup_bit_and(x)`, `subgroup_bit_or(x)`, `subgroup_bit_xor(x)` | the same, bitwise, of an integer `x` |
 | `subgroup_exclusive_add(x)`, `subgroup_exclusive_mul(x)` | the sum or the product over the invocations below this one |
