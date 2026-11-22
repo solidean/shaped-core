@@ -838,12 +838,13 @@ type_id checker::check_dot_call(function_scope& scope, ast::expr_id id, ast::cal
     auto const& member = ast.at(call.callee).node.as<ast::member>();
     auto const name = text_of(file, member.name);
 
-    // CHK-289: `T[N].filled(v)`, where `T[N]` is a type in the position of a value
-    if (auto const* const applied
-        = ast::is_valid(member.object) ? ast.at(member.object).node.try_as<ast::index>() : nullptr;
-        applied != nullptr && ast::is_valid(applied->object) && is_type_name(file, applied->object)
-        && (!ast.at(applied->object).node.is<ast::name>()
-            || scope.find_local(text_of(file, span_of(file, applied->object))) == nullptr))
+    // CHK-289: `T[N].filled(v)`, where `T[N]` is a type in the position of a value.
+    // The chain's root decides, since `a.b[i][j]` indexes a value however many groups it has.
+    auto root = member.object;
+    while (ast::is_valid(root) && ast.at(root).node.is<ast::index>())
+        root = ast.at(root).node.as<ast::index>().object;
+    if (root != member.object && ast::is_valid(root) && is_type_name(file, root)
+        && (!ast.at(root).node.is<ast::name>() || scope.find_local(text_of(file, span_of(file, root))) == nullptr))
         return check_filled(scope, id, call);
 
     // CHK-348: `m.foo(…)` is a call of the name `foo` of module `m`, and `m` is no argument

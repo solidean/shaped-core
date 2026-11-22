@@ -175,6 +175,49 @@ ASYNC_INVOCABLE_TEST("sg - an SGL binding array is filled with a view per elemen
         CHECK(got[i] == (i % 3) * 1000 + i);
 }
 
+ASYNC_INVOCABLE_TEST("sg - an atomic update reaches the element of an SGL binding array a thread picks",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::binding_arrays))
+        SKIP("this context has no binding arrays");
+
+    auto const pipeline = co_await shaders::binding_arrays::tally.acquire_pipeline(*ctx);
+    auto const group_layout = ctx->cached.acquire_binding_group_layout<shaders::binding_arrays::tallies>();
+
+    // Slot 0 of each element counts the threads of its parity, and slot 1 keeps the least of their ids.
+    constexpr auto count = 64;
+    auto const usage = sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src;
+    auto const even = ctx->persistent.create_buffer_from_data(cc::vector<u32>{0u, 0xFFFFFFFFu}, usage);
+    auto const odd = ctx->persistent.create_buffer_from_data(cc::vector<u32>{0u, 0xFFFFFFFFu}, usage);
+
+    auto cmd = ctx->create_command_list();
+    auto const group = ctx->transient.create_binding_group(
+        *cmd, group_layout,
+        shaders::binding_arrays::tallies{.slots = {even.as_readwrite_buffer(), odd.as_readwrite_buffer()}});
+    cmd->compute.bind_pipeline(*pipeline);
+    cmd->compute.bind_group(0, *group);
+    auto const updates = cc::vector<sg::array_buffer_access>{{.index = 0, .access = sg::access_flag::shader_write},
+                                                             {.index = 1, .access = sg::access_flag::shader_write}};
+    auto const declared
+        = cmd->compute.declare_array_buffer_access(shaders::binding_arrays::tallies::arrays::slots, updates);
+    cmd->compute.dispatch_threads(count);
+    auto const even_back = cmd->download.data_from_buffer(even);
+    auto const odd_back = cmd->download.data_from_buffer(odd);
+    ctx->submit_command_list(cc::move(cmd));
+
+    auto const got_even = co_await even_back.data();
+    auto const got_odd = co_await odd_back.data();
+    REQUIRE(got_even.size() == 2);
+    REQUIRE(got_odd.size() == 2);
+    CHECK(got_even[0] == count / 2);
+    CHECK(got_even[1] == 0u);
+    CHECK(got_odd[0] == count / 2);
+    CHECK(got_odd[1] == 1u);
+}
+
 ASYNC_INVOCABLE_TEST("sg - an SGL unbounded binding array takes as many views as the group is given (CHK-490)",
                      (sg::context_handle const& ctx))
 {
