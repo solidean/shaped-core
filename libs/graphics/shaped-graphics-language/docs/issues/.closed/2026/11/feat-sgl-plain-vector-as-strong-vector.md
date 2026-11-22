@@ -4,6 +4,8 @@ priority: next
 tags: [porting-feedback]
 refs:
   - issue: question-sgl-plain-vectors-as-layout
+closed: 2026-11-22
+resolution: fixed
 ---
 
 # float3 converts to vec3 with as, at no cost
