@@ -39,6 +39,7 @@ It writes the deterministic part, and refuses before writing anything if a file 
 - `CMakePresets.json`, which includes shaped-core's presets rather than copying them, so the preset names are shaped-core's.
 - `dev.py`, shaped-core's driver imported from the submodule, with this project's policy.
 - `.clang-format`, `.editorconfig` and `.clangd` copied from shaped-core, and `.shaped-lint.yml` with its doc links pointed into the submodule.
+- `CLAUDE.md`, shaped-core's house sections with `Specialize:` lines where the project's own go (step 7).
 - `.gitignore`, `.gitattributes`, `.issues.toml`, `README.md`, `docs/_index.md`, `docs/issues/` and `apps/`.
 - One sample library, `libs/base/<first-lib>`, with its `fwd.hh` and a test, so the first build has something to build and test.
   A type the library defines is declared in its `fwd.hh` and defined qualified, which shaped-linter's `qualified-type-definition` holds it to.
@@ -47,7 +48,7 @@ It writes the deterministic part, and refuses before writing anything if a file 
 `--lib` defaults to the project's name and `--namespace` to the library's name in snake_case; pick a short namespace when the request names none, as ours are (`cc`, `tg`, `sg`).
 [tools/project-template/](../../tools/project-template/readme.md) is the template, and its self-test is the `project-template-selftest` gate.
 
-Then the parts that need judgement, in this order: the layout, dev.py's policy, the build server, the issue tracker, CLAUDE.md, the skills.
+Then the parts that need judgement, in this order: the layout, dev.py's policy, the build server, the issue tracker, specializing CLAUDE.md, the skills.
 
 ## 3. The folder layout
 
@@ -125,30 +126,17 @@ client = "C:/Users/<user>/AppData/Local/ccs/bin/ccs.exe"
 
 ## 7. CLAUDE.md
 
-**The project's CLAUDE.md is a copy, specialized at once**: start from `extern/shaped-core/CLAUDE.md`, then make every section about this project.
-It never imports shaped-core's, since the copy is the project's to change.
-Section by section, unless the request says otherwise:
+**The project's CLAUDE.md is a copy, specialized at once**: step 2 wrote one, and it is the project's to change, never an import of shaped-core's.
+The house sections are already shaped-core's, their links pointed into the submodule:
+the hard rules, the living libraries, build & test, the strong guidelines, the style and prose rules, docs, cheat sheets and the git workflow.
+What is left, unless the request says otherwise:
 
-| shaped-core's section | In the project's CLAUDE.md |
-|---|---|
-| the opening "quick orientation, not for knowledge" paragraph | copy verbatim |
-| What this repo is | write anew: what the project is, its language and build, `dev.py`, that shaped-core is at `extern/shaped-core` |
-| Project layout | write anew in the same form: a one-liner per library and app, its namespace and its dependencies; the supporting directories |
-| Hard rules | copy dependency direction, `.clang-format` authoritative, the `building-and-testing` skill, the disk-space escalation, never running a nexus binary directly, `*-example` naming, absolute paths, straight to `main`, never waiting for CI, no force-push |
-| | the compatibility rule becomes the project's stance: copy shaped-core's beta wording unless told the project has shipped; drop the `.vdoc` line |
-| The libraries are living | copy, adding that a missing capability belonging in shaped-core is surfaced as a shaped-core extension, not worked around locally |
-| Build & test (essentials) | copy, with the commands the project's `dev.py` registers |
-| Build flags / presets | keep C++23, the default presets, `--preset` after the subcommand and `CC_ASSERT` on in `relwithdebinfo-*` only; add the project's `SC_LIBRARIES`; drop the rest |
-| Strong guidelines | copy verbatim: file size, directory branching, fast tests with no deliberate waiting, codifying edge cases |
-| Style preferences, Prose, The style is evolving | copy verbatim, pointing the links at `extern/shaped-core/docs/` |
-| Docs | copy, with `docs/_index.md` the project's hub |
-| Agent skills | list the skills step 8 copies |
-| Exploring the codebase | copy where the `repo_tools` MCP server is set up, else drop |
-| Cheat sheets | copy, pointing at shaped-core's sheets under `extern/shaped-core/libs/`, and asking for one per project library too |
-| Git workflow | copy: `main`, merging pulls, `check --fix` before every push, no push without the user's intent, the attribution rule, the heredoc for commit messages |
-| Quick reference | copy the rows whose commands the project has |
-
-Links in the copied text resolve from the project's root, so `docs/coding-guidelines.md` becomes `extern/shaped-core/docs/coding-guidelines.md`; the `crossrefs` gate finds any left over.
+- **Replace every `Specialize:` line**: what the project is, and the one-liner per library with its namespace and dependencies.
+  The setup is not done while one is left.
+- **Write what the request said** into the sections it concerns: a library planned, a platform it targets, a rule of its own.
+- **Grow the layout list as libraries and apps land**, one line each, as shaped-core's CLAUDE.md does.
+- **Add a section for a skill copied in step 8**, and the `repo_tools` MCP server's section from shaped-core's CLAUDE.md where it is set up.
+- **Keep the compatibility rule's beta stance** until the user says the project has shipped.
 
 ## 8. Skills
 

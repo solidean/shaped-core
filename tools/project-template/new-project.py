@@ -12,7 +12,7 @@ Run from the new project's root, with shaped-core already at extern/shaped-core:
 
 It writes only files that do not exist yet, and refuses before writing anything if one does, unless `--skip-existing` keeps those.
 It also sets the submodule's `.gitmodules` entry to follow `main` and to merge on `git submodule update`.
-What needs judgement, the CLAUDE.md and the skills above all, is docs/guides/starting-a-project.md's, not this script's.
+What needs judgement, specializing CLAUDE.md and the skills above all, is docs/guides/starting-a-project.md's, not this script's.
 """
 
 from __future__ import annotations
