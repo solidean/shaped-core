@@ -3,6 +3,7 @@
 #include <clean-core/algorithm/sort.hh>
 #include <clean-core/common/macros.hh>
 #include <clean-core/platform/environment.hh>
+#include <clean-core/platform/file_path.hh>
 #include <clean-core/record/log.hh>
 #include <clean-core/streams/file_stream.hh>
 #include <clean-core/string/format.hh>
@@ -168,6 +169,60 @@ void write_words(cc::string_view path, cc::span<u32 const> words)
     REQUIRE(stream.write(words.as_bytes()).has_value());
     REQUIRE(stream.flush().has_value());
 }
+
+/// SPIR-V modules spirv-val reads in one process: each is a file in a directory of this process's own.
+/// A process per module was most of the sweep's time, and on a loaded machine long enough for the watchdog.
+/// A refused batch is validated again module by module, so a failure still names its file and entry point.
+/// One batch belongs to one task: `add` is not safe to call from two threads at once.
+class spirv_batch
+{
+public:
+    spirv_batch() : _dir(cc::temp_file_path("sgl-spirv-batch"))
+    {
+        std::filesystem::create_directories(_dir.c_str_materialize());
+    }
+    spirv_batch(spirv_batch const&) = delete;
+    spirv_batch& operator=(spirv_batch const&) = delete;
+    ~spirv_batch()
+    {
+        auto ec = std::error_code();
+        std::filesystem::remove_all(_dir.c_str_materialize(), ec);
+    }
+
+    void add(cc::span<u32 const> words, cc::string_view file, cc::string_view entry_point, cc::string_view with = "")
+    {
+        auto const path = cc::format("{}/{}.spv", _dir, _modules.size());
+        write_words(path, words);
+        _modules.push_back(
+            {.path = path, .file = cc::string(file), .entry_point = cc::string(entry_point), .with = cc::string(with)});
+    }
+
+    void validate() const
+    {
+        if (_modules.empty() || run(_dir))
+            return;
+        for (auto const& m : _modules)
+            CHECK(run(m.path)).dump("file", m.file).dump("entry", m.entry_point).dump("with", m.with);
+    }
+
+private:
+    struct module
+    {
+        cc::string path;
+        cc::string file;
+        cc::string entry_point;
+        cc::string with;
+    };
+
+    [[nodiscard]] static bool run(cc::string_view path)
+    {
+        auto command = cc::format("spirv-val --target-env vulkan1.3 --scalar-block-layout \"{}\"", path);
+        return std::system(command.c_str_materialize()) == 0;
+    }
+
+    cc::string _dir;
+    cc::vector<module> _modules;
+};
 } // namespace
 
 TEST("sgl spirv - a module is SPIR-V 1.6, and states its workgroup")
@@ -302,7 +357,7 @@ TEST("sgl spirv - a patch's links take the locations after the control point's p
     CHECK(e.value().text.contains("[[vk::location(3)]] float scale"));
 }
 
-// A task per file, since each module is a spirv-val process, and those one after another were the binary's critical path.
+// A task per file, each handing its modules to spirv-val as one batch: the compiles run side by side, and the processes are few.
 ASYNC_TEST("sgl spirv - every entry point of the fixtures that lowers is what spirv-val calls valid")
 {
 #if defined(CC_OS_EMSCRIPTEN) || defined(CC_OS_IOS) || defined(CC_OS_TVOS)
@@ -340,13 +395,7 @@ ASYNC_TEST("sgl spirv - every entry point of the fixtures that lowers is what sp
         {
             auto const& file = files[file_index];
             auto& n = counts[file_index];
-            auto const module_path = cc::format("{}/sgl-spirv-emit-test-{}.spv", cc::temp_directory_path(), file_index);
-            auto const validates = [&](cc::span<u32 const> words)
-            {
-                write_words(module_path, words);
-                auto command = cc::format("spirv-val --target-env vulkan1.3 --scalar-block-layout \"{}\"", module_path);
-                return std::system(command.c_str_materialize()) == 0;
-            };
+            auto modules = spirv_batch();
             // every eighth module is sampled, counted from the file's index so a file of fewer still has its turn
             auto lined_modules = file_index;
 
@@ -375,7 +424,7 @@ ASYNC_TEST("sgl spirv - every entry point of the fixtures that lowers is what sp
                 auto const is_ray = stage >= sgl::check::stage::raygen;
                 ++(is_ray ? n.ray : is_mesh ? n.mesh : is_primitive ? n.primitive : is_raster ? n.raster : n.compute);
                 n.recording += e.value().debug_sites.empty() ? 0 : 1;
-                CHECK(validates(e.value().spirv)).dump("file", file).dump("entry", entry.entry_point);
+                modules.add(e.value().spirv, file, entry.entry_point);
 
                 // EMIT-257 and EMIT-267: the line table and the variables are SPIR-V spirv-val takes too, every eighth
                 // module, and each under --thorough
@@ -392,10 +441,8 @@ ASYNC_TEST("sgl spirv - every entry point of the fixtures that lowers is what sp
                              .native = sgl::emit::native_route::prefer,
                              .native_debug_info = level});
                         REQUIRE(lined.has_value());
-                        CHECK(validates(lined.value().spirv))
-                            .dump("file", file)
-                            .dump("entry", entry.entry_point)
-                            .dump("with", level == sgl::emit::debug_info::full ? "its variables" : "its line table");
+                        modules.add(lined.value().spirv, file, entry.entry_point,
+                                    level == sgl::emit::debug_info::full ? "its variables" : "its line table");
                     }
 
                 // each profile, nothing here running what it guards; a report writes through the debug buffer
@@ -413,15 +460,11 @@ ASYNC_TEST("sgl spirv - every entry point of the fixtures that lowers is what sp
                     if (profile.has_error() || profile.value().spirv.empty())
                         continue;
                     ++n.guarded;
-                    // a process per module, so a default run validates every eighth and --thorough takes them all
-                    if (!nx::is_thorough() && (file_index + n.guarded) % 8 != 0)
-                        continue;
-                    CHECK(validates(profile.value().spirv))
-                        .dump("file", file)
-                        .dump("entry", entry.entry_point)
-                        .dump("guard", int(guard));
+                    modules.add(profile.value().spirv, file, entry.entry_point,
+                                cc::format("guard profile {}", int(guard)));
                 }
             }
+            modules.validate();
         },
         {.grain = 1});
 
@@ -443,8 +486,7 @@ ASYNC_TEST("sgl spirv - every entry point of the fixtures that lowers is what sp
         guarded += n.guarded;
     }
 
-    auto const module_path = cc::format("{}/sgl-spirv-emit-test.spv", cc::temp_directory_path());
-    auto command = cc::format("spirv-val --target-env vulkan1.3 --scalar-block-layout \"{}\"", module_path);
+    auto record_modules = spirv_batch();
     // what no fixture prints: every family a record holds, and a vertex stage's
     constexpr cc::string_view records
         = "require shader_f16\n"
@@ -472,9 +514,9 @@ ASYNC_TEST("sgl spirv - every entry point of the fixtures that lowers is what sp
              .native = sgl::emit::native_route::require});
         REQUIRE(e.has_value());
         CHECK(e.value().debug_sites.size() == 1);
-        write_words(module_path, e.value().spirv);
-        CHECK(std::system(command.c_str_materialize()) == 0).dump("entry", entry);
+        record_modules.add(e.value().spirv, "records", entry);
     }
+    record_modules.validate();
 
     // the numbers the slice reaches, so a lowering lost shows here rather than as a quiet fall back to DXC
     CC_LOG_INFO("SGL's SPIR-V lowers {} compute entry points, {} vertex and pixel ones, {} geometry and tessellation "
