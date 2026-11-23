@@ -466,6 +466,10 @@ def includes(entries: SglEntries) -> list[str]:
     types = {m["type"] for _, b in entries.bindings for m in b["members"]}
     types |= {m["type"] for _, v in entries.vertex_inputs for m in v["members"]}
     types |= {m["type"] for _, s in entries.memory_structs for m in s["members"]}
+    types |= {v["type"] for _, s in entries.memory_structs for v in s.get("variant_fields", [])}
+    # a struct with cases reaches its variant fields' words by copying them, and asserts the case it is in
+    if any(s.get("cases") for _, s in entries.memory_structs):
+        out += ["<clean-core/common/assert.hh>", "<clean-core/common/utility.hh>", "<clean-core/fwd.hh>"]
     # an array is a fixed array of its element, which needs its own header too
     arrays = {array_of(t) for t in types} - {None}
     if arrays:
@@ -909,22 +913,162 @@ def layout_asserts(qualified: str, members: list[dict], size: int) -> str:
     return "".join(out)
 
 
+
 def emit_memory_struct(package: str, memory: dict[str, int], namespace: str, file: SglFile, struct: dict) -> str:
     name = struct["name"]
     space = "a constant block" if struct["space"] == "constants" else "a storage buffer"
     out = [f"\nnamespace {namespace}\n{{\n"]
     out.append(f"/// `struct {name}` of {file.path}, byte for byte as {space} holds it. Generated; do not edit.\n")
     out.append("/// Copy it into GPU memory as it is: every member sits where the shader reads it on every backend.\n")
+    if struct.get("cases"):
+        out.append("/// A struct with cases: build a value by its leaf's function, ask its case with `is_...`, and reach a field\n")
+        out.append("/// of some cases through its accessor, never through `_tag` and the `_w...` words.\n")
     out.append(f"struct {name}\n{{\n")
     out.append(padded_fields(package, memory, f"'{file.path}' `struct {name}`", struct["members"], "    ",
                              struct["size"]))
+    if struct.get("cases"):
+        out.append(struct_case_declarations(package, memory, file, struct))
     out.append("};\n")
     out.append(f"}} // namespace {namespace}\n")
     return "".join(out)
 
 
-def emit_memory_struct_impl(namespace: str, struct: dict) -> str:
-    return "\n" + layout_asserts(f"{namespace}::{struct['name']}", struct["members"], struct["size"])
+def emit_memory_struct_impl(namespace: str, struct: dict, package: str = "", memory: dict | None = None,
+                            file: SglFile | None = None) -> str:
+    out = "\n" + layout_asserts(f"{namespace}::{struct['name']}", struct["members"], struct["size"])
+    if struct.get("cases"):
+        out += struct_case_definitions(package, memory or {}, namespace, file, struct)
+    return out
+
+
+# ---- a struct with cases (SGL CHK-540) ----------------------------------------------------------------------------
+
+
+def is_layout_member(member_name: str) -> bool:
+    """The tag and the words a struct with cases adds to its layout, which no accessor or factory names."""
+    return member_name == "_tag" or re.fullmatch(r"_w[0-9]+", member_name) is not None
+
+
+def case_accessors(struct: dict) -> list[dict]:
+    """Each variant field the host reaches, by the accessor it is reached through.
+
+    Fields of one name in several cases are fields of their own, as SGL has them: each accessor is named after its case.
+    A field whose host type is not exactly its words, such as a struct or a half, has none.
+    """
+    by_name: dict[str, list[dict]] = {}
+    for v in struct.get("variant_fields", []):
+        by_name.setdefault(v["name"], []).append(v)
+    out = []
+    for name, fields in by_name.items():
+        is_one = len(fields) == 1
+        groups = [[f] for f in fields]
+        for group in groups:
+            first = group[0]
+            known = HOST_TYPES.get(first["type"])
+            if known is None or known[1] != first["size"]:
+                continue
+            accessor = name if is_one else f"{first.get('declared_in') or 'shared'}_{name}"
+            out.append({"accessor": accessor, "name": name, "type": known[0], "offset": first["offset"],
+                        "size": first["size"], "cases": sorted({c for f in group for c in f["cases"]}),
+                        "discriminant": any(f["discriminant"] for f in group), "fields": group})
+    return out
+
+
+def case_holds(struct: dict, accessor: dict) -> str:
+    """The condition a value meets for the accessor to reach it, or empty where some case of it has no test."""
+    conditions = {c["name"]: c["condition"] for c in struct["cases"]}
+    if not accessor["cases"] or any(not conditions.get(c) for c in accessor["cases"]):
+        return ""
+    return " || ".join(f"is_{c}()" for c in accessor["cases"])
+
+
+def factory_parameters(package: str, memory: dict, file: SglFile | None, struct: dict,
+                       leaf: dict) -> list[tuple[str, str, str]] | None:
+    """A leaf's factory parameters as (C++ type, name, accessor or `member`): its common fields, then its variant fields.
+
+    None where one of them has no accessor, which leaves the leaf without a factory.
+    """
+    writes = leaf.get("writes", {})
+    where = f"'{file.path if file else ''}' `struct {struct['name']}`"
+    out = []
+    for m in struct["members"]:
+        if is_layout_member(m["name"]) or m["name"] in writes:
+            continue
+        out.append((sized_host_type(package, memory, f"{where} member '{m['name']}'", m["type"], m["size"]), m["name"],
+                    "member"))
+    accessors = case_accessors(struct)
+    for v in struct.get("variant_fields", []):
+        if leaf["name"] not in v["cases"] or v["name"] in writes:
+            continue
+        accessor = next((a for a in accessors if v in a["fields"]), None)
+        if accessor is None:
+            return None
+        out.append((accessor["type"], v["name"], accessor["accessor"]))
+    return out
+
+
+def struct_case_declarations(package: str, memory: dict, file: SglFile, struct: dict) -> str:
+    out = ["\n    // its cases (SGL CHK-540), defined beside the struct's layout asserts\n"]
+    for c in struct["cases"]:
+        if c["condition"]:
+            out.append(f"    [[nodiscard]] bool is_{c['name']}() const;\n")
+    for a in case_accessors(struct):
+        cases = ", ".join(a["cases"])
+        out.append(f"    [[nodiscard]] {a['type']} {a['accessor']}() const; ///< a field of {cases}\n")
+        if not a["discriminant"]:
+            out.append(f"    void set_{a['accessor']}({a['type']} value);\n")
+    for c in struct["cases"]:
+        parameters = factory_parameters(package, memory, file, struct, c) if c["buildable"] else None
+        if parameters is None:
+            continue
+        listed = ", ".join(f"{t} {n}" for t, n, _ in parameters)
+        out.append(f"    [[nodiscard]] static {struct['name']} {c['name']}({listed});\n")
+    return "".join(out)
+
+
+def struct_case_definitions(package: str, memory: dict, namespace: str, file: SglFile | None, struct: dict) -> str:
+    qualified = f"{namespace}::{struct['name']}"
+    accessors = case_accessors(struct)
+    out = ["\n"]
+    for c in struct["cases"]:
+        if c["condition"]:
+            out.append(f"bool {qualified}::is_{c['name']}() const\n{{\n    return {c['condition']};\n}}\n\n")
+    for a in accessors:
+        holds = case_holds(struct, a)
+        message = f"{a['name']} is a field of {', '.join(a['cases'])} alone"
+        out.append(f"{a['type']} {qualified}::{a['accessor']}() const\n{{\n")
+        if holds:
+            out.append(f"    CC_ASSERT({holds}, \"{message}\");\n")
+        out.append(f"    auto value = {a['type']}();\n")
+        out.append(f"    static_assert(sizeof(value) == {a['size']});\n")
+        out.append(f"    cc::memcpy(&value, reinterpret_cast<cc::byte const*>(this) + {a['offset']}, sizeof(value));\n")
+        out.append("    return value;\n}\n\n")
+        if not a["discriminant"]:
+            out.append(f"void {qualified}::set_{a['accessor']}({a['type']} value)\n{{\n")
+            if holds:
+                out.append(f"    CC_ASSERT({holds}, \"{message}\");\n")
+            out.append(f"    cc::memcpy(reinterpret_cast<cc::byte*>(this) + {a['offset']}, &value, sizeof(value));\n")
+            out.append("}\n\n")
+    for c in struct["cases"]:
+        parameters = factory_parameters(package, memory, file, struct, c) if c["buildable"] else None
+        if parameters is None:
+            continue
+        listed = ", ".join(f"{t} {n}" for t, n, _ in parameters)
+        out.append(f"{qualified} {qualified}::{c['name']}({listed})\n{{\n")
+        out.append(f"    auto result = {struct['name']}{{}};\n")
+        # what says the case first, so every setter after it finds the value in its case
+        for field, value in c.get("writes", {}).items():
+            if any(m["name"] == field for m in struct["members"]):
+                out.append(f"    result.{field} = {value};\n")
+                continue
+            written = next(a for a in accessors if a["name"] == field)
+            out.append(f"    auto const {field} = {written['type']}({value});\n")
+            out.append(f"    cc::memcpy(reinterpret_cast<cc::byte*>(&result) + {written['offset']}, &{field}, "
+                       f"sizeof({field}));\n")
+        for _, n, how in parameters:
+            out.append(f"    result.{n} = {n};\n" if how == "member" else f"    result.set_{how}({n});\n")
+        out.append("    return result;\n}\n\n")
+    return "".join(out)
 
 
 # ---- an @inline block ----------------------------------------------------------------------------------------------
@@ -1027,7 +1171,8 @@ def emit_source(package: str, namespace: str, entries: SglEntries) -> str:
         return memory_structs_of(entries, file.path), file_namespace(namespace, entries, file.path)
 
     for file, struct in entries.memory_structs:
-        out.append(emit_memory_struct_impl(file_namespace(namespace, entries, file.path), struct))
+        out.append(emit_memory_struct_impl(file_namespace(namespace, entries, file.path), struct, package,
+                                           memory_structs_of(entries, file.path), file))
     for file, binding in entries.bindings:
         if binding["inline"]:
             out.append(emit_inline_impl(package, *at(file), file, binding))
