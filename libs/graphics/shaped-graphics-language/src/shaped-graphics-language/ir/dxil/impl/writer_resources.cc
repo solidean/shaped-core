@@ -473,8 +473,12 @@ void writer::texture_op(u32 index, instruction const& i)
         return;
     }
     case op::sample_lod:
+        return sampled(
+            index, i, dx_op::sample_level,
+            [&](cc::vector<ll_value>& args) { args.push_back(leaf_at(value_ref(operands[2]))); }, 3,
+            operands.size() > 3 ? value_ref(operands[3]) : value_ref::none);
     case op::sample_compare_zero:
-        return sampled(index, i, i.code == op::sample_lod ? dx_op::sample_level : dx_op::sample_cmp_level_zero,
+        return sampled(index, i, dx_op::sample_cmp_level_zero,
                        [&](cc::vector<ll_value>& args) { args.push_back(leaf_at(value_ref(operands[2]))); });
     case op::sample_implicit:
         return sampled(

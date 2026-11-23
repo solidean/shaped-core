@@ -89,6 +89,85 @@ TEST("slib - SGL's own DXIL of real kernels passes the validator")
     }
 }
 
+TEST("slib - SGL's DXIL of a splat a mix or a clamp reads beside a scaling passes the validator")
+{
+    // the shapes that left SPIR-V's splat unwritten (post/stack's cartoon and fade tint); DXIL writes a lane at a time
+    constexpr cc::string_view source = "binding pass:\n"
+                                       "    k: float4\n"
+                                       "    v: float4\n"
+                                       "\n"
+                                       "struct link:\n"
+                                       "    @position position: hpos4\n"
+                                       "    uv: float2\n"
+                                       "\n"
+                                       "@pixel fun cartoon_ps(input: link){pass} -> float4:\n"
+                                       "    let r = mix(pass.v.xyz, float3(1.0), pass.k.x)\n"
+                                       "    let q = pass.v.xyz * pass.k.x\n"
+                                       "    return float4(r.x + q.x, r.y, r.z, 1.0)\n"
+                                       "\n"
+                                       "@pixel fun fade_tint_ps(input: link){pass} -> float4:\n"
+                                       "    let color = pass.v.xyz\n"
+                                       "    let tinted = mix(float3(1.0), color, pass.k.y) * (color * pass.k.y)\n"
+                                       "    return float4(tinted.x, tinted.y, tinted.z, 1.0)\n"
+                                       "\n"
+                                       "@pixel fun clamped_ps(input: link){pass} -> float4:\n"
+                                       "    let c = clamp(pass.v.xyz, float3(0.0), float3(pass.k.z))\n"
+                                       "    let s = c * pass.k.z\n"
+                                       "    return float4(s.x, s.y, s.z, 1.0)\n"
+                                       "\n"
+                                       "@pixel fun chosen_ps(input: link){pass} -> float4:\n"
+                                       "    let w = pass.k.w\n"
+                                       "    let filled = float3(w)\n"
+                                       "    let picked = if input.uv.x > 0.5 => pass.v.xyz else filled\n"
+                                       "    let s = pass.v.xyz * w\n"
+                                       "    let t = picked + s\n"
+                                       "    return float4(t.x, t.y, t.z, 1.0)\n"
+                                       "\n"
+                                       "@pixel fun branched_ps(input: link){pass} -> float4:\n"
+                                       "    let w = pass.k.w\n"
+                                       "    let picked = if input.uv.x > 0.5 => pass.v else float4(w)\n"
+                                       "    return picked * w\n";
+    auto compiler = ssc::dxc::compiler::create();
+    if (compiler.has_error())
+        SKIP("no DXC");
+    for (auto const entry : {"cartoon_ps", "fade_tint_ps", "clamped_ps", "chosen_ps", "branched_ps"})
+    {
+        auto const e = written(source, entry);
+        REQUIRE(e.has_value());
+        REQUIRE(!e.value().dxil.empty());
+        auto const refused = compiler.value().validate(e.value().dxil);
+        CHECK(!refused.has_value()).dump("entry", entry).dump("validator", refused.value_or(cc::string()));
+    }
+}
+
+TEST("slib - SGL's DXIL of a sample at a level with an offset passes the validator, the offset immediates (EMIT-253)")
+{
+    constexpr cc::string_view source
+        = "binding work:\n"
+          "    image: texture_2d[float4]\n"
+          "    image_array: texture_2d_array[float4]\n"
+          "    volume: texture_3d[float4]\n"
+          "    smooth: sampler\n"
+          "    results: mut buffer[float4]\n"
+          "\n"
+          "@compute(64) fun run(@thread_id id: int3){work}:\n"
+          "    let uv = float2(id.x as float, 0.5) / 64.0\n"
+          "    let a = work.image.sample(uv, work.smooth, level = 0.0, offset = int2(-1, 2))\n"
+          "    let b = work.image_array.sample(uv, work.smooth, layer = 1, level = 1.0, offset = int2(7, -8))\n"
+          "    let deep = float3(..uv, 0.5)\n"
+          "    let d = work.volume.sample(deep, work.smooth, level = 0.0, offset = int3(1, -1, 3))\n"
+          "    work.results[id.x] = a + b + d\n";
+    auto compiler = ssc::dxc::compiler::create();
+    if (compiler.has_error())
+        SKIP("no DXC");
+    auto const e = written(source, "run");
+    REQUIRE(e.has_value());
+    REQUIRE(!e.value().dxil.empty());
+    // the validator refuses a sampleLevel whose offsets are no immediates in -8..7
+    auto const refused = compiler.value().validate(e.value().dxil);
+    CHECK(!refused.has_value()).dump("validator", refused.value_or(cc::string()));
+}
+
 TEST("slib - every entry point of the fixtures that SGL's DXIL lowers passes the validator")
 {
     auto compiler = ssc::dxc::compiler::create();
@@ -415,6 +494,19 @@ TEST("slib - DXIL's float flags stand on each operation, and only `fast` lets a 
     CHECK(fast_text.value().contains("fadd fast float"));
     CHECK(!strict_text.value().contains("fast float"));
     CHECK(strict_text.value().contains("fadd float"));
+
+    // CHK-435: a request's float floor lowers an entry point that states nothing as if it stated the floor
+    auto const floored = sgl::compile_to_text({.source = k_sums,
+                                               .entry_point = "fast_sum",
+                                               .target = sgl::emit::target::hlsl_dx12,
+                                               .float_floor = sgl::check::float_level::precise,
+                                               .native = sgl::emit::native_route::require});
+    REQUIRE(floored.has_value());
+    auto const floored_text = compiler.value().disassemble(floored.value().dxil);
+    REQUIRE(floored_text.has_value());
+    CHECK(!floored_text.value().contains("fast float"));
+    CHECK(floored_text.value().contains("fadd float"));
+    CHECK(!compiler.value().validate(floored.value().dxil).has_value());
 }
 
 // AMD's DXIL compiler crashes on a module without it, though LLVM leaves it optional.

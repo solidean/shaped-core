@@ -78,6 +78,7 @@ The offset is a `sample` or a `gather` operand of its own, the `construct` of co
 SPIR-V declares it as an `OpConstantComposite` where an image operation names it, and DXIL reads its lanes as immediates.
 `pixel_surface.sgl`'s new `offset_ps` takes both, and the mixed-route test draws it through every pairing on dx12 and vulkan, every lane within 1e-4 of DXC's.
 The vertex and pixel sweep lowers 83 of 83 on both writers, and dropping the offset in lowering failed every native pixel pairing.
+A sample at a level takes one too since 2026-11-23, as sampleLevel's immediates and `ConstOffset` after `Lod`; bias and gradients state none in the language.
 
 ## A double's maths, measured on 2026-11-07
 

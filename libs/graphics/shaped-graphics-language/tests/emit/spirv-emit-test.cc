@@ -246,6 +246,15 @@ TEST("sgl spirv - an entry point's guarantee stands on each float operation it k
     REQUIRE(precise.has_value());
     CHECK(decorated(fast.value().spirv, 42) == 0);
     CHECK(decorated(precise.value().spirv, 42) == 2);
+
+    // CHK-435: a request's float floor keeps them as if the entry point stated it
+    auto const floored = sgl::compile_to_text({.source = k_doubled,
+                                               .entry_point = "run",
+                                               .target = sgl::emit::target::hlsl_vulkan,
+                                               .float_floor = sgl::check::float_level::precise,
+                                               .native = sgl::emit::native_route::require});
+    REQUIRE(floored.has_value());
+    CHECK(decorated(floored.value().spirv, 42) == 2);
 }
 
 TEST("sgl spirv - a vector scaled by a scalar builds no splat, and an if around little is a select")
@@ -268,6 +277,120 @@ TEST("sgl spirv - a vector scaled by a scalar builds no splat, and an if around 
     CHECK(counted(words, 169) == 1); // OpSelect
     CHECK(counted(words, 245) == 0); // and no OpPhi
     CHECK(counted(words, 247) == 0); // nor the OpSelectionMerge it folded
+}
+
+TEST("sgl spirv - a splat a mix or a clamp reads too is written, though a scaling reads it without one")
+{
+#if defined(CC_OS_EMSCRIPTEN) || defined(CC_OS_IOS) || defined(CC_OS_TVOS)
+    SKIP("this platform runs no spirv-val, and has no std::system to start one with");
+#else
+    // a mix's weight and a clamp's upper bound are each operation's third operand, the index that once stood for
+    // "no splat" too, so the splat they shared with a scaling went unwritten (post/stack's cartoon and fade tint)
+    constexpr cc::string_view source = "binding pass:\n"
+                                       "    k: float4\n"
+                                       "    v: float4\n"
+                                       "\n"
+                                       "struct link:\n"
+                                       "    @position position: hpos4\n"
+                                       "    uv: float2\n"
+                                       "\n"
+                                       "@pixel fun cartoon_ps(input: link){pass} -> float4:\n"
+                                       "    let r = mix(pass.v.xyz, float3(1.0), pass.k.x)\n"
+                                       "    let q = pass.v.xyz * pass.k.x\n"
+                                       "    return float4(r.x + q.x, r.y, r.z, 1.0)\n"
+                                       "\n"
+                                       "@pixel fun fade_tint_ps(input: link){pass} -> float4:\n"
+                                       "    let color = pass.v.xyz\n"
+                                       "    let tinted = mix(float3(1.0), color, pass.k.y) * (color * pass.k.y)\n"
+                                       "    return float4(tinted.x, tinted.y, tinted.z, 1.0)\n"
+                                       "\n"
+                                       "@pixel fun clamped_ps(input: link){pass} -> float4:\n"
+                                       "    let c = clamp(pass.v.xyz, float3(0.0), float3(pass.k.z))\n"
+                                       "    let s = c * pass.k.z\n"
+                                       "    return float4(s.x, s.y, s.z, 1.0)\n"
+                                       "\n"
+                                       "@pixel fun chosen_ps(input: link){pass} -> float4:\n"
+                                       "    let w = pass.k.w\n"
+                                       "    let filled = float3(w)\n"
+                                       "    let picked = if input.uv.x > 0.5 => pass.v.xyz else filled\n"
+                                       "    let s = pass.v.xyz * w\n"
+                                       "    let t = picked + s\n"
+                                       "    return float4(t.x, t.y, t.z, 1.0)\n"
+                                       "\n"
+                                       "@pixel fun branched_ps(input: link){pass} -> float4:\n"
+                                       "    let w = pass.k.w\n"
+                                       "    let picked = if input.uv.x > 0.5 => pass.v else float4(w)\n"
+                                       "    return picked * w\n";
+#if defined(CC_OS_WINDOWS)
+    constexpr auto probe = "spirv-val --version > NUL 2>&1";
+#else
+    constexpr auto probe = "spirv-val --version > /dev/null 2>&1";
+#endif
+    auto const has_validator = std::system(probe) == 0;
+    auto modules = spirv_batch();
+    // the splat is a choice's other arm, operand 2: of a vector select in chosen_ps, whose lanes are read together so
+    // it is not split into scalar selects of the splat's scalar, and of a phi in branched_ps, whose arm loads
+    for (auto const entry : {"cartoon_ps", "fade_tint_ps", "clamped_ps", "chosen_ps", "branched_ps"})
+    {
+        auto const e = written(source, entry, sgl::emit::native_route::require);
+        REQUIRE(e.has_value());
+        auto const& words = e.value().spirv;
+        CHECK(counted(words, 142) == 1).dump("entry", entry); // the scaling is still OpVectorTimesScalar
+        if (cc::string_view(entry) == "chosen_ps")
+            CHECK(counted(words, 169) == 1); // one OpSelect of the whole vector
+        if (cc::string_view(entry) == "branched_ps")
+            CHECK(counted(words, 245) == 1); // one OpPhi of the whole vector
+        modules.add(words, "splats", entry);
+    }
+    if (!has_validator)
+        SKIP("no spirv-val on the path");
+    modules.validate();
+#endif
+}
+
+TEST("sgl spirv - a sample at a level takes its offset as ConstOffset beside Lod (EMIT-253)")
+{
+    auto const e
+        = written("binding work:\n"
+                  "    image: texture_2d[float4]\n"
+                  "    image_array: texture_2d_array[float4]\n"
+                  "    volume: texture_3d[float4]\n"
+                  "    smooth: sampler\n"
+                  "    results: mut buffer[float4]\n"
+                  "\n"
+                  "@compute(64) fun run(@thread_id id: int3){work}:\n"
+                  "    let uv = float2(id.x as float, 0.5) / 64.0\n"
+                  "    let a = work.image.sample(uv, work.smooth, level = 0.0, offset = int2(-1, 2))\n"
+                  "    let b = work.image_array.sample(uv, work.smooth, layer = 1, level = 1.0, offset = int2(7, -8))\n"
+                  "    let c = work.image.sample(uv, work.smooth, level = 2.0)\n"
+                  "    let deep = float3(..uv, 0.5)\n"
+                  "    let d = work.volume.sample(deep, work.smooth, level = 0.0, offset = int3(1, -1, 3))\n"
+                  "    work.results[id.x] = a + b + c + d\n",
+                  "run", sgl::emit::native_route::require);
+    REQUIRE(e.has_value());
+    auto const& words = e.value().spirv;
+    // OpImageSampleExplicitLod: result type, result, sampled image, coordinate, then the image operands' mask
+    auto masks = cc::vector<u32>();
+    for (auto at = isize(5); at < words.size(); at += isize(words[at] >> 16))
+        if ((words[at] & 0xffffu) == 88)
+            masks.push_back(words[at + 5]);
+    REQUIRE(masks.size() == 4);
+    CHECK(masks[0] == 0xau); // Lod | ConstOffset
+    CHECK(masks[1] == 0xau);
+    CHECK(masks[2] == 0x2u); // Lod alone
+    CHECK(masks[3] == 0xau); // a 3D texture's offset has three lanes
+#if !defined(CC_OS_EMSCRIPTEN) && !defined(CC_OS_IOS) && !defined(CC_OS_TVOS)
+#if defined(CC_OS_WINDOWS)
+    constexpr auto probe = "spirv-val --version > NUL 2>&1";
+#else
+    constexpr auto probe = "spirv-val --version > /dev/null 2>&1";
+#endif
+    if (std::system(probe) != 0)
+        SKIP("no spirv-val on the path");
+    auto modules = spirv_batch();
+    modules.add(words, "level offsets", "run");
+    modules.validate();
+#endif
 }
 
 TEST("sgl spirv - a pixel stage's surface is SPIR-V's own, and a discard goes on as a helper (EMIT-238)")

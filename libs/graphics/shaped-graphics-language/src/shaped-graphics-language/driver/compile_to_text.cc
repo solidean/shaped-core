@@ -182,6 +182,7 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
                                                  check::undefined_guard guards_undefined,
                                                  bool asks_software_trace,
                                                  bool weakens_float,
+                                                 check::float_level float_floor,
                                                  check::feature_set device_features,
                                                  cc::span<check::feature_fill const> fills,
                                                  check::core_fills core,
@@ -326,22 +327,36 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
         }
     }
     auto const& source_entry = fused.has_value() ? fused.value() : e;
+    // CHK-435: the request's floor raises the entry point as if it stated that level, and then names no function
+    auto const is_raised_by_floor = u8(float_floor) > u8(source_entry.float_guarantee);
+    auto const raised_by = is_raised_by_floor                            ? cc::string()
+                         : check::is_valid(source_entry.float_raised_by) ? m.at(source_entry.float_raised_by).name
+                                                                         : cc::string();
+    auto const asked_by = is_raised_by_floor ? cc::string("the request's float floor") : cc::format("'{}'", raised_by);
+    auto float_guarantee = is_raised_by_floor ? float_floor : source_entry.float_guarantee;
     // EMIT-185: a guarantee the target cannot keep is refused, unless the host weakened it on WebGPU
-    auto const raised_by
-        = check::is_valid(source_entry.float_raised_by) ? m.at(source_entry.float_raised_by).name : cc::string();
-    auto float_guarantee = source_entry.float_guarantee;
+    auto weakened = cc::string();
     if (u8(float_guarantee) > u8(kept_float_level(target)))
     {
         if (target != emit::target::wgsl || !weakens_float)
             return cc::error(cc::format("{}: error: float-guarantee-not-kept: entry point '{}' needs @float(.{}), "
-                                        "which "
-                                        "'{}' asks for, and {} keeps no more than .{}\n",
-                                        source_name, source_entry.name, float_level_name(float_guarantee), raised_by,
+                                        "which {} asks for, and {} keeps no more than .{}\n",
+                                        source_name, source_entry.name, float_level_name(float_guarantee), asked_by,
                                         emit::to_string(target), float_level_name(kept_float_level(target))));
+        weakened
+            = cc::format("{}: warning: float-guarantee-weakened: entry point '{}' needs @float(.{}), which {} asks "
+                         "for, and runs at .fast on {}, as the host allowed",
+                         source_name, e.name, float_level_name(float_guarantee), asked_by, emit::to_string(target));
         float_guarantee = check::float_level::fast;
     }
-    // EMIT-185: vulkan keeps a level through execution modes the device must have
+    // what the native routes lower each float operation at, as the source's own `@float` would have set it
     auto entry = source_entry;
+    if (is_raised_by_floor)
+    {
+        entry.float_guarantee = float_floor;
+        entry.float_raised_by = check::symbol_id::none;
+    }
+    // EMIT-185: vulkan keeps a level through execution modes the device must have
     if (target == emit::target::hlsl_vulkan && float_guarantee != check::float_level::fast)
         entry.features.set(check::feature::float_specials);
     if (target == emit::target::hlsl_vulkan && float_guarantee == check::float_level::ieee)
@@ -540,7 +555,12 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
     result.unshadowed_bytes = legal.unshadowed_bytes;
     result.float_guarantee = float_guarantee;
     if (float_guarantee != check::float_level::fast)
+    {
         result.float_raised_by = raised_by;
+        result.is_float_raised_by_floor = is_raised_by_floor;
+    }
+    if (!weakened.empty())
+        result.warnings.push_back(cc::move(weakened));
     return result;
 }
 
@@ -554,7 +574,11 @@ void add_source_facts(cc::result<emitted_source, cc::string>& text,
         return;
     for (auto const name : front.reached_library_names)
         text.value().library_files.push_back(cc::string(name));
-    text.value().warnings = front.warnings_of(e.function);
+    // the program's warnings come before what the compile of `e` itself warned of
+    auto warnings = front.warnings_of(e.function);
+    for (auto& w : text.value().warnings)
+        warnings.push_back(cc::move(w));
+    text.value().warnings = cc::move(warnings);
 }
 } // namespace
 
@@ -652,16 +676,18 @@ cc::result<sgl::emitted_source, cc::string> sgl::compile_to_text(text_request co
     }
     auto result = emit_text(front, e, request.target, request.line_directives, request.diagnostics,
                             request.guards_undefined, request.software_trace, request.weakens_float,
-                            request.device_features, request.fills, request.core, request.native,
+                            request.float_floor, request.device_features, request.fills, request.core, request.native,
                             request.native_debug_info, request.mesh, polyfill_vertex, polyfill_task, polyfill_control);
     add_source_facts(result, front, e);
-    if (result.has_value() && result.value().float_guarantee != e.float_guarantee)
-        result.value().warnings.push_back(cc::format(
-            "{}: warning: float-guarantee-weakened: entry point '{}' needs @float(.{}), which '{}' asks for, and runs "
-            "at .fast on {}, as the host allowed",
-            request.source_name, e.name, float_level_name(e.float_guarantee),
-            check::is_valid(e.float_raised_by) ? m.at(e.float_raised_by).name : cc::string(),
-            emit::to_string(request.target)));
+    // CHK-436 warns of code at `fast`, which a floor above it compiles none of, unless WebGPU weakened it back
+    if (result.has_value() && result.value().is_float_raised_by_floor)
+    {
+        auto kept = cc::vector<cc::string>();
+        for (auto& w : result.value().warnings)
+            if (!w.contains(": warning: nan-test-at-fast:"))
+                kept.push_back(cc::move(w));
+        result.value().warnings = cc::move(kept);
+    }
     if (result.has_value() && result.value().unshadowed_bytes > 0)
         result.value().warnings.push_back(cc::format(
             "{}: warning: workgroup-unshadowed: entry point '{}' holds {} bytes of workgroup memory, past what its "
@@ -748,10 +774,10 @@ cc::result<cc::vector<sgl::entry_text>, cc::string> sgl::compile_all_to_text(all
             // CHK-402: an entry point's own errors are that element's, and leave the others built
             auto own = front.errors_of(e.function);
             auto const fills = fills_on(request.targets[k]);
-            auto text = own.empty()
-                          ? emit_text(front, e, request.targets[k], false, false, check::undefined_guard::none, false,
-                                      false, request.device_features, fills, core_on(request.targets[k]))
-                          : cc::result<emitted_source, cc::string>(cc::error(own));
+            auto text = own.empty() ? emit_text(front, e, request.targets[k], false, false,
+                                                check::undefined_guard::none, false, false, check::float_level::fast,
+                                                request.device_features, fills, core_on(request.targets[k]))
+                                    : cc::result<emitted_source, cc::string>(cc::error(own));
             add_source_facts(text, front, e);
             result.push_back({.entry_point = e.name, .target = request.targets[k], .text = cc::move(text)});
         }

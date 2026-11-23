@@ -23,6 +23,8 @@ It fails on vulkan's dxc and native routes alike.
   DXC's SPIR-V fails the same way, so it is the driver folding the pair, not a route.
 - dx12 on the same GPU agrees with the reference, and `half_arithmetic.sgl` passes on vulkan.
 - Seen at `6337cd272` on a clean checkout; whether an earlier driver passed is not known.
+- An RTX 5080 on the same driver, 610.88, rounds the round trip as it should, on vulkan's dxc and native routes alike (2026-11-23).
+  The `known nvidia vulkan` line names the vendor alone, so the differential tests fail there for agreeing.
 
 ## Open
 

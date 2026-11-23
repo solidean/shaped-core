@@ -610,8 +610,8 @@ value_ref lowering::texture_call(flat_call const& c, builtins::function_record c
         return add(ir::op::construct, vector_type(scalar_of(xy_type), lanes_of(xy_type) + 1), {xy, layer});
     };
 
-    // EMIT-253: a `sample` or a `gather` takes its offset last, and nothing else states one
-    auto const takes_offset = shape.what == op::sample || shape.what == op::gather;
+    // EMIT-253: a `sample`, a sample at a level or a `gather` takes its offset last, and nothing else states one
+    auto const takes_offset = shape.what == op::sample || shape.what == op::sample_level || shape.what == op::gather;
     auto const with_offset = [&](std::initializer_list<value_ref> operands)
     {
         auto list = cc::vector<u32>();
@@ -669,7 +669,7 @@ value_ref lowering::texture_call(flat_call const& c, builtins::function_record c
         auto const at = coordinate(expr(arguments[1]));
         auto level = expr(arguments[layout.first]);
         level = converted(level, _out.type_of(level), _float);
-        return narrowed(add(ir::op::sample_lod, texels, {with_image(sampler), at, level}));
+        return narrowed(add(ir::op::sample_lod, texels, with_offset({with_image(sampler), at, level})));
     }
     case op::sample:
     {

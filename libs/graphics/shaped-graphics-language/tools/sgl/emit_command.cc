@@ -39,6 +39,7 @@ COMMAND("emit")
     auto polyfill_vertex = cc::string();
     auto polyfill_control = cc::string();
     auto polyfill_task = cc::string();
+    auto float_floor_name = cc::string("fast");
     auto args = nx::args({.name = "sgl emit",
                           .description = "Compiles one entry point of an SGL file and prints the target text, with its "
                                          "warnings on stderr, or the diagnostics that kept it from being written."});
@@ -68,6 +69,10 @@ COMMAND("emit")
     args.arg({"weaken-float"}, weaken_float,
              {.desc = "compile an entry point whose @float WGSL cannot keep at .fast, with a warning, as a host that "
                       "allows it on WebGPU does"});
+    args.arg({"float-floor"}, float_floor_name,
+             {.desc = "the least float guarantee the entry point compiles at, as if it stated it: fast, specials, "
+                      "precise or ieee",
+              .metavar = "LEVEL"});
     args.arg({"device-feature"}, device_feature_names,
              {.desc = "a feature the device has, which `has` answers and slib passes for every one a context has, "
                       "`--device-feature float_atomic_add`; repeat for each",
@@ -134,6 +139,19 @@ COMMAND("emit")
     else if (undefined != "none")
     {
         cc::eprintln("sgl emit: unknown --undefined '{}' (one of none, abort, report, define)", undefined);
+        return exit_usage;
+    }
+
+    auto float_floor = sgl::check::float_level::fast;
+    if (float_floor_name == "specials")
+        float_floor = sgl::check::float_level::specials;
+    else if (float_floor_name == "precise")
+        float_floor = sgl::check::float_level::precise;
+    else if (float_floor_name == "ieee")
+        float_floor = sgl::check::float_level::ieee;
+    else if (float_floor_name != "fast")
+    {
+        cc::eprintln("sgl emit: unknown --float-floor '{}' (one of fast, specials, precise, ieee)", float_floor_name);
         return exit_usage;
     }
 
@@ -204,6 +222,7 @@ COMMAND("emit")
          .guards_undefined = guards_undefined,
          .software_trace = software_trace,
          .weakens_float = weaken_float,
+         .float_floor = float_floor,
          .device_features = device_features,
          .native = is_spirv || is_dxil ? sgl::emit::native_route::require : sgl::emit::native_route::text,
          .native_debug_info = native_debug_info,

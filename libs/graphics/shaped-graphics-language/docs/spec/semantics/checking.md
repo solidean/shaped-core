@@ -991,6 +991,7 @@ fun f() -> float:
   Any other `n`, and the attribute on any other function, is `invalid-attribute-arguments`.
 * **CHK-435** `@float(.specials)` on a function states the least float guarantee its body needs: `.fast`, `.specials`, `.precise` or `.ieee`, each stricter than the one before.
   An entry point keeps the strictest guarantee of every function it inlines, itself included, and a function that states none is at `.fast`.
+  A compile may ask for a floor, a level every entry point is raised to as if it stated it, which then names no function; one that reaches a stricter level keeps its own.
   What each level lets a target do to a float is EVAL-6's, and what a target keeps is EMIT-185's.
   Any other argument is `invalid-attribute-arguments`.
 * **CHK-436** A float compared with itself, `x != x` or `x == x`, in code an entry point compiles at `.fast` is the warning `nan-test-at-fast`.

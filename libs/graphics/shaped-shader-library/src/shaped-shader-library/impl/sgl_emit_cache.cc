@@ -334,6 +334,7 @@ cc::result<sgl::module_description, cc::string> slib::impl::cached_describe(sgl:
     b.add_string(request.source);
     b.add_string(request.source_name);
     b.add_string(request.module);
+    b.add_pod(request.float_floor);
     b.add_pod(i64(request.options.size()));
     for (auto const& o : request.options)
     {
