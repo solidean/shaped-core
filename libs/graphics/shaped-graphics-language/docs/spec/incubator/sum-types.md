@@ -27,6 +27,20 @@ let g = material.glass(roughness = 0.1, ior = 1.5, absorption = float3(0.2))
 ```
 
 `material.dielectric` is a type, the set of `glass` and `thin_glass`, and `material.glass` is one variant.
+
+**A payload may be written in parens**, positional or named, as a call's arguments are:
+
+```sgl sketch
+struct shape:
+    case sphere(center: float3, radius: float)
+    case plane(float3, float)
+```
+
+A positional payload's fields are `.0`, `.1`, as a tuple's are ([structural-types.md](structural-types.md)).
+
+**Sibling cases are separate scopes**, so `glass.ior: float` and `metal.ior: float3` may coexist.
+Each is reached once the value is narrowed to its case, and `m.ior` on the whole `material` is an error.
+A name two siblings share is never a shared field by accident, whatever its types: sharing is declared, below.
 A value of a struct with cases is always in exactly one of its leaf cases; a struct that needs a "none" state declares an empty case for it.
 A struct holds itself neither directly nor through a case, since nothing on a GPU points: a tree stays indices into a buffer.
 
@@ -37,6 +51,22 @@ Nothing in the language can use one where the other would not do, so whether the
 **A field declared above a case sits at one offset in every variant below it.**
 Reading it is the same load whatever the variant is, with no branch.
 
+**A field may be shared by cases with no common ancestor that declares it**, by naming them:
+
+```sgl sketch
+struct material:
+    roughness: float
+    @cases(.glass, .metal)
+    tint: float3
+    case glass: ...
+    case metal: ...
+    case emissive: ...
+```
+
+`tint` has one offset in `glass` and in `metal`, and reads on any set within them, `material.glass or material.metal` among them.
+`emissive` has no `tint`, and its own fields may occupy the words `tint` takes elsewhere.
+Declaring it once at the owner keeps the layout decision in one place; a field declared in each case and unified afterwards could fail to fit, and say so far from the cause.
+
 **A value is not its memory.**
 A local of a sum type belongs to the compiler: its tag plus each variant's fields, split as any struct local is, and the target's liveness overlaps what never lives at once.
 Memory — a buffer element, and the C++ struct the host sees — has a fixed layout, as large as the largest variant.
@@ -46,12 +76,19 @@ No target has a usable union, and WGSL cannot reinterpret memory, so the variant
 
 1. A padding word the layout leaves anyway, such as the one after a `float3` at natural alignment.
 2. Values an enum field never takes.
-3. Spare bits of an integer whose range is declared, once a range can be declared.
+3. Spare values and bits of an integer whose range is declared, `index: u32 in 0..<(1 << 24)` leaving 8 bits free.
 4. A word of its own, when nothing above is free.
 
 A float is never a niche: WGSL may treat a NaN or infinity result as an indeterminate value, so its bits carry no tag.
 Where the tag lands is deterministic and documented, since the host reads the same bytes.
 `@padding(.none)` promises C++'s layout, which leaves fewer padding words to take.
+
+**A field's type may name a range**: `x: int in 0..<10`.
+It parses already: `:` and `in` share level 7 and associate left ([OP-2](../syntax/operators.md)), so the line is `(x: int) in (0..<10)`.
+What changes is the member table ([AST-78](../syntax/ast.md#members)), which gains a row: a membership whose left side is a field reads as that field with a refined type.
+The same row serves a parameter and a `let`; in an expression the line keeps meaning an ascription, then a membership test.
+`x: (int in 0..<10)` is the same type spelled in a type position, and reaches every place a type stands.
+A value converts into a refined type where the check pass can prove it fits; otherwise `as` converts it, checked under `SC_SHADER_UNDEFINED`'s `REPORT` as a downcast is.
 
 **Or the program names the discriminator**, with a `@when` on each case that is a predicate over common fields alone:
 
@@ -73,24 +110,32 @@ struct material:
         f0: float3
 ```
 
-A variant's own fields never decide which variant a value is, since reading them already assumes the answer.
+**A nested `@when` adds to its outer case's**, so the predicates nest the way checks and casts do.
+`m is .glass` means `m is .dielectric`, then glass's predicate on `m` narrowed to `material.dielectric`.
+An inner predicate may read the outer case's fields as well as the root's, since by then the value is known to have them.
+A case's predicate reads the fields of its ancestors and never its own or its descendants', since reading those already assumes the answer.
+Both are well-defined because every check along the path is one a program could write as a narrowing `if`.
 
 * **Disjointness and coverage are checked** where a predicate compares enum and integer fields against constants, joined by `and`, `or` and `not`.
   That is a finite-domain problem per field.
   An `int` field has no finite domain, so coverage over one needs a `_` arm, while disjointness is still checked.
-* **A case is constructible only where its predicate is a conjunction of equalities**, from which the compiler writes the discriminating fields itself.
+* **A case is constructible only where every predicate on its path is a conjunction of equalities**, from which the compiler writes the discriminating fields itself.
   Any other case is a view: `is` and `case` see it, and nothing builds it.
 * **A field a predicate reads is read-only through the sum type**, since assigning it would change the variant under a reader.
+  That holds for an outer case's field read by an inner predicate too, wherever the value is narrowed to that outer case.
   Only a whole value changes the variant.
 * **`@unchecked` admits a predicate outside the checked fragment.**
   Its arms test in declaration order, the first match winning, and a `case` over it always needs a `_`.
 
 **Or the tag is nowhere in the value**: it lives in another buffer, or it is the hit kind the hardware reports.
-Such a struct is untagged — built and cast, never asked `is`.
+Such a struct is untagged — built and cast, never asked `is` — which an attribute on the struct says, `@tag(.external)` for one.
 It is also how a GPU program avoids paying for its largest variant: a tag and an index into one buffer per kind.
 
 **`is` narrows, flow-sensitively, from the first version on.**
-`if m is .glass:` makes `m` a `material.glass` inside the branch, so `m.absorption` reads, and an early return narrows the rest of the body.
+`if m is .glass:` makes `m` a `material.glass` inside the branch, so `m.absorption` reads.
+`is not` is its negation, and narrows to the complement: after `if m is not .glass: return`, `m` is a `material.glass` for the rest of the body.
+The complement of a set is a set, so a value narrowed away from one case is still a type the program can name.
+`is not` is one operator of two words, since `not .glass` alone means nothing.
 A `case` arm narrows its scrutinee the same way.
 Destructuring waits for [patterns.md](patterns.md); narrowing needs none of it.
 
@@ -117,7 +162,7 @@ Bytes read back from the GPU arrive by `bit_cast` or `memcpy`, never by reading 
 
 ## What it touches
 
-* The AST: `case` as a declaration inside a struct block, nested, and `is` as a word operator.
+* The AST: `case` as a declaration inside a struct block, nested, `is` and `is not` as word operators, and the member row of a refined field.
 * The check pass: the variant tree as a type kind, sets and their conversions, flow-sensitive narrowing, and a constructor per constructible case.
   Also the predicate fragment with its disjointness and coverage check, and the read-only discriminating fields.
 * Layout: niche placement, the common fields' offsets and the word region, in the [layout rules](../semantics/emitting.md#layout) beside `@padding(.none)`.
@@ -133,16 +178,15 @@ Bytes read back from the GPU arrive by `bit_cast` or `memcpy`, never by reading 
 * `case` is a keyword, and a struct block holds members rather than statements, so `case name:` inside one can only declare.
 * An arm names several cases as `.spot or .sun` already, which is the spelling a set of variants takes in a type position.
 * `as` is a `cast` node in the AST already.
-* Attributes are an open, additive set, so `@when` and `@unchecked` need no grammar of their own.
+* Attributes are an open, additive set, so `@when`, `@unchecked`, `@cases` and the untagged attribute need no grammar of their own.
+* `x: int in 0..<10` already parses as `(x: int) in (0..<10)` (OP-2), which a member row can read as a refined field.
 * `bool` is an enum of the prelude, so a `bool` field is a finite domain like any enum field.
 
 ## Open
 
-* How an untagged struct is spelled, since leaving out every `@when` already means a tag the compiler places.
-* Whether `is` has a negated form, `m is not .glass`, or only `not (m is .glass)`.
-* Whether an inner case's `@when` conjoins with its outer case's, or must restate it.
-* Whether a field may be read on a set whose every variant declares it at the same offset with the same type, without a common ancestor declaring it.
-* Whether sibling cases may declare a field of one name and different types, reachable only once narrowed.
-* Whether a payload may be written in parens, `case some(T)`, beside the block form.
-* Whether integers gain declared ranges, which the third niche needs.
+* How an untagged struct is spelled: `@tag(.external)`, `@untagged`, `@tag(.none)` or `@discriminator(.external)`.
+  `@tag(.external)` reads as `@padding(.none)` does, and the same attribute could force a placement, `@tag(.word)`.
+* How `@cases` is spelled, and whether it names cases only or sets as well, `@cases(.dielectric, .metal)`.
+* Whether a payload in parens may also have a block, `case sphere(radius: float):` with fields below — the question `struct` has too.
+* Whether a refined type is a type of its own or `int` with a fact attached, which decides what overloading sees.
 * Which slice comes first: sv's materials want `@when` from the start, a mixed hit wants niches and `T?`.
