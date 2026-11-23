@@ -4,6 +4,8 @@ tags: [metal, porting-feedback]
 refs:
   - file: libs/graphics/shaped-graphics/backends/metal/src/shaped-graphics/backends/metal/metal_context.cc
   - test: sg - a quad vote is its whole quad's, so a derivative under a branch on one is its quad's (CHK-533)
+claimed-by: Claude (for Julius Nehring-Wirxel)
+claimed-at: 2026-11-23T10:48Z
 ---
 
 # Metal grants quad_control and multi_viewport once a run on Apple hardware shows each works
