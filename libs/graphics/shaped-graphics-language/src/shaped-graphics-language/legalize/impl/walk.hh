@@ -8,18 +8,26 @@ namespace sgl::check::impl
 /// Beyond this nesting a tree is no program, and a walk stops descending so that a cyclic tree cannot exhaust the stack.
 ///
 /// The number is bounded by the smallest stack a walk may run on, rather than by what a program might legitimately nest.
-/// A `cc::async_thread_pool` worker gets the platform's default 512 KiB where the main thread gets 8 MiB, and an
-/// unoptimized sanitizer build spends ~8 KiB on one `interpret` level — so at 200 the stack died at about level 60 and
-/// this guard never fired, which is the crash it exists to prevent.
-/// Raise it only against that budget.
+/// An unoptimized sanitizer build spends ~8 KiB on one `interpret` level, and when a `cc::async_thread_pool` worker had
+/// the platform's default 512 KiB, a limit of 200 let the stack die at about level 60 before this guard fired, which is
+/// the crash it exists to prevent.
+/// Every worker but Emscripten's has had cc::native_thread's 8 MiB since 2026-10-21, as Linux's and macOS's main threads
+/// have.
+/// A level of the deepest walk, the check pass's `check_expr` through a call, takes ~6 KiB of stack in an optimized
+/// Windows build and ~14 KiB unoptimized under ASan, read off the frames: 132 levels fit 8 MiB in every build, and the
+/// 1 MiB of a Windows main thread or of Emscripten (tools/cmake/Emscripten.cmake) only in an optimized one.
+/// So a host compiling SGL on a thread of its own gives it 2 MiB, or 1 MiB where the build is optimized.
+/// Raise it only against that budget; the depth test compiles a tree at the limit on a cc::native_thread of 8 MiB.
 ///
-/// It is a language limit as well: a top-level `let x = a + b + …` of 40 terms is past it.
+/// It is a language limit as well: a top-level `let x = a + b + …` of 128 terms is past it.
 /// The check pass refuses such an entry point as `nesting-too-deep` (CHK-268), so no walk here ever meets the hole it
 /// would leave behind.
 /// The real fix is iterative walks over an explicit work stack for `interpret`'s `eval` and the legalizer's expression
 /// walks, with a cycle caught by an on-path bit rather than by depth; the limit could then be far higher.
-/// 44 is 40 levels of a program (CHK-268) and the 4 a guard adds, about 352 KiB of that worker's stack at 8 KiB a level.
-constexpr int k_max_depth = 44;
+/// 132 is 128 levels of a program (CHK-268) and the 4 a guard adds, about 1.8 MiB of an 8 MiB stack at the deepest walk's
+/// ~14 KiB a level.
+/// It was 44 until a port's path tracer, with every call inlined, nested 48 levels (D94 of Quest3D's SGL migration).
+constexpr int k_max_depth = 132;
 
 /// How many levels a guard of a robustness profile nests its operands deeper (LEGAL-65).
 constexpr int k_guard_depth_reserve = 4;

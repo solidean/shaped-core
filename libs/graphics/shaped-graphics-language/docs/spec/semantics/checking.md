@@ -1834,10 +1834,10 @@ hit_group textured for path_rays:
   So an instance checks only the branches its own arguments leave, as C++'s `if constexpr` discards the rest, and the open body still judges the names of every branch (CHK-338).
   A condition that reads the target, `has` or an option decides nothing here, so every branch it guards is checked for every compile.
   What follows a chain an instance decided is never `unreachable-code`, since it serves the instances that take another branch.
-* **CHK-268** A flat tree nests at most 40 levels, and an entry point whose tree nests deeper is `nesting-too-deep` and has no flat tree.
+* **CHK-268** A flat tree nests at most 128 levels, and an entry point whose tree nests deeper is `nesting-too-deep` and has no flat tree.
   A level is an operand, the body of a block expression, an expression a statement holds, and a statement list inside a statement; every call counts as inlined.
-  A top-level `let x = a + b + …` is one level for the `let` and one per term, so 40 terms is past the limit.
-  The later passes walk 44 levels, and the 4 past a program's are what a robustness profile's guard nests its operands deeper (LEGAL-65), so no site of a program is left unguarded.
+  A top-level `let x = a + b + …` is one level for the `let` and one per term, so 128 terms is past the limit.
+  The later passes walk 132 levels, and the 4 past a program's are what a robustness profile's guard nests its operands deeper (LEGAL-65), so no site of a program is left unguarded.
   This is an implementation limit rather than a rule of the language, and it is expected to rise.
 
 ## Control flow

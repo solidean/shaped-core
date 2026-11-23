@@ -269,18 +269,24 @@ private:
             return false;
         auto const& x = _p.instructions[index_of(a)];
         auto const& y = _p.instructions[index_of(b)];
-        if (x.code != y.code || x.type != y.type || x.count != y.count || x.sub != y.sub || !gives_only_a_value(x.code))
+        // as share_common_values: an operation's `aux` and its guarantee are part of what it computes
+        if (x.code != y.code || x.type != y.type || x.count != y.count || x.sub != y.sub || x.aux != y.aux
+            || x.guarantee != y.guarantee || !gives_only_a_value(x.code))
             return false;
         auto const xs = _p.operands_of(x);
         auto const ys = _p.operands_of(y);
         for (auto k = isize(0); k < xs.size(); ++k)
         {
-            auto const is_value = operand_role(x.code, k) == operand::value;
-            if (!is_value && xs[k] != ys[k])
-                return false;
+            // a literal operand is no value, so only a value is resolved
+            if (operand_role(x.code, k) != operand::value)
+            {
+                if (xs[k] != ys[k])
+                    return false;
+                continue;
+            }
             auto const p = resolved(value_ref(xs[k]));
             auto const q = resolved(value_ref(ys[k]));
-            if (is_value && p != q && !same_constant(p, q))
+            if (p != q && !same_constant(p, q))
                 return false;
         }
         return true;
