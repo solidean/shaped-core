@@ -11,19 +11,21 @@ namespace sgl::check::impl
 /// An unoptimized sanitizer build spends ~8 KiB on one `interpret` level, and when a `cc::async_thread_pool` worker had
 /// the platform's default 512 KiB, a limit of 200 let the stack die at about level 60 before this guard fired, which is
 /// the crash it exists to prevent.
-/// Every worker has had cc::native_thread's 8 MiB since 2026-10-21, as Linux's and macOS's main threads have.
+/// Every worker but Emscripten's has had cc::native_thread's 8 MiB since 2026-10-21, as Linux's and macOS's main threads
+/// have.
 /// A level of the deepest walk, the check pass's `check_expr` through a call, takes ~6 KiB of stack in an optimized
 /// Windows build and ~14 KiB unoptimized under ASan, read off the frames: 132 levels fit 8 MiB in every build, and the
 /// 1 MiB of a Windows main thread or of Emscripten (tools/cmake/Emscripten.cmake) only in an optimized one.
 /// So a host compiling SGL on a thread of its own gives it 2 MiB, or 1 MiB where the build is optimized.
-/// Raise it only against that budget; the depth test compiles a tree at the limit on a pool worker.
+/// Raise it only against that budget; the depth test compiles a tree at the limit on a cc::native_thread of 8 MiB.
 ///
 /// It is a language limit as well: a top-level `let x = a + b + …` of 128 terms is past it.
 /// The check pass refuses such an entry point as `nesting-too-deep` (CHK-268), so no walk here ever meets the hole it
 /// would leave behind.
 /// The real fix is iterative walks over an explicit work stack for `interpret`'s `eval` and the legalizer's expression
 /// walks, with a cycle caught by an on-path bit rather than by depth; the limit could then be far higher.
-/// 132 is 128 levels of a program (CHK-268) and the 4 a guard adds, about 1 MiB of an 8 MiB stack at 8 KiB a level.
+/// 132 is 128 levels of a program (CHK-268) and the 4 a guard adds, about 1.8 MiB of an 8 MiB stack at the deepest walk's
+/// ~14 KiB a level.
 /// It was 44 until a port's path tracer, with every call inlined, nested 48 levels (D94 of Quest3D's SGL migration).
 constexpr int k_max_depth = 132;
 

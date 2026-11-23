@@ -1,5 +1,7 @@
 #include "flat-test-support.hh"
 
+#include <clean-core/thread/native_thread.hh>
+#include <nexus/tests/thread_scope.hh>
 #include <shaped-graphics-language/check/dump.hh>
 #include <shaped-graphics-language/driver/compile_to_text.hh>
 
@@ -379,16 +381,26 @@ TEST("sgl guards - a site as deep as a program may nest is guarded, its guard pa
                           "    work.result[0] = {}\n",
                           sum);
     };
-    // the deepest sum the check pass takes, which the window must hold below its top so the check refused one
+    // the deepest sum the check pass takes, which the window must hold below its top so the check refused one; on a
+    // cc::native_thread of 8 MiB, since the test's thread may be a Windows main thread of 1 MiB (walk.hh)
     auto deepest = 0;
-    for (auto terms = 118; terms <= 133; ++terms)
-        if (reports_of(check_sources(read_prelude(), source_of(terms))) == "")
-            deepest = terms;
+    auto guarded = false;
+    auto dump = cc::string();
+    auto thread = cc::native_thread::start(nx::attributed_to_current_test(
+        [&]
+        {
+            for (auto terms = 118; terms <= 133; ++terms)
+                if (reports_of(check_sources(read_prelude(), source_of(terms))) == "")
+                    deepest = terms;
+            auto const r = legalize_one(source_of(deepest), undefined_guard::report);
+            guarded = !r.core.messages.empty();
+            dump = r.dump;
+        }));
+    thread.join();
     CHECK(deepest < 133);
     // past what a guard reached before its levels were kept free, 124 of the program's 128 (it was 36 of 40)
     CHECK(deepest >= 125);
-    auto const r = legalize_one(source_of(deepest), undefined_guard::report);
-    CHECK(!r.core.messages.empty()).dump("core", r.dump);
+    CHECK(guarded).dump("core", dump);
 }
 
 TEST("sgl guards - workgroup memory whose shadow would not fit is left unshadowed, and the compile warns of it "

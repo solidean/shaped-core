@@ -1,7 +1,9 @@
 #include "../emit/emit-test-support.hh"
 
 #include <clean-core/string/format.hh>
+#include <clean-core/thread/native_thread.hh>
 #include <nexus/source_root.hh>
+#include <nexus/tests/thread_scope.hh>
 #include <shaped-graphics-language/driver/compile_to_text.hh>
 #include <shaped-graphics-language/driver/prelude.hh>
 #include <shaped-graphics-language/source/format_diagnostic.hh>
@@ -271,21 +273,41 @@ TEST("sgl driver - what is judged of one entry point's inlined body is no error 
 }
 
 // This is the one test that deliberately builds a tree AT the limit, and the check pass recurses over the AST before
-// any flat-tree guard applies, so it holds `k_max_depth` to the stack of a pool worker, 8 MiB (walk.hh says why).
-// Not `main_thread`: a Windows main thread has 1 MiB, which 128 levels outgrow in an unoptimized ASan build.
+// any flat-tree guard applies, so it holds `k_max_depth` to a cc::native_thread's stack, 8 MiB (walk.hh says why).
+// Its compiles run on such a thread of their own: the test's may be the main thread, whose 1 MiB on Windows 128 levels
+// outgrow in an unoptimized ASan build.
 TEST("sgl driver - a tree past the depth limit is refused by name, never as a hole a later pass trips over")
 {
     // The `let` is a level of its own, so 127 terms reach exactly 128 levels and 128 terms reach 129.
     // Every target, since each legalizes and emits the tree the check pass handed over.
-    for (auto const t : sgl::emit::all_targets())
+    struct compiled
     {
-        auto const at_limit = sgl::compile_to_text({.source = sum_source(127), .entry_point = "main_ps", .target = t});
-        REQUIRE(at_limit.has_value()).context(at_limit.has_error() ? at_limit.error() : cc::string());
-
-        auto const past
-            = error_of({.source = sum_source(128), .source_name = "sum.sgl", .entry_point = "main_ps", .target = t});
-        CHECK(past.contains("error: nesting-too-deep: 'main_ps' nests deeper than 128 levels")).context(past);
-        CHECK(!past.contains("not-core")).context(past);
+        cc::string at_limit_error;
+        bool is_at_limit_written = false;
+        cc::string past;
+    };
+    auto results = cc::vector<compiled>();
+    auto thread = cc::native_thread::start(nx::attributed_to_current_test(
+        [&]
+        {
+            for (auto const t : sgl::emit::all_targets())
+            {
+                auto const at_limit
+                    = sgl::compile_to_text({.source = sum_source(127), .entry_point = "main_ps", .target = t});
+                auto const past = sgl::compile_to_text(
+                    {.source = sum_source(128), .source_name = "sum.sgl", .entry_point = "main_ps", .target = t});
+                results.push_back({.at_limit_error = at_limit.has_error() ? at_limit.error() : cc::string(),
+                                   .is_at_limit_written = at_limit.has_value(),
+                                   .past = past.has_error() ? past.error() : cc::string("(compiled)")});
+            }
+        }));
+    thread.join();
+    REQUIRE(results.size() == sgl::emit::all_targets().size());
+    for (auto const& r : results)
+    {
+        CHECK(r.is_at_limit_written).context(r.at_limit_error);
+        CHECK(r.past.contains("error: nesting-too-deep: 'main_ps' nests deeper than 128 levels")).context(r.past);
+        CHECK(!r.past.contains("not-core")).context(r.past);
     }
 }
 
