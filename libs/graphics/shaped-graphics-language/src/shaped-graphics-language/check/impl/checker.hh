@@ -107,6 +107,18 @@ enum class flow : u8
 };
 
 /// The ordered scope of one function body, and what its expressions are checked against.
+/// A `let` of a query in the body being checked, and its candidate loop (CHK-555, CHK-559).
+struct query_let
+{
+    ast::stmt_id let = ast::stmt_id::none;
+    /// The statements its `let` stands among, where its loop must stand too.
+    ast::range_of<ast::stmt_id> block;
+    /// Its candidate loop; none before one is met.
+    ast::stmt_id loop = ast::stmt_id::none;
+    /// The loop's body is being checked.
+    bool is_loop_open = false;
+};
+
 struct function_scope
 {
     symbol_id function = symbol_id::none;
@@ -126,6 +138,10 @@ struct function_scope
     symbol_id enclosing = symbol_id::none;
     /// The type of `self` in a method or a property, where `self` is a name (CHK-245).
     type_id receiver = type_id::none;
+    /// The statement lists being checked, innermost last (CHK-555).
+    cc::vector<ast::range_of<ast::stmt_id>> blocks;
+    /// Every `let` of a query the body has met so far (CHK-555, CHK-559).
+    cc::vector<query_let> query_lets;
 
     /// The newest visible local or parameter of that name, which hides every module-level symbol of it.
     /// In a test, a name of the function around it is found last, and is `is_captured`.
@@ -1038,6 +1054,18 @@ struct checker
     type_id check_pipeline_trace(function_scope& scope, ast::expr_id id, ast::call const& call, ray_trace ray);
     /// `h.invoke(mut p)` of a hit object a `trace_hit` let holds (CHK-434).
     type_id check_hit_invoke(function_scope& scope, ast::expr_id id, ast::call const& call);
+    /// CHK-557, CHK-559: `q.hit`, or a candidate's member read without a call.
+    type_id check_query_member(function_scope& scope, ast::expr_id id, ast::member const& member, type_id object);
+    /// CHK-557, CHK-558: `c.commit()`, `c.commit(t)`, `c.triangle()` or `c.box()`.
+    type_id check_query_call(function_scope& scope, ast::expr_id id, ast::call const& call, type_id receiver);
+    /// CHK-555: `for c in q.candidates:`, the candidate loop of the query `q`.
+    void check_candidate_loop(function_scope& scope, ast::stmt_id id, ast::for_stmt const& loop);
+    /// CHK-554: what a `let` of a query or a candidate may be; false where it reported.
+    bool judge_query_let(function_scope& scope, ast::stmt_id id, ast::let_stmt const& let, type_id type);
+    /// The result type of the prelude's internal function `name`, which a query's member is typed by (CHK-557).
+    [[nodiscard]] type_id query_helper_result(cc::string_view name, i32 file, source_span where);
+    /// Whether `iterable` is `q.candidates`.
+    [[nodiscard]] bool is_candidates(i32 file, ast::expr_id iterable) const;
     /// A hit object's let, and the ray type its trace traced.
     struct hit_let
     {
@@ -1159,6 +1187,8 @@ struct checker
     [[nodiscard]] type_id resource_type(type_info info);
     /// `acceleration_structure[.geometry]` (CHK-320).
     [[nodiscard]] type_id resolve_acceleration_structure(i32 file, ast::expr_id expr, ast::index const& node);
+    /// `trace_query[.geometry]` or `query_candidate[.geometry]` (CHK-553, CHK-555).
+    [[nodiscard]] type_id resolve_query_type(i32 file, ast::expr_id expr, ast::index const& node, bool is_query);
     /// `(parameters) -> result`, interned: two mentions of one signature share an id (CHK-317).
     [[nodiscard]] type_id function_type(cc::span<type_id const> parameters, type_id result);
     /// Of `candidates`, the function whose signature is exactly `type`'s; `none` where no single one is.

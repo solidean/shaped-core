@@ -84,6 +84,9 @@ auto sgl::check::impl::flattener::flatten_expr(ast::expr_id id) -> flat_expr_id
         // CHK-348: `m.name`, a module-level name of module `m`
         if (where.kind == target_kind::symbol)
             return module_level();
+        // CHK-557, CHK-559: a member of a candidate or a query
+        if (where.kind == target_kind::query_member)
+            return flatten_query_member(id, where);
         // `a.foo` that is no field is a call of `foo` with `a` (CHK-249)
         if (tables().call_at(id) >= 0)
             return flatten_bound_call(id, type, c.out.call_records[tables().call_at(id)]);
@@ -537,6 +540,9 @@ auto sgl::check::impl::flattener::flatten_call(ast::expr_id id, type_id type, ta
 {
     if (where.kind == target_kind::array_filled)
         return flatten_filled(id, type, call);
+    // CHK-558: a candidate's commit, `triangle()` or `box()`
+    if (where.kind == target_kind::query_member)
+        return flatten_query_member(id, where);
     // PROTOTYPE (autodiff): `tangent[T]()`, a zero in every leaf
     if (where.kind == target_kind::zero_value)
     {
@@ -1565,6 +1571,9 @@ auto sgl::check::impl::flattener::call_closure(ast::expr_id id,
 {
     // by value: flattening below may push closures, and the vector moves
     auto const f = closures[handed];
+    // EMIT-276, EMIT-277: a candidate loop's body, which the prelude's loop hands each candidate to
+    if (f.candidate_loop >= 0)
+        return call_candidate_body(id, f.candidate_loop, values);
     // CHK-404: a function handed a candidate or a box is a decision the traversal calls in its loop
     auto const outer_decision = inlined_decision;
     auto decision = outer_decision;

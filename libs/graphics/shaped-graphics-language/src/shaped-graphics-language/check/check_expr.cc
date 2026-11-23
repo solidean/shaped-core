@@ -1074,6 +1074,9 @@ type_id checker::check_member(function_scope& scope, ast::expr_id id, ast::membe
     subscripted = outer;
     if (object == error_type || member.name.empty())
         return error_type;
+    // CHK-557, CHK-559: a query's and a candidate's members are their own table's
+    if (is_query_kind(out.at(object).kind))
+        return check_query_member(scope, id, member, object);
 
     // CHK-288: an array's length is a constant of its type, and it has no other member
     if (out.at(object).kind == type_kind::array)

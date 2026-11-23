@@ -66,6 +66,10 @@ cc::string spelling_of(check::type_info const& t, checked_module const& m)
         return t.is_mut ? cc::string("mut bytes") : cc::string("bytes");
     case type_kind::acceleration_structure:
         return cc::format("acceleration_structure[.{}]", k_geometry_kinds[t.format]);
+    case type_kind::trace_query:
+        return cc::format("trace_query[.{}]", k_geometry_kinds[t.format]);
+    case type_kind::query_candidate:
+        return cc::format("query_candidate[.{}]", k_geometry_kinds[t.format]);
     case type_kind::atomic:
         return cc::format("{}atomic[{}]", access_prefix(t.access), m.name_of(t.element));
     case type_kind::stream:
@@ -159,6 +163,13 @@ type_id checker::resolve_resource_name(i32 file, ast::expr_id expr, cc::string_v
                "`[.procedural]` or `[.mixed]`");
         return checked_module::error_type;
     }
+    if (text == "trace_query" || text == "query_candidate")
+    {
+        report(diagnostic_kind::wrong_kind_of_name, file, span_of(file, expr),
+               cc::format("a {0} says the geometry of its structure: `{0}[.triangles]`, `[.procedural]` or `[.mixed]`",
+                          text));
+        return checked_module::error_type;
+    }
 
     for (auto const& shape : k_shapes)
     {
@@ -189,6 +200,8 @@ type_id checker::resolve_resource_applied(i32 file, ast::expr_id expr, ast::inde
     auto const text = text_of(file, n->where);
     if (text == "acceleration_structure")
         return resolve_acceleration_structure(file, expr, node);
+    if (text == "trace_query" || text == "query_candidate")
+        return resolve_query_type(file, expr, node, text == "trace_query");
     if (text == "texel")
         return resolve_texel(file, expr, node);
 
@@ -341,6 +354,27 @@ type_id checker::resolve_acceleration_structure(i32 file, ast::expr_id expr, ast
                       is_pipeline ? feature::raytracing_pipeline : feature::ray_query);
     }
     return resource_type({.kind = type_kind::acceleration_structure, .format = geometry});
+}
+
+type_id checker::resolve_query_type(i32 file, ast::expr_id expr, ast::index const& node, bool is_query)
+{
+    auto const arguments = ast_of(file).at(node.arguments);
+    // CHK-553: a query and its candidates are of their structure's geometry, which picks their members
+    auto const* const dot = arguments.size() == 1 && arguments[0].name.empty() && !arguments[0].is_splat
+                              ? ast_of(file).at(arguments[0].value).node.try_as<ast::leading_dot>()
+                              : nullptr;
+    auto geometry = -1;
+    for (auto i = isize(0); dot != nullptr && i < isize(sizeof(k_geometry_kinds) / sizeof(k_geometry_kinds[0])); ++i)
+        if (k_geometry_kinds[i] == text_of(file, dot->name))
+            geometry = i32(i);
+    if (geometry < 0)
+    {
+        report(diagnostic_kind::wrong_kind_of_name, file, span_of(file, expr),
+               cc::format("a {} takes the geometry of its structure: `.triangles`, `.procedural` or `.mixed`",
+                          is_query ? "trace_query" : "query_candidate"));
+        return checked_module::error_type;
+    }
+    return resource_type({.kind = is_query ? type_kind::trace_query : type_kind::query_candidate, .format = geometry});
 }
 
 type_id checker::qualify_resource(i32 file, ast::expr_id expr, type_id inner, ast::type_access access)

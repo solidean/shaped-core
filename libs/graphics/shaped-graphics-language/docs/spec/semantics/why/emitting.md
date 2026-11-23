@@ -450,3 +450,9 @@ The choice is by API rather than by route, since that is where the instructions 
 `target_api` already tells the two apart, and both vulkan routes end as SPIR-V, so writing the same instructions from each keeps them computing alike.
 DXC hands a double to its own `floor` or `sqrt` as a float even for SPIR-V, an `OpFConvert` on either side of the float instruction.
 Its inline SPIR-V, `[[vk::ext_instruction(8, "GLSL.std.450")]]`, takes the double as it is, which is the device of EMIT-225.
+
+## EMIT-278
+
+Nothing reads a query after its loop but its committed hit, which an abort keeps, so the abort changes no answer.
+It does tell the driver the traversal is over, and it keeps one rule for every early exit instead of a judgement of which exits a target needs it for.
+A commit that ends the search marks the search ended rather than aborting at once, since the body may still read its candidate, and a candidate read after an abort is one no target defines.

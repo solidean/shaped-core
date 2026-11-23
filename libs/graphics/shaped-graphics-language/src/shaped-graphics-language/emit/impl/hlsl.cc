@@ -725,7 +725,7 @@ public:
         // EMIT-184: DXC lowers a query's micromap flags to SPIR-V without declaring the capability they need
         if (_is_vulkan && p.e.features.has(check::feature::opacity_micromap) && flags_some_query_for_micromaps(p))
             out += "[[vk::ext_extension(\"SPV_EXT_opacity_micromap\")]]\n[[vk::ext_capability(5381)]]\n";
-        // CHK-553: DXC writes `MaximallyReconvergesKHR` for the statement that opens the body, and this its extension
+        // CHK-561: DXC writes `MaximallyReconvergesKHR` for the statement that opens the body, and this its extension
         if (_is_vulkan && p.e.maximally_reconverges)
             out += "[[vk::ext_extension(\"SPV_KHR_maximal_reconvergence\")]]\n";
         if (p.e.entry_stage == stage::geometry || p.e.entry_stage == stage::tessellation_control

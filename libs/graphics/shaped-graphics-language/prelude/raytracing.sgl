@@ -451,6 +451,29 @@ fun is_occluded(world: acceleration_structure[.triangles], r: ray, .mask: int = 
     let h = trace(world, r, flags = ray_flags.accept_first_hit_and_end_search, mask = mask)
     return h.is_hit
 
+// ---- queries --------------------------------------------------------------------------------------------------------
+//
+// `let q = world.query(r)` starts a trace the program steps through itself, `for c in q.candidates:`, and `q.hit` is
+// what it committed (CHK-553 to CHK-559).
+// The checker types the query, its candidates and their members, and the flattener writes the loop from the internal
+// functions at the end of this file, in a trace's two forms (EMIT-276, EMIT-277); a query's call is never inlined.
+
+/// Starts a trace of `r` against `world`, which the program steps through with `for c in q.candidates:` (CHK-553).
+/// `flags` is a constant, and `mask` is ANDed with each instance's 8-bit mask.
+fun query(world: acceleration_structure[.triangles], r: ray, .flags: ray_flags = ray_flags.none, .mask: int = 255) -> trace_query[.triangles]:
+    let mut q: trace_query[.triangles] = undefined()
+    return q
+
+/// Starts a trace of `r` against boxes of procedural geometry, which the program steps through (CHK-553).
+fun query(world: acceleration_structure[.procedural], r: ray, .flags: ray_flags = ray_flags.none, .mask: int = 255) -> trace_query[.procedural]:
+    let mut q: trace_query[.procedural] = undefined()
+    return q
+
+/// Starts a trace of `r` against triangles and boxes both, which the program steps through (CHK-553).
+fun query(world: acceleration_structure[.mixed], r: ray, .flags: ray_flags = ray_flags.none, .mask: int = 255) -> trace_query[.mixed]:
+    let mut q: trace_query[.mixed] = undefined()
+    return q
+
 @internal fun accept_every_triangle(c: triangle_candidate) -> hit_decision => hit_decision.accept
 
 /// Which form of a trace a target writes: the native one, or the emulated one where the device has no query.
@@ -1363,3 +1386,324 @@ fun hit_object.reorder(self, hint: uint, bits: int) => hit_object_reorder_by_hin
         hit.object_to_world
         hit.world_to_object
     )
+
+// ---- the candidate loop ---------------------------------------------------------------------------------------------
+//
+// What the flattener writes a query's loop from (EMIT-276, EMIT-277), which no program calls.
+// The native form starts the target's query, steps it, and hands each step to the loop's body, `body(q)`.
+// The emulated form walks the pool, commits what the target would commit without asking, and hands every other
+// candidate to the body as a `walk_candidate`; what is committed is a `query_walk`.
+// A candidate's member `m` is `query_native_m(q, r)` in the one form and `query_emulated_m(w, s, r)` in the other.
+
+/// Starts the native trace of a query; one that skips every kind its structure holds meets nothing, by a mask of 0,
+/// since the target forbids the skip flags together and a query not started has nothing to step.
+@internal fun query_native_start_triangles(q: ray_query, world: acceleration_structure[.triangles], r: ray, flags: ray_flags, mask: int):
+    if flags.has(ray_flags.skip_triangles):
+        ray_query_trace(q, world, r.origin, r.direction, r.t_min, r.t_max, ray_flags.skip_procedural, 0, r.time)
+    else:
+        ray_query_trace(q, world, r.origin, r.direction, r.t_min, r.t_max, flags | ray_flags.skip_procedural, mask, r.time)
+
+@internal fun query_native_start_procedural(q: ray_query, world: acceleration_structure[.procedural], r: ray, flags: ray_flags, mask: int):
+    if flags.has(ray_flags.skip_procedural):
+        ray_query_trace(q, world, r.origin, r.direction, r.t_min, r.t_max, ray_flags.skip_triangles, 0, r.time)
+    else:
+        ray_query_trace(q, world, r.origin, r.direction, r.t_min, r.t_max, without_facing(flags) | ray_flags.skip_triangles, mask, r.time)
+
+@internal fun query_native_start_mixed(q: ray_query, world: acceleration_structure[.mixed], r: ray, flags: ray_flags, mask: int):
+    if flags.has(ray_flags.skip_triangles | ray_flags.skip_procedural):
+        ray_query_trace(q, world, r.origin, r.direction, r.t_min, r.t_max, ray_flags.none, 0, r.time)
+    else if flags.has(ray_flags.skip_triangles):
+        ray_query_trace(q, world, r.origin, r.direction, r.t_min, r.t_max, without_facing(flags), mask, r.time)
+    else:
+        ray_query_trace(q, world, r.origin, r.direction, r.t_min, r.t_max, flags, mask, r.time)
+
+/// Steps the native query to its end, handing the body every candidate the target cannot decide alone.
+@internal fun query_native_step(q: ray_query, body: (ray_query) -> void):
+    while ray_query_step(q) => body(q)
+
+@internal fun query_native_is_triangle(q: ray_query, r: ray) -> bool => ray_query_candidate_is_triangle(q)
+@internal fun query_native_is_procedural(q: ray_query, r: ray) -> bool => not ray_query_candidate_is_triangle(q)
+@internal fun query_native_instance_id(q: ray_query, r: ray) -> int => ray_query_candidate_instance_id(q)
+@internal fun query_native_instance_index(q: ray_query, r: ray) -> int => ray_query_candidate_instance_index(q)
+@internal fun query_native_geometry_index(q: ray_query, r: ray) -> int => ray_query_candidate_geometry_index(q)
+@internal fun query_native_primitive_index(q: ray_query, r: ray) -> int => ray_query_candidate_primitive_index(q)
+@internal fun query_native_ray(q: ray_query, r: ray) -> ray => r
+@internal fun query_native_t_min(q: ray_query, r: ray) -> float => r.t_min
+
+/// The `t` committed so far, or the ray's `t_max` where nothing is.
+@internal fun query_native_t_current(q: ray_query, r: ray) -> float:
+    if ray_query_committed_kind(q) != 0 => return ray_query_committed_t(q)
+    return r.t_max
+
+@internal fun query_native_object_ray(q: ray_query, r: ray) -> ray:
+    let o = ray_query_candidate_object_ray_origin(q)
+    let d = ray_query_candidate_object_ray_direction(q)
+    return ray(origin = pos3(o.x, o.y, o.z), direction = vec3(d.x, d.y, d.z), t_min = r.t_min, t_max = query_native_t_current(q, r))
+
+@internal fun query_native_object_to_world(q: ray_query, r: ray) -> affine3:
+    return affine3.from_rows(ray_query_candidate_object_to_world_row(q, 0), ray_query_candidate_object_to_world_row(q, 1), ray_query_candidate_object_to_world_row(q, 2))
+
+@internal fun query_native_world_to_object(q: ray_query, r: ray) -> affine3:
+    return affine3.from_rows(ray_query_candidate_world_to_object_row(q, 0), ray_query_candidate_world_to_object_row(q, 1), ray_query_candidate_world_to_object_row(q, 2))
+
+@internal fun query_native_t(q: ray_query, r: ray) -> float => ray_query_candidate_t(q)
+
+@internal fun query_native_barycentrics(q: ray_query, r: ray) -> float3:
+    let b = ray_query_candidate_barycentrics(q)
+    return float3(1.0 - b.x - b.y, b.x, b.y)
+
+@internal fun query_native_is_front_face(q: ray_query, r: ray) -> bool => ray_query_candidate_is_front_face(q)
+@internal fun query_native_cluster_id(q: ray_query, r: ray) -> int => candidate_cluster_id(q)
+@internal fun query_native_is_opaque(q: ray_query, r: ray) -> bool => ray_query_candidate_is_opaque_box(q)
+@internal fun query_native_triangle(q: ray_query, r: ray) -> triangle_candidate => candidate_of(q, r)
+@internal fun query_native_box(q: ray_query, r: ray) -> procedural_box => box_of(q, r, query_native_t_current(q, r))
+
+/// Accepts a triangle candidate; on a mixed query, a box is left as it is (CHK-558).
+@internal fun query_native_commit(q: ray_query, r: ray, is_mixed: bool) -> bool:
+    if is_mixed:
+        if not ray_query_candidate_is_triangle(q) => return false
+    ray_query_commit_triangle(q)
+    return true
+
+/// Reports a box's primitive hit at `t`, which commits only within the ray's range: `t_min` to `t_current` (CHK-558).
+@internal fun query_native_commit_at(q: ray_query, r: ray, t: float, is_mixed: bool) -> bool:
+    if is_mixed:
+        if ray_query_candidate_is_triangle(q) => return false
+    if not (t >= r.t_min and t <= query_native_t_current(q, r)) => return false
+    ray_query_commit_procedural(q, t)
+    return true
+
+@internal fun query_native_hit_triangles(q: ray_query, r: ray) -> triangle_hit => committed_of(q, r)
+
+@internal fun query_native_hit_procedural(q: ray_query, r: ray) -> procedural_hit[void]:
+    if ray_query_committed_kind(q) == 0 => return procedural_hit.none(r)
+    return procedural_hit(
+        true
+        ray_query_committed_t(q)
+        r
+        ray_query_committed_instance_id(q)
+        ray_query_committed_instance_index(q)
+        ray_query_committed_geometry_index(q)
+        ray_query_committed_primitive_index(q)
+        void
+        affine3.from_rows(ray_query_committed_object_to_world_row(q, 0), ray_query_committed_object_to_world_row(q, 1), ray_query_committed_object_to_world_row(q, 2))
+        affine3.from_rows(ray_query_committed_world_to_object_row(q, 0), ray_query_committed_world_to_object_row(q, 1), ray_query_committed_world_to_object_row(q, 2))
+    )
+
+@internal fun query_native_hit_mixed(q: ray_query, r: ray) -> mixed_hit[void]:
+    let kind = ray_query_committed_kind(q)
+    if kind == 1 => return mixed_of_triangle(committed_of(q, r), void)
+    if kind == 2 => return mixed_of_procedural(query_native_hit_procedural(q, r))
+    return mixed_hit.none(r)
+
+/// What the emulated walk of a query committed so far: `kind` 0 nothing, 1 a triangle, 2 a box.
+@internal struct query_walk:
+    kind: int
+    t: float
+    instance_id: int
+    instance_index: int
+    geometry_index: int
+    primitive_index: int
+    barycentrics: float3
+    is_front_face: bool
+    object_to_world: affine3
+    world_to_object: affine3
+    /// A commit under `accept_first_hit_and_end_search` was made, after which the walk meets no candidate.
+    is_ended: bool
+
+@internal fun query_walk_start(r: ray) -> query_walk:
+    let zero = float4(0.0, 0.0, 0.0, 0.0)
+    return query_walk(0, r.t_max, 0, 0, 0, 0, float3(0.0, 0.0, 0.0), false, affine3.from_rows(zero, zero, zero), affine3.from_rows(zero, zero, zero), false)
+
+/// A candidate the emulated walk met: a non-opaque triangle, or a box the ray enters.
+/// `origin` and `direction` are the ray in the instance's object space.
+@internal struct walk_candidate:
+    is_triangle: bool
+    t: float
+    instance_id: int
+    instance_index: int
+    geometry_index: int
+    primitive_index: int
+    barycentrics: float3
+    is_front_face: bool
+    is_opaque: bool
+    origin: float3
+    direction: float3
+    object_to_world: affine3
+    world_to_object: affine3
+
+/// Walks the pool from `root` for a query of the kinds `kinds` holds, 1 triangles and 2 boxes.
+@internal fun query_emulated_step(
+    root: uint
+    r: ray
+    flags: ray_flags
+    mask: int
+    kinds: int
+    state: mut query_walk
+    body: (walk_candidate) -> void
+):
+    walk_pool(
+        root
+        r
+        mask
+        r.t_max
+        (space, region_header, primitive, t_far) => query_leaf(mut state, space, region_header, primitive, t_far, r, flags, kinds, body)
+    )
+
+@internal fun query_emulated_triangles(world: acceleration_structure[.triangles], r: ray, flags: ray_flags, mask: int, state: mut query_walk, body: (walk_candidate) -> void):
+    query_emulated_step(acceleration_root(world), r, flags, mask, 1, mut state, body)
+
+@internal fun query_emulated_procedural(world: acceleration_structure[.procedural], r: ray, flags: ray_flags, mask: int, state: mut query_walk, body: (walk_candidate) -> void):
+    query_emulated_step(acceleration_root(world), r, flags, mask, 2, mut state, body)
+
+@internal fun query_emulated_mixed(world: acceleration_structure[.mixed], r: ray, flags: ray_flags, mask: int, state: mut query_walk, body: (walk_candidate) -> void):
+    query_emulated_step(acceleration_root(world), r, flags, mask, 3, mut state, body)
+
+/// A leaf of a query's walk; the BLAS header's w says what its leaves hold: 0 triangles, 1 boxes.
+@internal fun query_leaf(
+    state: mut query_walk
+    space: walk_space
+    region_header: uint4
+    primitive: uint
+    t_far: float
+    r: ray
+    flags: ray_flags
+    kinds: int
+    body: (walk_candidate) -> void
+) -> walk_step:
+    if region_header.w == 1:
+        if (kinds & 2) == 0 or flags.has(ray_flags.skip_procedural) => return walk_step(t_far, false)
+        return query_box(mut state, space, region_header, primitive, t_far, r, flags, body)
+    if (kinds & 1) == 0 or flags.has(ray_flags.skip_triangles) => return walk_step(t_far, false)
+    return with_triangle(
+        space
+        region_header
+        primitive
+        t_far
+        r
+        flags
+        (hit, is_opaque) => query_triangle(mut state, space, hit, is_opaque, flags, body)
+    )
+
+/// An opaque triangle is committed by the walk, as the target's traversal commits it, and the body sees the rest.
+@internal fun query_triangle(
+    state: mut query_walk
+    space: walk_space
+    hit: triangle_hit
+    is_opaque: bool
+    flags: ray_flags
+    body: (walk_candidate) -> void
+) -> walk_step:
+    if is_opaque:
+        let ends = state.is_ended or flags.has(ray_flags.accept_first_hit_and_end_search)
+        state = query_walk(1, hit.t, hit.instance_id, hit.instance_index, hit.geometry_index, hit.primitive_index, hit.barycentrics, hit.is_front_face, hit.object_to_world, hit.world_to_object, ends)
+    else:
+        let c = walk_candidate(
+            true
+            hit.t
+            hit.instance_id
+            hit.instance_index
+            hit.geometry_index
+            hit.primitive_index
+            hit.barycentrics
+            hit.is_front_face
+            false
+            space.origin
+            space.direction
+            hit.object_to_world
+            hit.world_to_object
+        )
+        body(c)
+    return walk_step(state.t, state.is_ended)
+
+/// A box the ray enters is the body's, opaque or not: only a commit makes it a hit.
+@internal fun query_box(
+    state: mut query_walk
+    space: walk_space
+    region_header: uint4
+    primitive: uint
+    t_far: float
+    r: ray
+    flags: ray_flags
+    body: (walk_candidate) -> void
+) -> walk_step:
+    let at = region_header.y + 2 * primitive
+    let box_lo = acceleration_pool_load(at)
+    let box_hi = acceleration_pool_load(at + 1)
+    if not is_box_entered(pool_float3(box_lo), pool_float3(box_hi), space.origin, space.inverse, r.t_min, t_far):
+        return walk_step(t_far, false)
+    let is_opaque = is_opaque_candidate((box_hi.w & 2147483648) != 0, space.instance.z >> 24, flags)
+    if flags.has(ray_flags.cull_opaque) and is_opaque => return walk_step(t_far, false)
+    if flags.has(ray_flags.cull_non_opaque) and not is_opaque => return walk_step(t_far, false)
+    let c = walk_candidate(
+        false
+        0.0
+        (space.instance.y & 16777215) as int
+        space.instance.w as int
+        (box_hi.w & 2147483647) as int
+        box_lo.w as int
+        float3(0.0, 0.0, 0.0)
+        false
+        is_opaque
+        space.origin
+        space.direction
+        space.to_world
+        space.to_object
+    )
+    body(c)
+    return walk_step(state.t, state.is_ended)
+
+@internal fun query_emulated_is_triangle(w: walk_candidate, s: query_walk, r: ray) -> bool => w.is_triangle
+@internal fun query_emulated_is_procedural(w: walk_candidate, s: query_walk, r: ray) -> bool => not w.is_triangle
+@internal fun query_emulated_instance_id(w: walk_candidate, s: query_walk, r: ray) -> int => w.instance_id
+@internal fun query_emulated_instance_index(w: walk_candidate, s: query_walk, r: ray) -> int => w.instance_index
+@internal fun query_emulated_geometry_index(w: walk_candidate, s: query_walk, r: ray) -> int => w.geometry_index
+@internal fun query_emulated_primitive_index(w: walk_candidate, s: query_walk, r: ray) -> int => w.primitive_index
+@internal fun query_emulated_ray(w: walk_candidate, s: query_walk, r: ray) -> ray => r
+@internal fun query_emulated_t_min(w: walk_candidate, s: query_walk, r: ray) -> float => r.t_min
+@internal fun query_emulated_t_current(w: walk_candidate, s: query_walk, r: ray) -> float => s.t
+
+@internal fun query_emulated_object_ray(w: walk_candidate, s: query_walk, r: ray) -> ray:
+    return ray(origin = pos3(w.origin.x, w.origin.y, w.origin.z), direction = vec3(w.direction.x, w.direction.y, w.direction.z), t_min = r.t_min, t_max = s.t)
+
+@internal fun query_emulated_object_to_world(w: walk_candidate, s: query_walk, r: ray) -> affine3 => w.object_to_world
+@internal fun query_emulated_world_to_object(w: walk_candidate, s: query_walk, r: ray) -> affine3 => w.world_to_object
+@internal fun query_emulated_t(w: walk_candidate, s: query_walk, r: ray) -> float => w.t
+@internal fun query_emulated_barycentrics(w: walk_candidate, s: query_walk, r: ray) -> float3 => w.barycentrics
+@internal fun query_emulated_is_front_face(w: walk_candidate, s: query_walk, r: ray) -> bool => w.is_front_face
+@internal fun query_emulated_cluster_id(w: walk_candidate, s: query_walk, r: ray) -> int => -1
+@internal fun query_emulated_is_opaque(w: walk_candidate, s: query_walk, r: ray) -> bool => w.is_opaque
+
+@internal fun query_emulated_triangle(w: walk_candidate, s: query_walk, r: ray) -> triangle_candidate:
+    return triangle_candidate(w.t, r, w.instance_id, w.instance_index, w.geometry_index, w.primitive_index, w.barycentrics, w.is_front_face, w.object_to_world, w.world_to_object)
+
+@internal fun query_emulated_box(w: walk_candidate, s: query_walk, r: ray) -> procedural_box:
+    return procedural_box(s.t, r, query_emulated_object_ray(w, s, r), w.instance_id, w.instance_index, w.geometry_index, w.primitive_index, w.object_to_world, w.world_to_object)
+
+/// Accepts a triangle candidate; `ends` where the flags end the search at the first commit (CHK-558).
+@internal fun query_emulated_commit(s: mut query_walk, w: walk_candidate, r: ray, is_mixed: bool, ends: bool) -> bool:
+    if is_mixed:
+        if not w.is_triangle => return false
+    s = query_walk(1, w.t, w.instance_id, w.instance_index, w.geometry_index, w.primitive_index, w.barycentrics, w.is_front_face, w.object_to_world, w.world_to_object, s.is_ended or ends)
+    return true
+
+/// Reports a box's primitive hit at `t`, within the ray's range alone (CHK-558).
+@internal fun query_emulated_commit_at(s: mut query_walk, w: walk_candidate, r: ray, t: float, is_mixed: bool, ends: bool) -> bool:
+    if is_mixed:
+        if w.is_triangle => return false
+    if not (t >= r.t_min and t <= s.t) => return false
+    s = query_walk(2, t, w.instance_id, w.instance_index, w.geometry_index, w.primitive_index, float3(0.0, 0.0, 0.0), false, w.object_to_world, w.world_to_object, s.is_ended or ends)
+    return true
+
+@internal fun query_emulated_hit_triangles(s: query_walk, r: ray) -> triangle_hit:
+    if s.kind == 0 => return no_triangle_hit(r)
+    return triangle_hit(true, s.t, r, s.instance_id, s.instance_index, s.geometry_index, s.primitive_index, s.barycentrics, s.is_front_face, s.object_to_world, s.world_to_object)
+
+@internal fun query_emulated_hit_procedural(s: query_walk, r: ray) -> procedural_hit[void]:
+    if s.kind == 0 => return procedural_hit.none(r)
+    return procedural_hit(true, s.t, r, s.instance_id, s.instance_index, s.geometry_index, s.primitive_index, void, s.object_to_world, s.world_to_object)
+
+@internal fun query_emulated_hit_mixed(s: query_walk, r: ray) -> mixed_hit[void]:
+    if s.kind == 1 => return mixed_of_triangle(query_emulated_hit_triangles(s, r), void)
+    if s.kind == 2 => return mixed_of_procedural(query_emulated_hit_procedural(s, r))
+    return mixed_hit.none(r)

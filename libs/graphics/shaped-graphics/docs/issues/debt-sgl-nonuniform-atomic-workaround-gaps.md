@@ -5,9 +5,9 @@ refs:
   - file: docs/bugs-external/nonuniform-indexed-atomics-count-other-lanes/readme.md
 ---
 
-# CHK-553's per-lane form is still wrong now and then on Intel, and a pixel stage keeps its native atomic
+# CHK-561's per-lane form is still wrong now and then on Intel, and a pixel stage keeps its native atomic
 
-CHK-553 writes an atomic at a `nonuniform` binding-array index around Intel's and AMD's drivers, but only its leader form is right on both.
+CHK-561 writes an atomic at a `nonuniform` binding-array index around Intel's and AMD's drivers, but only its leader form is right on both.
 The leader form needs a compute stage with subgroups, a 32-bit integer, and on vulkan `quad_control`; for `min`, `max` and the bit operations, also a value before that nothing reads.
 
 - **Everything else takes a compare-exchange per lane**, which is right on AMD and wrong on Intel in about 1 run of 20 (measured: 9 of 200 in the reproduction).
@@ -21,7 +21,7 @@ What would close most of it:
 - **64-bit subgroup reductions** in SGL would let 64-bit atomics take the leader form.
 - **An exclusive scan of `min`, `max` and the bit operations** would give each lane of a round its own value before, so those take the leader form too.
 
-`sg - an atomic at a nonuniform index into an SGL binding array is right in each form CHK-553 writes` skips the per-lane form on Intel for this reason.
+`sg - an atomic at a nonuniform index into an SGL binding array is right in each form CHK-561 writes` skips the per-lane form on Intel for this reason.
 
 Once, in 70 runs of the binding-array tests on the AMD iGPU, dx12 hung the device (`DXGI_ERROR_DEVICE_HUNG`).
 It was not seen again in 80 more runs, and which shader hung is unknown; a loop of the workaround that a lane never leaves would look like this.

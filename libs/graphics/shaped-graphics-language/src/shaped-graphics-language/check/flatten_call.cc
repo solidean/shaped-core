@@ -667,8 +667,13 @@ auto sgl::check::impl::flattener::inline_bound(ast::expr_id call,
     c.note_body_read(callee);
     auto const& s = c.out.at(callee);
     auto is_open = s.info < 0 || frames.size() > k_max_inline_depth;
-    for (auto const& f : frames)
-        is_open = is_open || f.function == callee;
+    // a candidate loop's body calls nothing below it: what stands there is the loop it is written in (EMIT-276)
+    for (auto i = frames.size() - 1; i >= 0; --i)
+    {
+        is_open = is_open || frames[i].function == callee;
+        if (frames[i].is_candidate_body)
+            break;
+    }
     auto const* const node = is_open ? nullptr : &c.ast_of(s.file).at(s.declaration).node;
     auto const* const function = node != nullptr ? node->try_as<ast::fun_decl>() : nullptr;
     auto const* const property = node != nullptr ? node->try_as<ast::property_decl>() : nullptr;

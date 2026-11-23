@@ -220,10 +220,10 @@ ASYNC_INVOCABLE_TEST("sg - an atomic update reaches the element of an SGL bindin
     CHECK(got_odd[1] == 1u);
 }
 
-// CHK-553: Intel's and AMD's drivers combine such an atomic across the elements its lanes picked, so there SGL writes it
+// CHK-561: Intel's and AMD's drivers combine such an atomic across the elements its lanes picked, so there SGL writes it
 // around them: by one lane a round where the stage has subgroups, and as a compare-exchange by each lane otherwise.
 // Asking for the workaround runs both forms on every device, WARP included, rather than on those two vendors alone.
-ASYNC_INVOCABLE_TEST("sg - an atomic at a nonuniform index into an SGL binding array is right in each form CHK-553 "
+ASYNC_INVOCABLE_TEST("sg - an atomic at a nonuniform index into an SGL binding array is right in each form CHK-561 "
                      "writes",
                      (sg::context_handle const& ctx))
 {

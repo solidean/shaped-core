@@ -48,6 +48,12 @@ enum class sgl::check::type_kind : sgl::u8
     /// `acceleration_structure[.triangles]`: what a trace runs against, a TLAS the host binds (CHK-320).
     /// `format` is its geometry, a position in `k_geometry_kinds`; a resource, never a value.
     acceleration_structure,
+    /// `trace_query[.triangles]`: a trace the program steps through, the `let` of a `world.query` (CHK-553).
+    /// `format` is its geometry, as an acceleration structure's; never a value, it stays where its `let` put it (CHK-554).
+    trace_query,
+    /// `query_candidate[.triangles]`: what a query's traversal stopped at, the variable of a candidate loop (CHK-555).
+    /// `format` is its geometry; never a value either.
+    query_candidate,
     /// `(A, B) -> R`: a function a parameter takes, whose `members` are the parameter types and `element` the result.
     /// Only a parameter holds one, and a call through it is inlined where the function was handed over (CHK-317).
     function,
@@ -73,6 +79,13 @@ namespace sgl::check
     return k == type_kind::buffer || k == type_kind::bytes || k == type_kind::texture || k == type_kind::image
         || k == type_kind::sampler || k == type_kind::acceleration_structure;
 }
+
+/// True for a query or a candidate, which stay where they were made and are never a value (CHK-554).
+[[nodiscard]] constexpr bool is_query_kind(type_kind k)
+{
+    return k == type_kind::trace_query || k == type_kind::query_candidate;
+}
+
 } // namespace sgl::check
 
 namespace sgl::check
@@ -943,6 +956,8 @@ enum class sgl::check::target_kind : sgl::u8
     /// On a `case_test`, on a `case` pattern over a struct with cases, and on a cast to one of its cases: the leaf
     /// cases of the struct `symbol` it names, the mask's bits as `index` holds them (CHK-541).
     struct_cases,
+    /// On a `member` or a call: member `index` of a query or a candidate, a `query_member` (CHK-557 to CHK-559).
+    query_member,
 };
 
 /// What an expression refers to, for an editor: go to definition, hover, rename.

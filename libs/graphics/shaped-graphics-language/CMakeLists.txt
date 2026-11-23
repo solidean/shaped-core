@@ -120,6 +120,7 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/check/check_resources.cc
     src/shaped-graphics-language/check/check_stages.cc
     src/shaped-graphics-language/check/check_raytracing.cc
+    src/shaped-graphics-language/check/check_query.cc
     src/shaped-graphics-language/check/check_generics.cc
     src/shaped-graphics-language/check/check_modules.cc
     src/shaped-graphics-language/check/check_stmt.cc
@@ -134,6 +135,7 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/check/flatten_call.cc
     src/shaped-graphics-language/check/flatten_struct_cases.cc
     src/shaped-graphics-language/check/flatten_stmt.cc
+    src/shaped-graphics-language/check/flatten_query.cc
     src/shaped-graphics-language/check/flatten_diff.cc
     src/shaped-graphics-language/check/flatten_diff_lower.cc
     src/shaped-graphics-language/check/flatten_diff_forward.cc
@@ -504,6 +506,7 @@ if(SC_BUILD_TESTS)
         tests/check/pipeline-check-test.cc
         tests/check/mesh-stage-check-test.cc
         tests/check/raytracing-pipeline-check-test.cc
+        tests/check/query-check-test.cc
         tests/check/enum-check-test.cc
         tests/check/struct-case-check-test.cc
         tests/check/expression-check-test.cc
@@ -515,7 +518,9 @@ if(SC_BUILD_TESTS)
         tests/interpret/check-run-test.cc
         tests/interpret/driver-bindings-test.cc
         tests/interpret/driver-test-support.hh
+        tests/interpret/emulated-scenes.hh
         tests/interpret/emulated-trace-test.cc
+        tests/interpret/query-test.cc
         tests/interpret/tessellation-test.cc
         tests/interpret/expect-test.cc
         tests/interpret/interpret-test.cc

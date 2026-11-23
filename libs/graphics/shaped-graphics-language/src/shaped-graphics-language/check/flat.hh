@@ -909,7 +909,7 @@ struct sgl::check::flat_entry_point
     i32 written_words = 0;
     /// LEGAL-69 under `define`: LEGAL-71 zeroes workgroup memory before the body, as WGSL's starts.
     bool zeroes_workgroup = false;
-    /// CHK-553: a vulkan text states `MaximallyReconvergesKHR`, since a subgroup operation of the body sees the
+    /// CHK-561: a vulkan text states `MaximallyReconvergesKHR`, since a subgroup operation of the body sees the
     /// invocations that reach it; the flattener sets it only where the device has `quad_control`, whose extensions grant it.
     bool maximally_reconverges = false;
     /// LEGAL-69: the bytes of workgroup memory a profile left unshadowed, since its shadow would not fit beside them in

@@ -193,6 +193,12 @@ enum class sgl::diagnostic_kind : sgl::u8
     invalid_pipeline,
     /// A ray type whose trace reaches a shader that traces it again, which a pipeline's derived depth cannot bound.
     recursive_trace,
+    /// A query or a candidate somewhere other than where its `let` or its loop put it (CHK-554).
+    query_escapes,
+    /// A query's `candidates` anywhere but behind the `in` of the one loop in the block of its `let` (CHK-555).
+    query_traversal_misplaced,
+    /// A query's `hit` read before its candidate loop is over, or of a query without one (CHK-559).
+    query_hit_too_early,
     /// A declaration, a local or a parameter whose name would hide a `@shadowable(false)` symbol.
     shadows_unshadowable,
     /// A test that reads a parameter, a local or a binding member of the function it stands in; it runs on its own.

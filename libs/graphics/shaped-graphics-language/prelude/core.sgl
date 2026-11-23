@@ -352,7 +352,7 @@ fun add_reduced(slot: mut atomic[float], key: int, v: float):
 //
 // Intel's and AMD's drivers combine such an atomic's lanes before they split them by the element each picked, so an
 // element takes what other elements were owed (docs/bugs-external/nonuniform-indexed-atomics-count-other-lanes).
-// Where `has(.nonuniform_atomic_workaround)` holds, the flattener writes one of these in the atomic's place (CHK-553):
+// Where `has(.nonuniform_atomic_workaround)` holds, the flattener writes one of these in the atomic's place (CHK-561):
 // `op` is 0 to 6 for `add`, `subtract`, `min`, `max`, `bit_and`, `bit_or` and `bit_xor`, a constant once inlined.
 // By a leader, each element the subgroup's lanes picked takes one atomic, of what its lanes combine to, by one lane alone.
 // The rounds' subgroup operations see the lanes that reach them, which a vulkan text states as maximal reconvergence.
