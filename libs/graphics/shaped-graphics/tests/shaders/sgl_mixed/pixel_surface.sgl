@@ -85,12 +85,13 @@ binding surface_textures:
         second = float4(compare, flat, around.x, plain.w)
     }
 
-// An offset moves a sample or a gather by whole texels, and only a constant may state one (CHK-280).
+// An offset moves a sample, one at a level or a gather by whole texels, and only a constant may state one (CHK-280).
 @pixel fun offset_ps(l: surface_link){surface_textures} -> surface_colors:
     let uv = l.position.xy * 0.125
     let moved = surface_textures.albedo.sample(uv, surface_textures.smooth, offset = int2(1, -1))
+    let leveled = surface_textures.albedo.sample(uv, surface_textures.smooth, level = 0.0, offset = int2(-1, 1))
     let around = surface_textures.albedo.gather(uv, surface_textures.smooth, component = texel_component.x, offset = int2(-1, 0))
     return {
-        first = float4(moved.x + link_sum(l), moved.y, moved.z, around.x)
+        first = float4(moved.x + link_sum(l), moved.y, leveled.z, around.x)
         second = float4(around.y, around.z, around.w, moved.w)
     }

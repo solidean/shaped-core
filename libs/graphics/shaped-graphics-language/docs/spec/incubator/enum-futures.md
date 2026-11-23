@@ -28,7 +28,7 @@ On a declaration whose set is open — one mirroring a host enum that grows, or 
 A `case` over such a type would stop needing a `_` to be accepted, and an emitter would stop writing a `default` arm on the targets that do not demand one.
 WGSL demands one unconditionally, so the attribute never reaches its text; the saving is HLSL's and MSL's alone, which is a thin reason to build it before something needs it.
 
-**Cases that carry values**, `triangle(triangle_hit)`, which a `case` would destructure.
+**Cases that carry values** are a struct's cases, in [sum-types.md](sum-types.md), of which an enum is the payload-free special case.
 A mixed trace's result is the first thing that wants one, and [raytracing-futures.md](raytracing-futures.md) says how.
 
 **Nested declarations** inside an `enum` block are `unsupported-yet` in the first version and are meant to work.

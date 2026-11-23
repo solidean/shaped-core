@@ -190,6 +190,8 @@ void write_entry_point(babel::json::object_writer& o, sgl::described_entry_point
         cc::string_view const names[] = {"fast", "specials", "precise", "ieee"};
         o.write("float_guarantee", names[int(e.float_guarantee)]);
         o.write("float_raised_by", e.float_raised_by);
+        if (e.is_float_raised_by_floor)
+            o.write("float_raised_by_floor", true);
     }
     {
         auto list = o.write_array("bindings", babel::json::layout::compact);
@@ -513,6 +515,7 @@ COMMAND("describe")
     auto option_arguments = cc::vector<cc::string>();
     auto module = cc::string();
     auto module_dirs = cc::vector<cc::string>();
+    auto float_floor_name = cc::string("fast");
     auto args = nx::args(
         {.name = "sgl describe",
          .description = "Describes the bindings, the vertex and pixel structs, the entry points and the "
@@ -526,6 +529,10 @@ COMMAND("describe")
              {.desc = "a directory whose .sgl files are modules the file may use", .metavar = "DIR"});
     args.arg({"module"}, module,
              {.desc = "describe this module of the module directories instead of a file", .metavar = "NAME"});
+    args.arg({"float-floor"}, float_floor_name,
+             {.desc = "the least float guarantee every entry point is described at, as if each stated it: fast, "
+                      "specials, precise or ieee",
+              .metavar = "LEVEL"});
     if (auto const r = args.parse(nx::test_args()); r.should_exit())
         return r.exit_code();
     if (path.empty() == module.empty())
@@ -546,6 +553,18 @@ COMMAND("describe")
         cc::eprintln("sgl describe: an option is given as `name=value`, and '{}' is not", options.error());
         return exit_usage;
     }
+    auto float_floor = sgl::check::float_level::fast;
+    if (float_floor_name == "specials")
+        float_floor = sgl::check::float_level::specials;
+    else if (float_floor_name == "precise")
+        float_floor = sgl::check::float_level::precise;
+    else if (float_floor_name == "ieee")
+        float_floor = sgl::check::float_level::ieee;
+    else if (float_floor_name != "fast")
+    {
+        cc::eprintln("sgl describe: unknown --float-floor '{}' (one of fast, specials, precise, ieee)", float_floor_name);
+        return exit_usage;
+    }
 
     auto source = cc::result<cc::string, cc::string>(cc::string());
     if (!path.empty())
@@ -560,7 +579,8 @@ COMMAND("describe")
                                           .source_name = path,
                                           .options = options.value(),
                                           .library = sgl_tool::files_but(library.value(), path),
-                                          .module = module});
+                                          .module = module,
+                                          .float_floor = float_floor});
     if (described.has_error())
     {
         cc::eprint(described.error());
