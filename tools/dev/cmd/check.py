@@ -38,13 +38,14 @@ NAME = "check"
 # clean-simd's link-map check runs after every link of a dispatching binary, where a parser that silently stopped
 # matching would look exactly like a clean link.
 SELFTESTS: dict[str, tuple[str, list[tuple[str, list[str], tuple[str, ...]]]]] = {
-    "dev-selftest-core": ("dev.py's process machinery: the job profile, the progress region, the guards, a quiet step, fail-fast", [
+    "dev-selftest-core": ("dev.py's process machinery: the job profile, the progress region, the guards, a quiet step, fail-fast, file holders", [
         ("tools/dev/profile-self-test.py", [], ()),
         ("tools/dev/ui-self-test.py", [], ()),
         # The guard is installed in a child, whose script is a string: no import of it is visible here.
         ("tools/dev/memory-guard-self-test.py", [], ("tools/dev/lib/core/memory_guard.py",)),
         ("tools/dev/stall-report-self-test.py", [], ()),
         ("tools/dev/fail-fast-self-test.py", [], ()),
+        ("tools/dev/file-holders-self-test.py", [], ()),
     ]),
     "dev-selftest-scope": ("what a change selects: the change scope, the gate registry, the source roots", [
         ("tools/dev/changes-self-test.py", [], ()),

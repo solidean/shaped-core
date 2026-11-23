@@ -59,7 +59,39 @@ def print_build_failure(results: list[StepResult], presets: list[Preset], root: 
     if cfg_fail is not None:
         ui.write_line(console.red(f"\nconfigure failed - see {rel(cfg_fail.stderr_log, root)}"))
     else:
+        _print_unwritable_outputs(results, presets, root)
         ui.write_line(console.red(f"\nbuild failed - {build_diag_hint(presets, root)}"))
+
+
+def _print_unwritable_outputs(results: list[StepResult], presets: list[Preset], root: Path) -> None:
+    """Who holds an output the linker could not replace, asked now, since whoever held it often lets go a moment later.
+
+    No compile diagnostic exists for this failure, so build_diag shows nothing, and the holder is the whole answer.
+    """
+    from . import file_holders
+
+    for r in results:
+        if r.ok:
+            continue
+        text = ""
+        for log in (r.stdout_log, r.stderr_log):
+            try:
+                text += log.read_text(encoding="utf-8", errors="replace") if log is not None else ""
+            except OSError:
+                pass
+        build_dir = next((p.build_dir for p in presets if r.stdout_log is not None and _under(r.stdout_log, p.build_dir)),
+                         presets[0].build_dir if presets else root)
+        for output in file_holders.unwritable_outputs(text, build_dir):
+            holders = file_holders.holders_of(output)
+            if holders is None:
+                ui.write_line(console.yellow(f"\n{rel(output, root)} could not be written, and this platform cannot say who holds it"))
+            elif not holders:
+                ui.write_line(console.yellow(
+                    f"\n{rel(output, root)} could not be written, and nothing holds it now: whatever held it let go since"))
+            else:
+                ui.write_line(console.yellow(f"\n{rel(output, root)} could not be written: it is held open by"))
+                for h in holders:
+                    ui.write_line(console.yellow(f"  {file_holders.describe(h)}"))
 
 
 def summarize_build(

@@ -305,6 +305,15 @@ Everything dev.py starts runs under a memory guard, so a runaway process or a pi
 
 [memory_guard.py](../../tools/dev/lib/core/memory_guard.py) has the details, and [its self-test](../../tools/dev/memory-guard-self-test.py) runs with `check`.
 
+## An output the linker cannot replace
+
+On Windows a linker cannot replace an executable another process holds open, and it says only "permission denied".
+- **dev.py names the holders** under the failed build: each process's executable, and what started it, asked of Windows' Restart Manager when the failure is reported.
+- **"Nothing holds it now"** means the holder let go before the report: a process that ran briefly, which the next occurrence may catch.
+- The VS Code extension runs `sgl lsp` from a copy of its own, so an editor never holds the build's `sgl`.
+
+[file_holders.py](../../tools/dev/lib/core/file_holders.py) has the details, and [its self-test](../../tools/dev/file-holders-self-test.py) runs with `check`.
+
 ## A step that goes quiet
 
 A hung build prints nothing past its `[build] all` banner, so after 5 minutes without output dev.py names what is still running under the step.
