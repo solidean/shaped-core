@@ -796,7 +796,7 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
   SGL's SPIR-V writes `OpRayQueryGetIntersectionClusterIdNV` and `ClusterIDNV`, with `SPV_NV_cluster_acceleration_structure`'s capability.
   HLSL for vulkan reaches them through inline SPIR-V, a template over both of a `RayQuery`'s parameters and a builtin input, which DXC has no names for.
   HLSL for dx12 writes Shader Model 6.10's `CandidateClusterID`, `CommittedClusterID` and `ClusterID`, and DXIL refuses it as `unsupported-yet` until then.
-* **EMIT-185** A text keeps its entry point's float guarantee (CHK-435), or the compile refuses with `float-guarantee-not-kept`, naming the function that asked.
+* **EMIT-185** A text keeps its entry point's float guarantee (CHK-435), or the compile refuses with `float-guarantee-not-kept`, naming the function that asked, or the floor where the compile's floor raised it.
   `hlsl-dx12` keeps every level: DXC compiles from `.specials` on with `-Gis`, and at `.ieee` with `-denorm preserve` too.
   `msl` keeps up to `.precise`, since Metal's safe math keeps the special values and the order and flushes denormals, read and written (measured on an M4).
   `hlsl-vulkan` keeps every level through the same flags: DXC writes `SignedZeroInfNanPreserve` and `NoContraction` on every float operation for `-Gis`, and `DenormPreserve` for `-denorm preserve`.

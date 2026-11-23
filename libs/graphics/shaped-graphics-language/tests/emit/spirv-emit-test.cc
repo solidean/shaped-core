@@ -246,6 +246,15 @@ TEST("sgl spirv - an entry point's guarantee stands on each float operation it k
     REQUIRE(precise.has_value());
     CHECK(decorated(fast.value().spirv, 42) == 0);
     CHECK(decorated(precise.value().spirv, 42) == 2);
+
+    // CHK-435: a request's float floor keeps them as if the entry point stated it
+    auto const floored = sgl::compile_to_text({.source = k_doubled,
+                                               .entry_point = "run",
+                                               .target = sgl::emit::target::hlsl_vulkan,
+                                               .float_floor = sgl::check::float_level::precise,
+                                               .native = sgl::emit::native_route::require});
+    REQUIRE(floored.has_value());
+    CHECK(decorated(floored.value().spirv, 42) == 2);
 }
 
 TEST("sgl spirv - a vector scaled by a scalar builds no splat, and an if around little is a select")
@@ -298,7 +307,14 @@ TEST("sgl spirv - a splat a mix or a clamp reads too is written, though a scalin
                                        "@pixel fun clamped_ps(input: link){pass} -> float4:\n"
                                        "    let c = clamp(pass.v.xyz, float3(0.0), float3(pass.k.z))\n"
                                        "    let s = c * pass.k.z\n"
-                                       "    return float4(s.x, s.y, s.z, 1.0)\n";
+                                       "    return float4(s.x, s.y, s.z, 1.0)\n"
+                                       "\n"
+                                       "@pixel fun chosen_ps(input: link){pass} -> float4:\n"
+                                       "    let w = pass.k.w\n"
+                                       "    let filled = float3(w)\n"
+                                       "    let picked = if input.uv.x > 0.5 => pass.v.xyz else filled\n"
+                                       "    let s = pass.v.xyz * w\n"
+                                       "    return float4(picked.x + s.x, picked.y, picked.z, 1.0)\n";
 #if defined(CC_OS_WINDOWS)
     constexpr auto probe = "spirv-val --version > NUL 2>&1";
 #else
@@ -306,7 +322,8 @@ TEST("sgl spirv - a splat a mix or a clamp reads too is written, though a scalin
 #endif
     auto const has_validator = std::system(probe) == 0;
     auto modules = spirv_batch();
-    for (auto const entry : {"cartoon_ps", "fade_tint_ps", "clamped_ps"})
+    // chosen_ps: the splat is a choice's other arm, operand 2 of a select or of a phi alike
+    for (auto const entry : {"cartoon_ps", "fade_tint_ps", "clamped_ps", "chosen_ps"})
     {
         auto const e = written(source, entry, sgl::emit::native_route::require);
         REQUIRE(e.has_value());
@@ -322,19 +339,23 @@ TEST("sgl spirv - a splat a mix or a clamp reads too is written, though a scalin
 
 TEST("sgl spirv - a sample at a level takes its offset as ConstOffset beside Lod (EMIT-253)")
 {
-    auto const e = written("binding work:\n"
-                           "    image: texture_2d[float4]\n"
-                           "    image_array: texture_2d_array[float4]\n"
-                           "    smooth: sampler\n"
-                           "    results: mut buffer[float4]\n"
-                           "\n"
-                           "@compute(64) fun run(@thread_id id: int3){work}:\n"
-                           "    let uv = float2(id.x as float, 0.5) / 64.0\n"
-                           "    let a = work.image.sample(uv, work.smooth, level = 0.0, offset = int2(-1, 2))\n"
-                           "    let b = work.image_array.sample(uv, work.smooth, layer = 1, level = 1.0, offset = int2(7, -8))\n"
-                           "    let c = work.image.sample(uv, work.smooth, level = 2.0)\n"
-                           "    work.results[id.x] = a + b + c\n",
-                           "run", sgl::emit::native_route::require);
+    auto const e
+        = written("binding work:\n"
+                  "    image: texture_2d[float4]\n"
+                  "    image_array: texture_2d_array[float4]\n"
+                  "    volume: texture_3d[float4]\n"
+                  "    smooth: sampler\n"
+                  "    results: mut buffer[float4]\n"
+                  "\n"
+                  "@compute(64) fun run(@thread_id id: int3){work}:\n"
+                  "    let uv = float2(id.x as float, 0.5) / 64.0\n"
+                  "    let a = work.image.sample(uv, work.smooth, level = 0.0, offset = int2(-1, 2))\n"
+                  "    let b = work.image_array.sample(uv, work.smooth, layer = 1, level = 1.0, offset = int2(7, -8))\n"
+                  "    let c = work.image.sample(uv, work.smooth, level = 2.0)\n"
+                  "    let deep = float3(..uv, 0.5)\n"
+                  "    let d = work.volume.sample(deep, work.smooth, level = 0.0, offset = int3(1, -1, 3))\n"
+                  "    work.results[id.x] = a + b + c + d\n",
+                  "run", sgl::emit::native_route::require);
     REQUIRE(e.has_value());
     auto const& words = e.value().spirv;
     // OpImageSampleExplicitLod: result type, result, sampled image, coordinate, then the image operands' mask
@@ -342,10 +363,11 @@ TEST("sgl spirv - a sample at a level takes its offset as ConstOffset beside Lod
     for (auto at = isize(5); at < words.size(); at += isize(words[at] >> 16))
         if ((words[at] & 0xffffu) == 88)
             masks.push_back(words[at + 5]);
-    REQUIRE(masks.size() == 3);
+    REQUIRE(masks.size() == 4);
     CHECK(masks[0] == 0xau); // Lod | ConstOffset
     CHECK(masks[1] == 0xau);
     CHECK(masks[2] == 0x2u); // Lod alone
+    CHECK(masks[3] == 0xau); // a 3D texture's offset has three lanes
 #if !defined(CC_OS_EMSCRIPTEN) && !defined(CC_OS_IOS) && !defined(CC_OS_TVOS)
 #if defined(CC_OS_WINDOWS)
     constexpr auto probe = "spirv-val --version > NUL 2>&1";

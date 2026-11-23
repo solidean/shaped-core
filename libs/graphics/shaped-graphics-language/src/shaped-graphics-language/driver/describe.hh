@@ -229,8 +229,11 @@ struct sgl::described_entry_point
     /// The subgroup size a compute entry point prefers (CHK-371); 0 where it prefers none.
     i32 preferred_subgroup_size = 0;
     /// The strictest `@float` it reaches (CHK-435), and the function that stated it, by name; empty at `fast`.
+    /// Where `describe_request::float_floor` is stricter, it is the floor, no function is named, and
+    /// `is_float_raised_by_floor` says so.
     check::float_level float_guarantee = check::float_level::fast;
     cc::string float_raised_by;
+    bool is_float_raised_by_floor = false;
     /// The binding list in the order written, which is the order of the pipeline layout's groups with any `@inline` one last.
     /// A `@workgroup` binding is left out, since the host binds nothing for it.
     /// A binding of another module is `m.name`, whatever name the file's `use` gave the module.
@@ -445,6 +448,8 @@ struct sgl::describe_request
     /// binding and edge struct of the module's files, and the structs those bindings place.
     /// Its entry points, pipelines and ray sets are left out, since an entry point is built from the file it stands in.
     cc::string_view module;
+    /// The least float guarantee every entry point is described at, as `text_request::float_floor` compiles it (CHK-435).
+    check::float_level float_floor = check::float_level::fast;
 };
 
 namespace sgl

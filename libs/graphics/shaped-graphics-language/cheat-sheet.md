@@ -65,6 +65,8 @@ sgl::text_request                          // source, source_name ("<sgl>"), lib
                                            // none writes the same bytes; `vulkan_config` / `dx12_config::native_debug_info` and SC_SG_NATIVE_DEBUG_INFO ask for it
                                            // the entry point is found by NAME; source_name is never opened
                                            // run_tests: the source's own tests run, and one that fails is an error
+                                           // float_floor: every entry point compiles at least at that level, as if it stated @float (CHK-435);
+                                           // the result's float_guarantee, float_raised_by and is_float_raised_by_floor say who asked; describe_request takes it too
                                            // options: check::option_value{name, value} per `@option const` set, value as SGL spells it:
                                            // `16`, `-3`, `0.5`, `true`, `.rgba16_float`; the rest keep their defaults, tests always run at them
                                            // a used module's option is named `common.taps`; a name no option has, a value of
@@ -530,6 +532,7 @@ uv run dev.py run sgl -- emit shader.sgl --entry main_ps --target wgsl   # the t
 uv run dev.py run sgl -- emit shader.sgl --entry main_cs --option tile=16 # an option set for this compile; `describe` takes it too
 uv run dev.py run sgl -- emit shader.sgl --entry main_cs --undefined report --diagnostics  # the guards of LEGAL-65, LEGAL-66 and LEGAL-69 (workgroup memory read unstored); abort: no report; define: WGSL's values
 uv run dev.py run sgl -- emit shader.sgl --entry main_cs --target wgsl --weaken-float     # a @float WGSL cannot keep, at .fast with a warning
+uv run dev.py run sgl -- emit shader.sgl --entry main_cs --float-floor precise            # every entry point at least .precise; `describe` takes it too
 uv run dev.py run sgl -- test a.sgl b.sgl                                # the tests of each file; exit 2 when one fails
 #   emit, test and describe take --module-dir DIR, repeatable: the .sgl files directly in it are modules to `use`
 uv run dev.py run sgl -- describe --module view --module-dir shaders     # a module of the directories, as its package entry reads it
@@ -644,7 +647,7 @@ while t < far: ...                       //   (CHK-528); a bound kept, not a pro
 
 @float(.specials) fun clean(v: float) -> float:   // the least float guarantee a body needs (CHK-435): .fast (default),
     return if v != v => 0.0 else v       //   .specials, .precise, .ieee; an entry point keeps the strictest it reaches
-                                         // dx12 keeps all, msl up to .precise, vulkan and wgsl refuse above .fast (EMIT-185)
+                                         // dx12 and vulkan keep all, msl up to .precise, wgsl refuses above .fast (EMIT-185)
                                          // `v != v` at .fast: WARNING nan-test-at-fast; is_nan tests the bits, fine anywhere
 
 fun bump(c: mut counter, by: float):     // a mut parameter: the caller's place (CHK-315)

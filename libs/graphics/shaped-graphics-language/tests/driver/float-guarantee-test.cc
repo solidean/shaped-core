@@ -33,12 +33,146 @@ constexpr cc::string_view k_layered = "binding work:\n"
                                       "@float(.ieee) @compute(64) fun exact(@thread_id id: int3){work}:\n"
                                       "    work.values[id.x] = plain(work.values[id.x])\n";
 
-cc::result<sgl::emitted_source, cc::string> compiled(cc::string_view entry, target t, bool weakens = false)
+cc::result<sgl::emitted_source, cc::string> compiled(cc::string_view entry,
+                                                     target t,
+                                                     bool weakens = false,
+                                                     float_level floor = float_level::fast)
 {
-    return sgl::compile_to_text(
-        {.source = k_layered, .source_name = "float.sgl", .entry_point = entry, .target = t, .weakens_float = weakens});
+    return sgl::compile_to_text({.source = k_layered,
+                                 .source_name = "float.sgl",
+                                 .entry_point = entry,
+                                 .target = t,
+                                 .weakens_float = weakens,
+                                 .float_floor = floor});
+}
+
+/// The entry point named `name` of `d`, which the test requires.
+sgl::described_entry_point const& entry_named(sgl::module_description const& d, cc::string_view name)
+{
+    for (auto const& e : d.entry_points)
+        if (e.name == name)
+            return e;
+    REQUIRE(false).dump("entry", name);
+    return d.entry_points[0];
 }
 } // namespace
+
+TEST("sgl float - a request's floor raises every entry point to at least its level, as if each stated it")
+{
+    // below the floor: raised, and no function named, since none asked
+    auto const loose = compiled("loose", target::hlsl_dx12, false, float_level::precise);
+    REQUIRE(loose.has_value()).dump("error", loose.has_error() ? loose.error() : cc::string());
+    CHECK(loose.value().float_guarantee == float_level::precise);
+    CHECK(loose.value().float_raised_by.empty());
+    CHECK(loose.value().is_float_raised_by_floor);
+
+    // at or above it: the entry point's own level, and the function that stated it
+    auto const both = compiled("both", target::hlsl_dx12, false, float_level::specials);
+    REQUIRE(both.has_value());
+    CHECK(both.value().float_guarantee == float_level::precise);
+    CHECK(both.value().float_raised_by == "ordered");
+    CHECK(!both.value().is_float_raised_by_floor);
+    auto const level = compiled("both", target::hlsl_dx12, false, float_level::precise);
+    REQUIRE(level.has_value());
+    CHECK(level.value().float_raised_by == "ordered");
+    CHECK(!level.value().is_float_raised_by_floor);
+    auto const exact = compiled("exact", target::hlsl_dx12, false, float_level::precise);
+    REQUIRE(exact.has_value());
+    CHECK(exact.value().float_guarantee == float_level::ieee);
+    CHECK(exact.value().float_raised_by == "exact");
+
+    // a target keeps a raised level as it keeps a stated one: vulkan through the features, metal through safe math
+    auto const vulkan = compiled("loose", target::hlsl_vulkan, false, float_level::ieee);
+    REQUIRE(vulkan.has_value());
+    CHECK(vulkan.value().features.has(sgl::check::feature::float_specials));
+    CHECK(vulkan.value().features.has(sgl::check::feature::float_denormals));
+    auto const metal = compiled("loose", target::msl, false, float_level::specials);
+    REQUIRE(metal.has_value());
+    CHECK(metal.value().text.contains("#pragma METAL fp math_mode(safe)\n")).dump("text", metal.value().text);
+}
+
+TEST("sgl float - a floor a target cannot keep is refused naming the floor, and WebGPU weakens it as a stated one")
+{
+    auto const refused = compiled("loose", target::wgsl, false, float_level::specials);
+    REQUIRE(refused.has_error());
+    CHECK(refused.error().contains("float-guarantee-not-kept")).dump("error", refused.error());
+    CHECK(refused.error().contains("the request's float floor")).dump("error", refused.error());
+    CHECK(!refused.error().contains("''")).dump("error", refused.error());
+    // metal keeps up to precise, so a floor of ieee is refused there too
+    auto const metal = compiled("loose", target::msl, false, float_level::ieee);
+    REQUIRE(metal.has_error());
+    CHECK(metal.error().contains("the request's float floor")).dump("error", metal.error());
+    // where a function asks more than the floor, the refusal names the function
+    auto const stated = compiled("both", target::wgsl, false, float_level::specials);
+    REQUIRE(stated.has_error());
+    CHECK(stated.error().contains("'ordered'")).dump("error", stated.error());
+
+    auto const weakened = compiled("loose", target::wgsl, true, float_level::precise);
+    REQUIRE(weakened.has_value()).dump("error", weakened.has_error() ? weakened.error() : cc::string());
+    CHECK(weakened.value().float_guarantee == float_level::fast);
+    CHECK(!weakened.value().is_float_raised_by_floor);
+    REQUIRE(weakened.value().warnings.size() == 1);
+    CHECK(weakened.value().warnings[0].contains("float-guarantee-weakened"));
+    CHECK(weakened.value().warnings[0].contains("the request's float floor")).dump("warning", weakened.value().warnings[0]);
+    // with no floor and nothing stated, nothing was weakened
+    auto const plain = compiled("loose", target::wgsl, true);
+    REQUIRE(plain.has_value());
+    CHECK(plain.value().warnings.empty());
+}
+
+TEST("sgl float - code a floor raises above fast does not warn of a NaN test at fast (CHK-436)")
+{
+    constexpr auto source = "binding work:\n"
+                            "    values: mut buffer[float]\n"
+                            "\n"
+                            "@compute(64) fun cs(@thread_id id: int3){work}:\n"
+                            "    let v = work.values[id.x]\n"
+                            "    work.values[id.x] = if v != v => 0.0 else v\n";
+    auto const at_fast = sgl::compile_to_text({.source = source, .entry_point = "cs"});
+    REQUIRE(at_fast.has_value());
+    auto warned = false;
+    for (auto const& w : at_fast.value().warnings)
+        warned = warned || w.contains("nan-test-at-fast");
+    CHECK(warned);
+    auto const floored
+        = sgl::compile_to_text({.source = source, .entry_point = "cs", .float_floor = float_level::specials});
+    REQUIRE(floored.has_value());
+    for (auto const& w : floored.value().warnings)
+        CHECK(!w.contains("nan-test-at-fast")).dump("warning", w);
+}
+
+TEST("sgl float - describe reports the level a floor raises an entry point to, and that the floor raised it")
+{
+    auto const plain = sgl::describe({.source = k_layered, .source_name = "float.sgl"});
+    REQUIRE(plain.has_value()).dump("error", plain.has_error() ? plain.error() : cc::string());
+    CHECK(entry_named(plain.value(), "loose").float_guarantee == float_level::fast);
+    CHECK(!entry_named(plain.value(), "loose").is_float_raised_by_floor);
+
+    auto const floored
+        = sgl::describe({.source = k_layered, .source_name = "float.sgl", .float_floor = float_level::precise});
+    REQUIRE(floored.has_value());
+    auto const& loose = entry_named(floored.value(), "loose");
+    CHECK(loose.float_guarantee == float_level::precise);
+    CHECK(loose.float_raised_by.empty());
+    CHECK(loose.is_float_raised_by_floor);
+    auto const& both = entry_named(floored.value(), "both");
+    CHECK(both.float_guarantee == float_level::precise);
+    CHECK(both.float_raised_by == "ordered");
+    CHECK(!both.is_float_raised_by_floor);
+    auto const& exact = entry_named(floored.value(), "exact");
+    CHECK(exact.float_guarantee == float_level::ieee);
+    CHECK(!exact.is_float_raised_by_floor);
+
+    // describe and the text agree on every entry point
+    for (auto const& e : floored.value().entry_points)
+    {
+        auto const text = compiled(e.name, target::hlsl_dx12, false, float_level::precise);
+        REQUIRE(text.has_value());
+        CHECK(text.value().float_guarantee == e.float_guarantee).dump("entry", e.name);
+        CHECK(text.value().float_raised_by == e.float_raised_by).dump("entry", e.name);
+        CHECK(text.value().is_float_raised_by_floor == e.is_float_raised_by_floor).dump("entry", e.name);
+    }
+}
 
 TEST("sgl float - an entry point keeps the strictest @float of what it reaches, and names the function that raised it")
 {

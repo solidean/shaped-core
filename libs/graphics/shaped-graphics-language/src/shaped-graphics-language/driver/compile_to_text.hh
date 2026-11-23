@@ -47,6 +47,10 @@ struct sgl::text_request
     /// Compiles an entry point whose `@float` WGSL cannot keep at `fast`, with a warning, rather than refusing it (EMIT-185).
     /// The host's to give, since only the code that picked WebGPU knows whether running without the guarantee will do.
     bool weakens_float = false;
+    /// The least float guarantee every entry point is compiled at, as if each stated it with `@float` (CHK-435).
+    /// An entry point that reaches a stricter level keeps its own; one raised past what the target keeps is refused,
+    /// naming the floor (EMIT-185), and `weakens_float` weakens it on WGSL as it does a stated level.
+    check::float_level float_floor = check::float_level::fast;
     /// What the device has, each named as `sg::feature` names it, which `has` answers once inlined (CHK-426).
     /// With `float_atomic_add` an `atomic[float]` is the target's own float atomic where the target can say one,
     /// vulkan and metal, and a `uint`'s bits elsewhere.
@@ -282,8 +286,10 @@ struct sgl::emitted_source
     cc::vector<variant_axis> axes;
     /// The float guarantee the text keeps (CHK-435, EMIT-185): the entry point's, or `fast` where it was weakened.
     check::float_level float_guarantee = check::float_level::fast;
-    /// The function that raised the entry point's guarantee, by name; empty at `fast`.
+    /// The function that raised the entry point's guarantee, by name; empty at `fast`, and where the floor raised it.
     cc::string float_raised_by;
+    /// `text_request::float_floor` raised the guarantee past every level the entry point reaches (CHK-435).
+    bool is_float_raised_by_floor = false;
     /// LEGAL-69: the bytes of workgroup memory the profile could not shadow, whose reads it tests not; 0 where it did.
     i32 unshadowed_bytes = 0;
     /// The options the entry point reaches, by name, in declaration order (CHK-355).

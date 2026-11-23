@@ -281,10 +281,11 @@ described_option describe_option(check::checked_module const& m, check::symbol_i
             .follows = cc::move(follows)};
 }
 
-/// `legal` is `e` legalized, which is the tree the footprint is read from.
+/// `legal` is `e` legalized, which is the tree the footprint is read from; `float_floor` is the request's (CHK-435).
 described_entry_point describe_entry_point(check::checked_module const& m,
                                            check::flat_entry_point const& e,
-                                           check::flat_entry_point const& legal)
+                                           check::flat_entry_point const& legal,
+                                           check::float_level float_floor)
 {
     auto result = described_entry_point{.name = e.name, .stage = e.entry_stage};
     for (auto axis = 0; axis < 3; ++axis)
@@ -292,7 +293,12 @@ described_entry_point describe_entry_point(check::checked_module const& m,
     result.is_dispatched_by_threads = e.is_auto_workgroup;
     result.preferred_subgroup_size = e.preferred_subgroup_size;
     result.float_guarantee = e.float_guarantee;
-    if (check::is_valid(e.float_raised_by))
+    if (u8(float_floor) > u8(e.float_guarantee))
+    {
+        result.float_guarantee = float_floor;
+        result.is_float_raised_by_floor = true;
+    }
+    else if (check::is_valid(e.float_raised_by))
         result.float_raised_by = m.at(e.float_raised_by).name;
     for (auto const id : e.bindings)
         if (!m.bindings[m.at(id).info].is_workgroup)
@@ -1028,7 +1034,7 @@ cc::result<sgl::module_description, cc::string> sgl::describe(describe_request c
         // a compile writes a print or drops it (LEGAL-63), so no print keeps a description from being written
         emit_impl::validate(m, legal.back(), errors, true);
         if (errors.size() == before)
-            result.entry_points.push_back(describe_entry_point(m, e, legal.back()));
+            result.entry_points.push_back(describe_entry_point(m, e, legal.back(), request.float_floor));
     }
 
     for (auto const& p : m.pipelines)

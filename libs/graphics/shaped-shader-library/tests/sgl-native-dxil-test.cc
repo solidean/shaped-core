@@ -113,11 +113,18 @@ TEST("slib - SGL's DXIL of a splat a mix or a clamp reads beside a scaling passe
                                        "@pixel fun clamped_ps(input: link){pass} -> float4:\n"
                                        "    let c = clamp(pass.v.xyz, float3(0.0), float3(pass.k.z))\n"
                                        "    let s = c * pass.k.z\n"
-                                       "    return float4(s.x, s.y, s.z, 1.0)\n";
+                                       "    return float4(s.x, s.y, s.z, 1.0)\n"
+                                       "\n"
+                                       "@pixel fun chosen_ps(input: link){pass} -> float4:\n"
+                                       "    let w = pass.k.w\n"
+                                       "    let filled = float3(w)\n"
+                                       "    let picked = if input.uv.x > 0.5 => pass.v.xyz else filled\n"
+                                       "    let s = pass.v.xyz * w\n"
+                                       "    return float4(picked.x + s.x, picked.y, picked.z, 1.0)\n";
     auto compiler = ssc::dxc::compiler::create();
     if (compiler.has_error())
         SKIP("no DXC");
-    for (auto const entry : {"cartoon_ps", "fade_tint_ps", "clamped_ps"})
+    for (auto const entry : {"cartoon_ps", "fade_tint_ps", "clamped_ps", "chosen_ps"})
     {
         auto const e = written(source, entry);
         REQUIRE(e.has_value());
@@ -133,6 +140,7 @@ TEST("slib - SGL's DXIL of a sample at a level with an offset passes the validat
         = "binding work:\n"
           "    image: texture_2d[float4]\n"
           "    image_array: texture_2d_array[float4]\n"
+          "    volume: texture_3d[float4]\n"
           "    smooth: sampler\n"
           "    results: mut buffer[float4]\n"
           "\n"
@@ -140,7 +148,9 @@ TEST("slib - SGL's DXIL of a sample at a level with an offset passes the validat
           "    let uv = float2(id.x as float, 0.5) / 64.0\n"
           "    let a = work.image.sample(uv, work.smooth, level = 0.0, offset = int2(-1, 2))\n"
           "    let b = work.image_array.sample(uv, work.smooth, layer = 1, level = 1.0, offset = int2(7, -8))\n"
-          "    work.results[id.x] = a + b\n";
+          "    let deep = float3(..uv, 0.5)\n"
+          "    let d = work.volume.sample(deep, work.smooth, level = 0.0, offset = int3(1, -1, 3))\n"
+          "    work.results[id.x] = a + b + d\n";
     auto compiler = ssc::dxc::compiler::create();
     if (compiler.has_error())
         SKIP("no DXC");
@@ -478,6 +488,19 @@ TEST("slib - DXIL's float flags stand on each operation, and only `fast` lets a 
     CHECK(fast_text.value().contains("fadd fast float"));
     CHECK(!strict_text.value().contains("fast float"));
     CHECK(strict_text.value().contains("fadd float"));
+
+    // CHK-435: a request's float floor lowers an entry point that states nothing as if it stated the floor
+    auto const floored = sgl::compile_to_text({.source = k_sums,
+                                               .entry_point = "fast_sum",
+                                               .target = sgl::emit::target::hlsl_dx12,
+                                               .float_floor = sgl::check::float_level::precise,
+                                               .native = sgl::emit::native_route::require});
+    REQUIRE(floored.has_value());
+    auto const floored_text = compiler.value().disassemble(floored.value().dxil);
+    REQUIRE(floored_text.has_value());
+    CHECK(!floored_text.value().contains("fast float"));
+    CHECK(floored_text.value().contains("fadd float"));
+    CHECK(!compiler.value().validate(floored.value().dxil).has_value());
 }
 
 // AMD's DXIL compiler crashes on a module without it, though LLVM leaves it optional.

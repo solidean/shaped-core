@@ -30,6 +30,11 @@ The ladder, from loosest to strictest; each level licenses what is listed and ev
 An entry point may state one itself, which raises its own and is the only place a level can be asked for while the compile is per entry point.
 `describe` reports an entry point's level and the function that raised it, so a slower pipeline or a stalled driver is traced to the line that asked.
 
+**A compile may raise every entry point to a floor, as if each stated it**, which `text_request::float_floor` and `describe_request::float_floor` take.
+A test bake that holds a port to the exact meaning compiles the sources it ships unchanged at `.precise`, where rewriting a copy of each to state the level would drift from what ships.
+An entry point that reaches a stricter level keeps its own, and its function is named; one the floor raised names none, and the refusal and `describe` name the floor instead.
+It is the host's, as the WebGPU opt-in is: the source says what it needs, and only a host knows that it wants more for a run of its own.
+
 **A level a target cannot keep is refused, as a missing feature is refused** (CHK-322).
 Here is how each target would keep each level:
 
