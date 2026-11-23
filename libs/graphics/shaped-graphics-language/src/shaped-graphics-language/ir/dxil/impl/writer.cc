@@ -2,6 +2,7 @@
 
 #include <clean-core/string/format.hh>
 #include <shaped-graphics-language/check/symbols.hh>
+#include <shaped-graphics-language/ir/dominance.hh>
 
 using namespace sgl;
 using namespace sgl::ir;
@@ -246,7 +247,102 @@ void writer::declare_blocks()
     _blocks.resize_to_filled(_p.blocks.size(), ll_block::none);
     for (auto const b : blocks_in_order(_p))
         if (is_reachable(b))
+        {
             _blocks[isize(b)] = _m.add_block();
+            // a conditional break's own block follows its block, which is the order the two are written in
+            auto const& block = _p.blocks[isize(b)];
+            if (_p.instructions[block.first + block.count - 1].code == op::branch_conditional)
+                for (auto& l : _loop_breaks)
+                    if (l.from == u32(b))
+                        l.split = _m.add_block();
+        }
+}
+
+void writer::find_loop_breaks()
+{
+    auto const order = blocks_in_order(_p);
+    auto position = cc::vector<u32>::create_filled(_p.blocks.size(), 0xffffffffu);
+    for (auto i = isize(0); i < order.size(); ++i)
+        position[isize(order[i])] = u32(i);
+    // the predecessors of each block, by its position in the order, which dominance numbers its nodes by
+    auto scratch = cc::vector<u32>();
+    auto first = cc::vector<u32>::create_filled(order.size() + 1, 0u);
+    for (auto const b : order)
+        if (is_reachable(b))
+        {
+            auto const& block = _p.blocks[isize(b)];
+            for (auto const to : successors_of(_p, _p.instructions[block.first + block.count - 1], scratch))
+                ++first[position[to] + 1];
+        }
+    for (auto i = isize(0); i < order.size(); ++i)
+        first[i + 1] += first[i];
+    auto preds = cc::vector<u32>::create_filled(first.back(), 0u);
+    auto filled = cc::vector<u32>::create_copy_of(first);
+    for (auto i = isize(0); i < order.size(); ++i)
+        if (is_reachable(order[i]))
+        {
+            auto const& block = _p.blocks[isize(order[i])];
+            for (auto const to : successors_of(_p, _p.instructions[block.first + block.count - 1], scratch))
+                preds[filled[position[to]]++] = u32(i);
+        }
+    auto const dom = dominance(first, preds);
+
+    for (auto const h : order)
+    {
+        auto const& header = _p.blocks[isize(h)];
+        if (!is_reachable(h) || header.merges != merge_kind::loop || !is_reachable(header.merge))
+            continue;
+        auto const m = header.merge;
+        // a block of the loop: one its header dominates and its merge does not
+        auto const in_loop = [&](block_ref x)
+        {
+            return is_reachable(x) && dom.dominates(position[isize(h)], position[isize(x)])
+                && !dom.dominates(position[isize(m)], position[isize(x)]);
+        };
+        auto holds_subgroup = false;
+        for (auto const x : order)
+            if (in_loop(x))
+            {
+                auto const& block = _p.blocks[isize(x)];
+                for (auto k = block.first; k < block.first + block.count; ++k)
+                    holds_subgroup = holds_subgroup || _p.instructions[k].code == op::subgroup;
+            }
+        if (!holds_subgroup)
+            continue;
+        auto const back = is_reachable(header.continue_to) ? u32(header.continue_to) : u32(h);
+        for (auto const x : order)
+        {
+            if (x == h || !in_loop(x))
+                continue;
+            auto const& block = _p.blocks[isize(x)];
+            auto const& last = _p.instructions[block.first + block.count - 1];
+            if (last.code != op::branch && last.code != op::branch_conditional)
+                continue;
+            auto leaves = false;
+            for (auto const to : successors_of(_p, last, scratch))
+                leaves = leaves || to == u32(m);
+            if (!leaves)
+                continue;
+            // a break out of nested loops at once goes back into the outermost, which holds the rest
+            auto is_known = false;
+            for (auto& l : _loop_breaks)
+                if (l.from == u32(x) && l.merge == u32(m))
+                {
+                    is_known = true;
+                    l.back = back;
+                }
+            if (!is_known)
+                _loop_breaks.push_back({.from = u32(x), .merge = u32(m), .back = back});
+        }
+    }
+}
+
+auto writer::loop_break_of(u32 from, u32 to) const -> loop_break const*
+{
+    for (auto const& l : _loop_breaks)
+        if (l.from == from && l.merge == to)
+            return &l;
+    return nullptr;
 }
 
 void writer::run()
@@ -271,6 +367,7 @@ void writer::run()
     if (!is_library())
         number_signature();
     find_reachable();
+    find_loop_breaks();
     declare_blocks();
     auto const order = blocks_in_order(_p);
     _m.open_block(_blocks[isize(order[0])]);
@@ -278,6 +375,14 @@ void writer::run()
     if (is_library())
         declare_ray_roots();
     declare_handles();
+    if (!_loop_breaks.empty())
+    {
+        auto const word = _m.array(_m.int_type(), 1);
+        auto const table = _m.add_constant_table("dx.break.cond", word, _m.constant_null(word), 4);
+        ll_value const at[] = {_m.constant_i32(0), _m.constant_i32(0)};
+        auto const read = _m.load(_m.int_type(), _m.element_pointer(word, table, at), 4);
+        _break_condition = _m.compare(predicate::i_eq, read, _m.constant_i32(0));
+    }
     for (auto const b : order)
     {
         if (!is_reachable(b) || !_failure.empty())
@@ -305,6 +410,7 @@ void writer::run()
 
 void writer::lower_block(block_ref b)
 {
+    _lowering = u32(b);
     auto const& block = _p.blocks[isize(b)];
     _rows.clear();
     for (auto i = block.first; i + 1 < block.first + block.count && _failure.empty(); ++i)
@@ -331,9 +437,29 @@ void writer::terminator(instruction const& i)
     switch (i.code)
     {
     case op::branch:
+        if (auto const* const l = loop_break_of(_lowering, operands[0]))
+            return _m.branch_if(_break_condition, _blocks[l->merge], _blocks[l->back]);
         return _m.branch(_blocks[operands[0]]);
     case op::branch_conditional:
-        return _m.branch_if(leaf_at(value_ref(operands[0])), _blocks[operands[1]], _blocks[operands[2]]);
+    {
+        auto const* const yes = loop_break_of(_lowering, operands[1]);
+        auto const* const no = loop_break_of(_lowering, operands[2]);
+        if (yes == nullptr && no == nullptr)
+            return _m.branch_if(leaf_at(value_ref(operands[0])), _blocks[operands[1]], _blocks[operands[2]]);
+        // both ways out to one merge: the break's block alone, so the merge has the one edge its phis name
+        if (yes == no)
+            _m.branch(yes->split);
+        else
+            _m.branch_if(leaf_at(value_ref(operands[0])), yes != nullptr ? yes->split : _blocks[operands[1]],
+                         no != nullptr ? no->split : _blocks[operands[2]]);
+        for (auto const* const l : {yes, no})
+            if (l != nullptr && (l == yes || yes != no))
+            {
+                _m.open_block(l->split);
+                _m.branch_if(_break_condition, _blocks[l->merge], _blocks[l->back]);
+            }
+        return;
+    }
     case op::switch_:
     {
         auto cases = cc::vector<u32>::create_with_capacity(operands.size());
@@ -870,17 +996,22 @@ void writer::phi(u32 index, instruction const& i)
     auto edges = isize(0);
     for (auto k = isize(1); k < operands.size(); k += 2)
         edges += is_reachable(block_ref(operands[k])) ? 1 : 0;
+    for (auto const& l : _loop_breaks)
+        edges += l.back == _lowering ? 1 : 0;
     _scratch.clear();
     for (auto l = u32(0); l < leaves_of(i.type); ++l)
         _scratch.push_back(_m.phi(scalar_type(scalar_at(i.type, l)), edges));
     _phis.push_back(index);
+    _phi_blocks.push_back(_lowering);
     define(index);
 }
 
 void writer::fill_phis()
 {
-    for (auto const index : _phis)
+    for (auto j = isize(0); j < _phis.size(); ++j)
     {
+        auto const index = _phis[j];
+        auto const at = _phi_blocks[j];
         auto const operands = _p.operands_of(_p.instructions[index]);
         auto const first = _value_first[index];
         for (auto l = u32(0); l < _value_count[index]; ++l)
@@ -890,8 +1021,17 @@ void writer::fill_phis()
             {
                 if (!is_reachable(block_ref(operands[k + 1])))
                     continue;
-                _m.set_phi_edge(_values[first + l], edge++, leaf_at(value_ref(operands[k]), l), _blocks[operands[k + 1]]);
+                // a conditional break reaches its merge through its own block
+                auto const* const split = loop_break_of(operands[k + 1], at);
+                auto const from
+                    = split != nullptr && split->split != ll_block::none ? split->split : _blocks[operands[k + 1]];
+                _m.set_phi_edge(_values[first + l], edge++, leaf_at(value_ref(operands[k]), l), from);
             }
+            // the edge back into the loop that no invocation takes carries no value
+            for (auto const& b : _loop_breaks)
+                if (b.back == at)
+                    _m.set_phi_edge(_values[first + l], edge++, _m.constant_undef(_m.type_of(_values[first + l])),
+                                    b.split != ll_block::none ? b.split : _blocks[b.from]);
         }
     }
 }

@@ -10,6 +10,7 @@
 #include <shaped-graphics-language/ir/ssa.hh>
 #include <shaped-graphics-language/ir/verify.hh>
 
+
 using namespace sgl;
 using namespace sgl::ir;
 
@@ -71,17 +72,22 @@ cc::optional<cc::string> sgl::ir::compile_dxil(emit::impl::plan const& plan, pro
 {
     if (auto gap = lower_to_ssa(plan, p); gap.has_value())
         return gap;
-    simplify(p);
-    assert_whole(p, control_flow::unstructured, "simplify");
+    // A loop of a subgroup operation keeps its structure, which the writer reads to keep a break's blocks in the loop.
+    auto flow = control_flow::unstructured;
+    for (auto const& i : p.instructions)
+        if (i.code == op::subgroup)
+            flow = control_flow::structured;
+    simplify(p, flow);
+    assert_whole(p, flow, "simplify");
     share_common_values(p);
-    assert_whole(p, control_flow::unstructured, "share_common_values");
+    assert_whole(p, flow, "share_common_values");
     hoist_common_values(p);
-    assert_whole(p, control_flow::unstructured, "hoist_common_values");
+    assert_whole(p, flow, "hoist_common_values");
     remove_unused(p);
-    assert_whole(p, control_flow::unstructured, "remove_unused");
-    flatten_branches(p);
-    assert_whole(p, control_flow::unstructured, "flatten_branches");
+    assert_whole(p, flow, "remove_unused");
+    flatten_branches(p, flow);
+    assert_whole(p, flow, "flatten_branches");
     chain_sums(p);
-    assert_whole(p, control_flow::unstructured, "chain_sums");
+    assert_whole(p, flow, "chain_sums");
     return write_dxil(p, out);
 }
