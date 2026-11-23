@@ -8,7 +8,7 @@ using namespace sgl;
 using namespace sgl::check;
 using namespace sgl::check::impl;
 
-// Queries (the spec's checking file, CHK-540 to CHK-546): `let q = world.query(r)`, `for c in q.candidates:` and
+// Queries (the spec's checking file, CHK-553 to CHK-559): `let q = world.query(r)`, `for c in q.candidates:` and
 // `q.hit`, which the flattener writes as a trace's two forms (check/flatten_query.cc).
 // What a reader checks by eye is checked here, from the text: where a loop stands and when a hit is read.
 // What only the inlined tree shows, a query handed on through a call, is the flattener's to judge.
@@ -78,7 +78,7 @@ bool checker::judge_query_let(function_scope& scope, ast::stmt_id id, ast::let_s
                "give a value to keep");
         return false;
     }
-    // CHK-541: a query is the `let` of the `world.query` that gave it, and nothing else holds it
+    // CHK-554: a query is the `let` of the `world.query` that gave it, and nothing else holds it
     auto const* const call = ast::is_valid(let.value) ? ast.at(let.value).node.try_as<ast::call>() : nullptr;
     auto const& callee = ast::is_valid(let.value) ? tables_of(file).target_at(let.value) : target{};
     auto const is_start = call != nullptr && callee.kind == target_kind::overload && is_valid(callee.symbol)
@@ -123,7 +123,7 @@ type_id checker::check_query_member(function_scope& scope, ast::expr_id id, ast:
                               out.name_of(object), name));
             return error_type;
         }
-        // CHK-546: after the query's loop alone, which the text shows where the query is a `let` of this body
+        // CHK-559: after the query's loop alone, which the text shows where the query is a `let` of this body
         auto const* const object_name = ast_of(file).at(member.object).node.try_as<ast::name>();
         auto const* const local = object_name != nullptr ? scope.find_local(text_of(file, object_name->where)) : nullptr;
         if (auto const* const q = query_let_of(scope, local); q != nullptr && !is_prelude_file(file))
@@ -197,7 +197,7 @@ type_id checker::check_query_call(function_scope& scope, ast::expr_id id, ast::c
     auto const geometry = geometry_name(t);
     if (name == "commit")
     {
-        // CHK-545: a triangle is accepted as it is, and a box's primitive is reported at a `t` of the body's
+        // CHK-558: a triangle is accepted as it is, and a box's primitive is reported at a `t` of the body's
         auto const is_box = arguments.size() == 1;
         if (arguments.size() > 1 || (arguments.size() == 1 && !arguments[0].name.empty()))
         {
@@ -278,7 +278,7 @@ void checker::check_candidate_loop(function_scope& scope, ast::stmt_id id, ast::
     {
         set_type(file, loop.iterable, object);
         candidate = resource_type({.kind = type_kind::query_candidate, .format = out.at(object).format});
-        // CHK-542: one loop, in the block of the query's `let`, after it and at its level
+        // CHK-555: one loop, in the block of the query's `let`, after it and at its level
         auto const* const object_name = ast.at(member.object).node.try_as<ast::name>();
         auto const* const local = object_name != nullptr ? scope.find_local(text_of(file, object_name->where)) : nullptr;
         auto* const q = query_let_of(scope, local);
@@ -300,7 +300,7 @@ void checker::check_candidate_loop(function_scope& scope, ast::stmt_id id, ast::
         if (q != nullptr && q->loop == id)
             q->is_loop_open = true;
     }
-    // CHK-542: how often a candidate loop runs is the driver's, so nothing states it
+    // CHK-555: how often a candidate loop runs is the driver's, so nothing states it
     auto const& attributes = ast.at(id).attributes;
     for (auto const& a : ast.at(attributes))
         unsupported(file, a.name, "an attribute on a candidate loop, which runs as often as the driver decides");

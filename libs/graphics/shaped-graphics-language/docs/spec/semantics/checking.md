@@ -1618,42 +1618,42 @@ HLSL writes it on dx12 and vulkan; WebGPU has none, and sg's metal backend does 
 
 ### Queries
 
-* **CHK-540** `world.query(r)` of an acceleration member `world` and a `ray` `r` gives a **query**, a `trace_query[.g]` of the member's geometry `.g` ([why](why/checking.md#chk-540)).
+* **CHK-553** `world.query(r)` of an acceleration member `world` and a `ray` `r` gives a **query**, a `trace_query[.g]` of the member's geometry `.g` ([why](why/checking.md#chk-553)).
   `flags`, a `ray_flags`, and `mask`, an `int`, follow by name; any other argument is `no-matching-overload`.
   `flags` is a constant once the entry point is inlined, or `invalid-constant-argument`; `mask` may be any `int`, of which the low 8 bits count.
   Its builtins need `ray_query`, by CHK-322, and it stands in any stage an inline trace may.
   Flags a target forbids together are left out as a trace leaves them, so a query that skips every kind its structure holds meets no candidate and commits nothing.
-* **CHK-541** A query is the `let` of the `world.query` that gave it, and a **candidate** the variable of a candidate loop ([why](why/checking.md#chk-541)).
+* **CHK-554** A query is the `let` of the `world.query` that gave it, and a **candidate** the variable of a candidate loop ([why](why/checking.md#chk-554)).
   Any other value of either is `query-escapes`.
   So is a `let mut` of one, an assignment of one, a struct or an array that holds one, an `if` or a `return` that hands one on, and a `print` of one.
   An argument is none of these: a call is inlined, and a parameter of type `trace_query[.g]` or `query_candidate[.g]` stands for the name it was handed.
   `c.triangle()` and `c.box()` are values like any other: a `triangle_candidate` and a `procedural_box`, read from the candidate where they stand.
-* **CHK-542** `for c in q.candidates:` is a **candidate loop**: its body runs once per candidate the traversal of `q` meets, and `c` is a `query_candidate[.g]` ([why](why/checking.md#chk-542)).
+* **CHK-555** `for c in q.candidates:` is a **candidate loop**: its body runs once per candidate the traversal of `q` meets, and `c` is a `query_candidate[.g]` ([why](why/checking.md#chk-555)).
   `q.candidates` stands behind a `for`'s `in` and nowhere else, or `query-traversal-misplaced`.
   The loop stands in the block of its query's `let`, after it and at its level, and a query has one loop at most; a loop anywhere else, or a second one, is `query-traversal-misplaced`.
   `break` ends the traversal, keeping what it committed, `continue` goes on to the next candidate, and a `return` or a `yield` ends the traversal with what it leaves.
   Each names the innermost loop around it, by CHK-119, so a `break` in a loop inside the body leaves that loop alone.
   An attribute on a candidate loop is `unsupported-yet`, by CHK-39, since how often it runs is the driver's.
   Its body is in non-uniform control flow (CHK-284), since each invocation meets its own candidates.
-* **CHK-543** A candidate loop's body is a decision of CHK-404: a write through a binding that it reaches is `stage-not-allowed`, whose detail says the driver decides how often the body runs.
+* **CHK-556** A candidate loop's body is a decision of CHK-404: a write through a binding that it reaches is `stage-not-allowed`, whose detail says the driver decides how often the body runs.
   It writes its own locals and the enclosing body's, and a commit writes the query, which is no binding.
   A query or a trace inside the body is one of its own, and its own loop's body a decision too.
-* **CHK-544** A candidate's members are the table of [raytracing](../raytracing.md#stepping-through-a-trace) ([why](why/checking.md#chk-544)).
+* **CHK-557** A candidate's members are the table of [raytracing](../raytracing.md#stepping-through-a-trace) ([why](why/checking.md#chk-557)).
   On a query of `.triangles`, a member the table gives a box alone is `unknown-member`, and on `.procedural` one it gives a triangle alone, the detail naming the query's geometry.
   On `.mixed` each is a member, and one of the other kind reads an undefined value, as a mixed hit's attributes do on a triangle.
   A member reads the query's state where it stands, so an `assert`'s condition takes none (CHK-227).
-* **CHK-545** `c.commit()` accepts a triangle candidate, and `c.commit(t)` with a `float` `t` reports a box's primitive hit at `t` ([why](why/checking.md#chk-545)).
+* **CHK-558** `c.commit()` accepts a triangle candidate, and `c.commit(t)` with a `float` `t` reports a box's primitive hit at `t` ([why](why/checking.md#chk-558)).
   Each gives a `bool`, whether it committed.
   A `t` of another type is `type-mismatch`, and `c.commit(t)` on `.triangles` or `c.commit()` on `.procedural` is `no-matching-overload`.
   `c.commit(t)` commits only where `c.t_min <= t <= c.t_current`, and elsewhere gives `false` and changes nothing.
   On `.mixed` a commit of the other kind gives `false` and changes nothing.
   Where the query's flags hold `accept_first_hit_and_end_search`, a commit that gives `true` ends the traversal once the candidate's body is done, as a `break` at its end would.
-* **CHK-546** `q.hit` is the hit a query committed: a `triangle_hit`, a `procedural_hit[void]` or a `mixed_hit[void]` for `.triangles`, `.procedural` and `.mixed` ([why](why/checking.md#chk-546)).
+* **CHK-559** `q.hit` is the hit a query committed: a `triangle_hit`, a `procedural_hit[void]` or a `mixed_hit[void]` for `.triangles`, `.procedural` and `.mixed` ([why](why/checking.md#chk-559)).
   It is read after the query's candidate loop alone, in that loop's block or a block within it; a read inside the loop, before it, or of a query without one is `query-hit-too-early`.
   A query a function is handed is judged where the call is inlined.
   It may be read any number of times there, and each read gives the same hit.
   It `is_hit` where the traversal committed anything, and otherwise its `t` is the ray's `t_max` and nothing else is set.
-* **CHK-547** `world.trace(r, …)` with a constant `flags` gives what its decisions written as a candidate loop give ([why](why/checking.md#chk-547)).
+* **CHK-560** `world.trace(r, …)` with a constant `flags` gives what its decisions written as a candidate loop give ([why](why/checking.md#chk-560)).
   That is the loop of [raytracing](../raytracing.md#stepping-through-a-trace): a triangle's decision on `c.triangle()`, and a box's intersection on `c.box()`.
   A box's any hit runs only where the box is not opaque, and `accept_and_end_search` is a `break`.
   A trace's decisions are inlined into that body, so CHK-404 judges them as it judges the body.
@@ -1781,7 +1781,7 @@ hit_group textured for path_rays:
 * **CHK-113** `place op= value` is `place = place op value`: the operator resolves by CHK-70 to CHK-73, and its result is of the type of `place`.
 * **CHK-114** The condition of an `if` and of a `while` is a `bool`, or it is `type-mismatch`.
 * **CHK-115** `for name in first ..< end` runs over `int`: both bounds are `int`, and `name` is an immutable `int` local of the body.
-  A type on the variable is `int`; a range that is not `..<`, and anything else behind `in`, is `unsupported-yet`, but a query's `candidates` (CHK-542) ([why](why/checking.md#chk-115)).
+  A type on the variable is `int`; a range that is not `..<`, and anything else behind `in`, is `unsupported-yet`, but a query's `candidates` (CHK-555) ([why](why/checking.md#chk-115)).
 * **CHK-116** `and`, `or` and `not` are the language's own: their operands are `bool` and so is their value, and no function declares them ([why](why/checking.md#chk-116)).
 * **CHK-117** In a comparison chain each operator resolves over its two neighbours by CHK-70 to CHK-73 and gives a `bool`, and the chain is a `bool`.
 * **CHK-118** A `loop:` that is a statement is left by `break`, and one that is a value by `break value`.
@@ -2028,7 +2028,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 
 | kind | reported by |
 |---|---|
-| `unsupported-yet` | CHK-8, CHK-61, CHK-134, CHK-213, CHK-237, CHK-291, CHK-299, CHK-307, CHK-314, CHK-321, CHK-329, CHK-333, CHK-338, CHK-339, CHK-344, CHK-346, CHK-347, CHK-350, CHK-352, CHK-353, CHK-357, CHK-366, CHK-374, CHK-381, CHK-383, CHK-387, CHK-389, CHK-397, CHK-431, CHK-432, CHK-434, CHK-516, CHK-522, CHK-523, CHK-526, CHK-524, CHK-525, CHK-450, CHK-453, CHK-454, CHK-538, CHK-542 |
+| `unsupported-yet` | CHK-8, CHK-61, CHK-134, CHK-213, CHK-237, CHK-291, CHK-299, CHK-307, CHK-314, CHK-321, CHK-329, CHK-333, CHK-338, CHK-339, CHK-344, CHK-346, CHK-347, CHK-350, CHK-352, CHK-353, CHK-357, CHK-366, CHK-374, CHK-381, CHK-383, CHK-387, CHK-389, CHK-397, CHK-431, CHK-432, CHK-434, CHK-516, CHK-522, CHK-523, CHK-526, CHK-524, CHK-525, CHK-450, CHK-453, CHK-454, CHK-538, CHK-555 |
 | `member-not-allowed-here` | CHK-490 |
 | `duplicate-declaration` | CHK-12, CHK-28, CHK-241, CHK-347, CHK-351, CHK-530 |
 | `dependency-cycle` | CHK-18, CHK-136 |
@@ -2047,7 +2047,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `invalid-attribute-arguments` | CHK-36, CHK-39, CHK-204, CHK-208, CHK-211, CHK-212, CHK-220, CHK-231, CHK-267, CHK-403, CHK-292, CHK-293, CHK-301, CHK-304, CHK-384, CHK-369, CHK-370, CHK-371, CHK-431, CHK-435, CHK-480, CHK-522, CHK-526, CHK-538 |
 | `binding-not-listed` | CHK-45, CHK-131, CHK-228 |
 | `as-precedence` | CHK-411 |
-| `type-mismatch` | CHK-52, CHK-56, CHK-77, CHK-112 to CHK-118, CHK-121, CHK-167, CHK-210, CHK-214, CHK-219, CHK-236, CHK-243, CHK-275, CHK-276, CHK-279, CHK-281, CHK-287, CHK-329, CHK-344, CHK-362, CHK-375, CHK-392, CHK-429, CHK-433, CHK-434, CHK-545 |
+| `type-mismatch` | CHK-52, CHK-56, CHK-77, CHK-112 to CHK-118, CHK-121, CHK-167, CHK-210, CHK-214, CHK-219, CHK-236, CHK-243, CHK-275, CHK-276, CHK-279, CHK-281, CHK-287, CHK-329, CHK-344, CHK-362, CHK-375, CHK-392, CHK-429, CHK-433, CHK-434, CHK-558 |
 | `not-assignable` | CHK-112, CHK-236, CHK-316, CHK-352, CHK-367, CHK-514, CHK-536, CHK-539 |
 | `read-before-assignment` | CHK-55 |
 | `missing-return` | CHK-125, CHK-236 |
@@ -2057,11 +2057,11 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `workgroup-wastes-lanes` | CHK-521 |
 | `recursive-call` | CHK-130 |
 | `recursive-trace` | CHK-332 |
-| `query-escapes` | CHK-541 |
-| `query-traversal-misplaced` | CHK-542 |
-| `query-hit-too-early` | CHK-546 |
-| `unknown-member` | CHK-64, CHK-147, CHK-152, CHK-279, CHK-329, CHK-385, CHK-488, CHK-544 |
-| `no-matching-overload` | CHK-71, CHK-155, CHK-316, CHK-340, CHK-329, CHK-344, CHK-365, CHK-366, CHK-367, CHK-392, CHK-396, CHK-433, CHK-434, CHK-458, CHK-540, CHK-545 |
+| `query-escapes` | CHK-554 |
+| `query-traversal-misplaced` | CHK-555 |
+| `query-hit-too-early` | CHK-559 |
+| `unknown-member` | CHK-64, CHK-147, CHK-152, CHK-279, CHK-329, CHK-385, CHK-488, CHK-557 |
+| `no-matching-overload` | CHK-71, CHK-155, CHK-316, CHK-340, CHK-329, CHK-344, CHK-365, CHK-366, CHK-367, CHK-392, CHK-396, CHK-433, CHK-434, CHK-458, CHK-553, CHK-558 |
 | `non-exhaustive-case` | CHK-160 |
 | `duplicate-case-pattern` | CHK-161 |
 | `missing-value-in-arm` | CHK-168 |
@@ -2071,7 +2071,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `unused-require` | CHK-265 |
 | `pixel-stage-ignores-view` | CHK-515 |
 | `generic-not-instantiated` | CHK-338 |
-| `stage-not-allowed` | CHK-193, CHK-277, CHK-329, CHK-344, CHK-512, CHK-543 |
+| `stage-not-allowed` | CHK-193, CHK-277, CHK-329, CHK-344, CHK-512, CHK-556 |
 | `ambiguous-overload` | CHK-72 |
 | `missing-field`, `unknown-field`, `duplicate-field` | CHK-178 |
 | `invalid-entry-point` | CHK-87, CHK-88, CHK-89, CHK-93, CHK-271, CHK-273, CHK-276, CHK-294, CHK-301 to CHK-306, CHK-326 to CHK-328, CHK-342, CHK-380, CHK-481, CHK-484, CHK-485, CHK-520 |
@@ -2090,7 +2090,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `constant-without-value` | CHK-311 |
 | `constant-not-representable` | CHK-312, CHK-396 |
 | `missing-sampler` | CHK-279 |
-| `invalid-constant-argument` | CHK-280, CHK-285, CHK-299, CHK-309, CHK-378, CHK-389, CHK-425, CHK-426, CHK-433, CHK-540 |
+| `invalid-constant-argument` | CHK-280, CHK-285, CHK-299, CHK-309, CHK-378, CHK-389, CHK-425, CHK-426, CHK-433, CHK-553 |
 | `non-uniform-control-flow` | CHK-282, CHK-298, CHK-374, CHK-377, CHK-379, CHK-431 |
 | `non-uniform-index` | CHK-300, CHK-401 |
 | `needless-nonuniform` | CHK-300, CHK-401 |

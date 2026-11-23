@@ -378,7 +378,7 @@ TEST("slib - a query on a device with opacity micromaps says so on both routes, 
     spirv_modules.validate();
 }
 
-// EMIT-275, EMIT-277: the candidate loop's native form on both writers, each past its validator, from the corpus's
+// EMIT-276, EMIT-278: the candidate loop's native form on both writers, each past its validator, from the corpus's
 // queries: a procedural one that breaks, a triangle one that ends its search at a commit and returns out of its loop
 // through a helper, and a mixed one with a query in its body.
 TEST("slib - a candidate loop lowers on both writers, each past its validator")

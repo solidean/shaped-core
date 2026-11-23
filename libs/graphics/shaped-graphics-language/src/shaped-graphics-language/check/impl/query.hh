@@ -3,7 +3,7 @@
 #include <clean-core/string/string_view.hh>
 #include <shaped-graphics-language/fwd.hh>
 
-// The members of a query and of its candidates (CHK-544 to CHK-546): one table the checker types them by and the
+// The members of a query and of its candidates (CHK-557 to CHK-559): one table the checker types them by and the
 // flattener writes them from.
 // A candidate's member `m` is the prelude's `query_native_m(q, r)` in the native form and `query_emulated_m(w, s, r)`
 // in the emulated one, and its type is what the native function returns.
@@ -83,7 +83,7 @@ inline constexpr query_member_info k_query_members[] = {
 };
 
 /// Whether a candidate of a query of `geometry`, a position in `k_geometry_kinds`, has a member of `kind`.
-/// On `.mixed` it has every member, and one of the other kind reads an undefined value (CHK-544).
+/// On `.mixed` it has every member, and one of the other kind reads an undefined value (CHK-557).
 [[nodiscard]] constexpr bool has_member_of(int geometry, query_member_kind kind)
 {
     if (kind == query_member_kind::any || geometry == 2)

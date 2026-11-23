@@ -359,7 +359,7 @@ type_id checker::resolve_acceleration_structure(i32 file, ast::expr_id expr, ast
 type_id checker::resolve_query_type(i32 file, ast::expr_id expr, ast::index const& node, bool is_query)
 {
     auto const arguments = ast_of(file).at(node.arguments);
-    // CHK-540: a query and its candidates are of their structure's geometry, which picks their members
+    // CHK-553: a query and its candidates are of their structure's geometry, which picks their members
     auto const* const dot = arguments.size() == 1 && arguments[0].name.empty() && !arguments[0].is_splat
                               ? ast_of(file).at(arguments[0].value).node.try_as<ast::leading_dot>()
                               : nullptr;

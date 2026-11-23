@@ -1061,7 +1061,7 @@ type_id checker::check_member(function_scope& scope, ast::expr_id id, ast::membe
     subscripted = outer;
     if (object == error_type || member.name.empty())
         return error_type;
-    // CHK-544, CHK-546: a query's and a candidate's members are their own table's
+    // CHK-557, CHK-559: a query's and a candidate's members are their own table's
     if (is_query_kind(out.at(object).kind))
         return check_query_member(scope, id, member, object);
 

@@ -667,7 +667,7 @@ auto sgl::check::impl::flattener::inline_bound(ast::expr_id call,
     c.note_body_read(callee);
     auto const& s = c.out.at(callee);
     auto is_open = s.info < 0 || frames.size() > k_max_inline_depth;
-    // a candidate loop's body calls nothing below it: what stands there is the loop it is written in (EMIT-275)
+    // a candidate loop's body calls nothing below it: what stands there is the loop it is written in (EMIT-276)
     for (auto i = frames.size() - 1; i >= 0; --i)
     {
         is_open = is_open || frames[i].function == callee;

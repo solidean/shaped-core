@@ -797,7 +797,7 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
   SGL's SPIR-V writes `OpRayQueryGetIntersectionClusterIdNV` and `ClusterIDNV`, with `SPV_NV_cluster_acceleration_structure`'s capability.
   HLSL for vulkan reaches them through inline SPIR-V, a template over both of a `RayQuery`'s parameters and a builtin input, which DXC has no names for.
   HLSL for dx12 writes Shader Model 6.10's `CandidateClusterID`, `CommittedClusterID` and `ClusterID`, and DXIL refuses it as `unsupported-yet` until then.
-* **EMIT-275** A query of the native form is EMIT-243's one query, and its candidate loop steps it.
+* **EMIT-276** A query of the native form is EMIT-243's one query, and its candidate loop steps it.
   The loop declares the query, starts the trace and is a loop over the target's proceed, and its body reads the candidate.
   The `let` of `world.query` evaluates its arguments where it stands, and nothing between it and its loop can tell where the trace starts.
   HLSL writes `RayQuery<flags> q;`, a `RayDesc` and `TraceRayInline` (EMIT-159), and `while (q.Proceed())` for the loop.
@@ -805,13 +805,13 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
   A `.procedural` query writes `skip_triangles` and a `.triangles` one `skip_procedural` beside its flags, as a trace does.
   `c.is_triangle` is the candidate's type, each member its target's candidate read, and `q.hit` the committed reads, built as a trace builds its result.
   A query whose hit nothing reads writes no committed read.
-  `c.commit(t)` is the range test of CHK-545 around the target's commit, and on `.mixed` both commits test the candidate's type first.
-* **EMIT-276** A query of the emulated form is the walk of sg's acceleration pool, with the candidate loop's body inlined where the walk meets a candidate.
+  `c.commit(t)` is the range test of CHK-558 around the target's commit, and on `.mixed` both commits test the candidate's type first.
+* **EMIT-277** A query of the emulated form is the walk of sg's acceleration pool, with the candidate loop's body inlined where the walk meets a candidate.
   The walk commits an opaque triangle itself, as a target's traversal does, and hands the body every non-opaque triangle and every box the ray enters.
   `c.commit()` and `c.commit(t)` set the walk's committed hit, and `t_current` reads it.
   `break` ends the walk, and `continue` goes on with it; the body's own loops keep their own `break` and `continue`.
   The interpreter runs this form (EVAL-95), so a `test` steps through a query against a pool its driver binds.
-* **EMIT-277** Every exit that leaves a candidate loop before the traversal is done writes the target's abort ([why](why/emitting.md#emit-277)).
+* **EMIT-278** Every exit that leaves a candidate loop before the traversal is done writes the target's abort ([why](why/emitting.md#emit-278)).
   Those are a `break`, a `return`, a `yield` out of a value block around the loop, and a commit that ends the search.
   The abort comes after the value the exit hands on, which may read the candidate, and before the exit itself.
   A `discard` writes no abort: the invocation goes on as a helper (EMIT-238), which writes nothing, and its traversal with it.

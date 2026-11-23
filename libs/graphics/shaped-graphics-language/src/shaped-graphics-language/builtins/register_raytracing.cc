@@ -1009,7 +1009,7 @@ void sgl::builtins::register_raytracing(registry& r)
             nothing, query_op::trace, "/// Starts the trace of a ray.");
     add("fun ray_query_proceed(q: ray_query) -> bool", no_bool, query_op::proceed,
         "/// Traverses to the next candidate the shader decides, and false once there is none.");
-    // CHK-542: a candidate loop's body is non-uniform control flow whatever its ray, where a trace's decisions are
+    // CHK-555: a candidate loop's body is non-uniform control flow whatever its ray, where a trace's decisions are
     // judged by what they decided
     add("fun ray_query_step(q: ray_query) -> bool", no_bool, query_op::proceed,
         "/// Traverses to the next candidate as `ray_query_proceed` does, for a candidate loop, whose body is each "

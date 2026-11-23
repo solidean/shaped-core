@@ -282,7 +282,7 @@ fun graded(a: float) -> float:
   A member name its binding lacks, or bytes that are no whole value or no whole number of elements, fail the test as `invalid-bindings`, and it never runs.
   A texture, an image or a binding array of them is bound as EVAL-120's texels, with its extent, layers, levels and samples; texels that are no whole set of them fail as `invalid-bindings` too.
   A dynamic sampler is bound as the state `sg::sampler` holds.
-* **EVAL-95** A trace and a query run their emulated form, over the acceleration pool the driver binds, laid out as sg's webgpu backend lays it out (EMIT-276).
+* **EVAL-95** A trace and a query run their emulated form, over the acceleration pool the driver binds, laid out as sg's webgpu backend lays it out (EMIT-277).
   `acceleration_root(world)` is the root unit the driver gives that member, and `acceleration_pool_load(u)` is unit `u` of the pool.
   A run without a pool reads zero at every unit, so every trace misses and every query meets nothing; a unit past the end of a pool it has is a `program-error`.
 * **EVAL-130** A moving instance stands at the ray's `time`: its object-to-world map is its two transforms mixed element by element, `M0 + (M1 - M0) * s`.

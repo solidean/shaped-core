@@ -31,7 +31,7 @@ struct stage_violation
     stage decision = stage::none;
     /// The decision is one an inline trace calls, rather than the entry point itself.
     bool is_inlined_decision = false;
-    /// The decision is a candidate loop's body (CHK-543).
+    /// The decision is a candidate loop's body (CHK-556).
     bool is_candidate_body = false;
     /// The write is an assignment to a buffer's element, `call` its place; `callee` is then none.
     bool is_buffer_store = false;
@@ -54,7 +54,7 @@ struct flattener
     cc::vector<stage_violation> stage_violations;
     /// The decision an inline trace's loop is calling while its body is inlined: `any_hit` or `intersection` (CHK-404).
     stage inlined_decision = stage::none;
-    /// The decision being inlined is a candidate loop's body rather than a trace's decision (CHK-543).
+    /// The decision being inlined is a candidate loop's body rather than a trace's decision (CHK-556).
     bool is_candidate_body = false;
     /// A test's calls of a builtin only the ray-tracing stages reach, which a test cannot run yet.
     cc::vector<stage_violation> ray_stage_calls;
@@ -202,7 +202,7 @@ struct flattener
         /// The instance whose body it was written in, whose tables hold its types; -1 outside one (CHK-338).
         i32 instance = -1;
         /// The body of a candidate loop, a position in `candidate_loops`, which the prelude's loop hands each
-        /// candidate to (EMIT-275, EMIT-276); -1 for a function or a lambda.
+        /// candidate to (EMIT-276, EMIT-277); -1 for a function or a lambda.
         i32 candidate_loop = -1;
     };
     cc::vector<closure> closures;
@@ -948,9 +948,9 @@ struct flattener
 
     // ---- queries (check/flatten_query.cc) ----------------------------------------------------------------------------
 
-    /// A query of the tree, made where its `let` stands (CHK-540), or a candidate of one, met in its loop (CHK-542).
+    /// A query of the tree, made where its `let` stands (CHK-553), or a candidate of one, met in its loop (CHK-555).
     /// A name of either stands for an int literal of its type whose value is its position here, which nothing but a
-    /// member, a loop or a parameter reads; any other node holding one is a query that escaped (CHK-541).
+    /// member, a loop or a parameter reads; any other node holding one is a query that escaped (CHK-554).
     struct query_state
     {
         /// For a candidate, the query it is of; -1 for a query.
@@ -963,7 +963,7 @@ struct flattener
         flat_expr_id ray = flat_expr_id::none;
         flat_expr_id flags = flat_expr_id::none;
         flat_expr_id mask = flat_expr_id::none;
-        /// The flags' value, a constant (CHK-540).
+        /// The flags' value, a constant (CHK-553).
         u32 flag_bits = 0;
         /// What `q.hit` reads, which the loop assigns.
         local_id hit = local_id::none;
@@ -978,7 +978,7 @@ struct flattener
         local_id handle = local_id::none;
         /// A candidate's in the emulated form: what the walk committed.
         local_id walk = local_id::none;
-        /// A candidate's in the native form under `accept_first_hit_and_end_search`: a commit was made (EMIT-277).
+        /// A candidate's in the native form under `accept_first_hit_and_end_search`: a commit was made (EMIT-278).
         local_id ended = local_id::none;
     };
     cc::vector<query_state> queries;
@@ -1006,15 +1006,15 @@ struct flattener
 
     /// The position in `queries` that `value` stands for; -1 where it is no query's or candidate's literal.
     [[nodiscard]] i32 query_of(flat_expr_id value) const;
-    /// CHK-540: `let q = world.query(r, …)`, which binds `q` and writes nothing but its arguments.
+    /// CHK-553: `let q = world.query(r, …)`, which binds `q` and writes nothing but its arguments.
     void flatten_query_let(origin from, ast::stmt_id id, ast::let_stmt const& let);
-    /// CHK-542, EMIT-275, EMIT-276: the candidate loop as the two forms of a trace.
+    /// CHK-555, EMIT-276, EMIT-277: the candidate loop as the two forms of a trace.
     void flatten_candidate_loop(origin from, ast::stmt_id id, ast::for_stmt const& loop);
-    /// CHK-544 to CHK-546: a member of a candidate or a query, read or called.
+    /// CHK-557 to CHK-559: a member of a candidate or a query, read or called.
     flat_expr_id flatten_query_member(ast::expr_id id, target const& where);
     /// The loop's body for the candidate `values[0]`: the target's query, or the walk's candidate.
     flat_expr_id call_candidate_body(ast::expr_id id, i32 loop, cc::span<flat_expr_id const> values);
-    /// EMIT-277: before a leave of `target` from a native candidate loop's body, the abort of every loop it leaves;
+    /// EMIT-278: before a leave of `target` from a native candidate loop's body, the abort of every loop it leaves;
     /// `target` none for the tree's own return.
     /// The leave's `value`, where it has one, is evaluated into a local first, since it may read the candidate.
     void abort_crossed(origin from, label_id target, flat_expr_id* value = nullptr);
@@ -1023,7 +1023,7 @@ struct flattener
                               cc::string_view name,
                               cc::span<flat_expr_id const> arguments,
                               cc::span<i32 const> handed = {});
-    /// CHK-541: a node of the tree that holds a query or a candidate, which is one that escaped.
+    /// CHK-554: a node of the tree that holds a query or a candidate, which is one that escaped.
     void judge_queries();
     /// Reports `kind` at `at` of the file being written, once however many trees inline it, and fails the tree
     /// without a second diagnostic; always `none`.

@@ -3,7 +3,7 @@
 using namespace sgl_test;
 using namespace sgl_test::emulated_scenes;
 
-// The candidate loop's emulated form on the interpreter (EMIT-276, EVAL-95): a query steps through the walk of the
+// The candidate loop's emulated form on the interpreter (EMIT-277, EVAL-95): a query steps through the walk of the
 // pools emulated-scenes.hh writes, and its answers are held to the hand-worked geometry and to `world.trace`'s.
 
 TEST("sgl query - a query of the empty structure meets no candidate, and its hit is the ray's end")
@@ -21,7 +21,7 @@ TEST("sgl query - a query of the empty structure meets no candidate, and its hit
 
 TEST("sgl query - an opaque triangle is committed by the traversal, and no body is asked about it")
 {
-    // CHK-544: a candidate is what the traversal cannot decide alone
+    // CHK-557: a candidate is what the traversal cannot decide alone
     CHECK(failures_of("test {scenes}:\n"
                       "    let q = scenes.pair.query(along_z(0.25, 0.25))\n"
                       "    let mut n = 0\n"
@@ -60,7 +60,7 @@ TEST("sgl query - a non-opaque triangle is a candidate, and only a commit makes 
 
 TEST("sgl query - a candidate reads what the traversal stopped at, and t_current what it committed")
 {
-    // CHK-544
+    // CHK-557
     CHECK(failures_of("test {scenes}:\n"
                       "    let q = scenes.cutout.query(along_z(0.25, 0.25))\n"
                       "    let mut seen = 0\n"
@@ -92,7 +92,7 @@ TEST("sgl query - a candidate reads what the traversal stopped at, and t_current
 
 TEST("sgl query - break keeps what was committed, continue leaves a candidate, and return leaves both")
 {
-    // CHK-542
+    // CHK-555
     CHECK(failures_of("fun first_primitive(r: ray){scenes} -> int:\n"
                       "    let q = scenes.cutout.query(r)\n"
                       "    for c in q.candidates:\n"
@@ -132,7 +132,7 @@ TEST("sgl query - break keeps what was committed, continue leaves a candidate, a
 
 TEST("sgl query - accept_first_hit_and_end_search ends the traversal at the first commit that commits")
 {
-    // CHK-545
+    // CHK-558
     CHECK(failures_of("test {scenes}:\n"
                       "    let q = scenes.cutout.query(along_z(0.25, 0.25), flags = "
                       "ray_flags.accept_first_hit_and_end_search)\n"
@@ -147,7 +147,7 @@ TEST("sgl query - accept_first_hit_and_end_search ends the traversal at the firs
 
 TEST("sgl query - flags and a mask choose what a query meets, as they do a trace's")
 {
-    // CHK-540
+    // CHK-553
     CHECK(failures_of("test {scenes}:\n"
                       // a query that skips every kind its structure holds meets nothing, opaque or not
                       "    let a = scenes.pair.query(along_z(0.25, 0.25), flags = ray_flags.skip_triangles)\n"
@@ -174,7 +174,7 @@ TEST("sgl query - flags and a mask choose what a query meets, as they do a trace
 
 TEST("sgl query - a box is a candidate, opaque or not, and a commit within the ray's range is its hit")
 {
-    // CHK-544, CHK-545: a box with no commit is no hit; a commit outside t_min to t_current does nothing
+    // CHK-557, CHK-558: a box with no commit is no hit; a commit outside t_min to t_current does nothing
     CHECK(mixed_failures_of("test {scenes}:\n"
                             "    let q = scenes.ball.query(along_z(2.75, 0.75))\n"
                             "    let mut n = 0\n"
@@ -206,7 +206,7 @@ TEST("sgl query - a box is a candidate, opaque or not, and a commit within the r
 
 TEST("sgl query - a mixed query meets both kinds, and a commit of the other kind does nothing")
 {
-    // CHK-544, CHK-545 on `.mixed`: the ball, and behind it instance 13's two triangles, forced non-opaque
+    // CHK-557, CHK-558 on `.mixed`: the ball, and behind it instance 13's two triangles, forced non-opaque
     CHECK(mixed_failures_of("test {scenes}:\n"
                             "    let all = scenes.mixed.query(along_z(2.75, 0.75))\n"
                             "    let mut triangles = 0\n"
@@ -236,7 +236,7 @@ TEST("sgl query - a mixed query meets both kinds, and a commit of the other kind
 
 TEST("sgl query - a trace's decisions written as a candidate loop give what the trace gives")
 {
-    // CHK-547: `world.trace` is the candidate loop
+    // CHK-560: `world.trace` is the candidate loop
     CHECK(mixed_failures_of("fun looped(r: ray){scenes} -> triangle_hit:\n"
                             "    let q = scenes.cutout.query(r)\n"
                             "    for c in q.candidates:\n"
@@ -304,7 +304,7 @@ TEST("sgl query - the decal lookup collects every decal a point lies in, by the 
 
 TEST("sgl query - a box's commit takes t_min and t_current themselves, and a NaN commits nothing")
 {
-    // CHK-545: `t_min <= t <= t_current`, both ends included; a NaN is in no range
+    // CHK-558: `t_min <= t <= t_current`, both ends included; a NaN is in no range
     CHECK(mixed_failures_of("test {scenes}:\n"
                             "    let q = scenes.ball.query(along_z(2.75, 0.75))\n"
                             "    let mut good = true\n"
@@ -325,7 +325,7 @@ TEST("sgl query - a box's commit takes t_min and t_current themselves, and a NaN
 
 TEST("sgl query - under accept_first_hit_and_end_search the rest of a committing body runs, then the walk ends")
 {
-    // CHK-545: a commit that commits ends the traversal once the body is done, a `continue` after it too
+    // CHK-558: a commit that commits ends the traversal once the body is done, a `continue` after it too
     CHECK(failures_of("test {scenes}:\n"
                       "    let q = scenes.cutout.query(along_z(0.25, 0.25), flags = "
                       "ray_flags.accept_first_hit_and_end_search)\n"
@@ -343,7 +343,7 @@ TEST("sgl query - under accept_first_hit_and_end_search the rest of a committing
 
 TEST("sgl query - a mixed query that skips triangles meets its boxes alone")
 {
-    // CHK-540: `skip_triangles` on `.mixed` leaves the boxes; the ball is the one candidate on this ray
+    // CHK-553: `skip_triangles` on `.mixed` leaves the boxes; the ball is the one candidate on this ray
     CHECK(mixed_failures_of("test {scenes}:\n"
                             "    let q = scenes.mixed.query(along_z(2.75, 0.75), flags = ray_flags.skip_triangles)\n"
                             "    let mut triangles = 0\n"
@@ -362,7 +362,7 @@ TEST("sgl query - a mixed query that skips triangles meets its boxes alone")
 
 TEST("sgl query - early exits through loops in the body, a helper and a candidate handed on keep the walk right")
 {
-    // CHK-541, CHK-542: a return from a loop inside the body leaves the traversal and the function
+    // CHK-554, CHK-555: a return from a loop inside the body leaves the traversal and the function
     CHECK(failures_of("fun deep(r: ray){scenes} -> int:\n"
                       "    let q = scenes.cutout.query(r)\n"
                       "    for c in q.candidates:\n"

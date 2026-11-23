@@ -37,7 +37,7 @@ void sgl::check::impl::flattener::flatten_return(origin from, ast::expr_id value
         flat_expr_id const color[] = {result};
         result = add_expr(pixel_targets, from.expr, flat_construct{.arguments = add_list(color)});
     }
-    // EMIT-277: a return out of a native candidate loop's body aborts the traversal first
+    // EMIT-278: a return out of a native candidate loop's body aborts the traversal first
     abort_crossed(from, return_label, &result);
     if (is_valid(return_label))
         add_stmt(from, flat_leave{.target = return_label, .value = result});
@@ -779,7 +779,7 @@ void sgl::check::impl::flattener::flatten_walked_for(origin from,
 
 void sgl::check::impl::flattener::flatten_for(origin from, ast::stmt_id id, ast::for_stmt const& loop)
 {
-    // CHK-542: a loop over a query's candidates is the trace's two forms
+    // CHK-555: a loop over a query's candidates is the trace's two forms
     if (c.is_candidates(file(), loop.iterable))
         return flatten_candidate_loop(from, id, loop);
     auto const walk = ast::is_valid(loop.iterable) ? c.range_walk_of(file(), loop.iterable) : checker::range_walk();
@@ -807,7 +807,7 @@ void sgl::check::impl::flattener::flatten_stmt(ast::stmt_id id)
     auto const at = cursor_scope(*this, from);
     if (auto const* const let = s.node.try_as<ast::let_stmt>())
     {
-        // CHK-540: a query's `let` writes its arguments, and the name stands for the query
+        // CHK-553: a query's `let` writes its arguments, and the name stands for the query
         if (auto const type = ast::is_valid(let->value) ? tables().type_at(let->value) : type_id::none;
             type != type_id::none && type != checked_module::error_type && c.out.at(type).kind == type_kind::trace_query
             && !let->is_mut && tables().target_at(let->value).kind == target_kind::overload)

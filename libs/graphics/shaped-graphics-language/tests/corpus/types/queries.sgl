@@ -1,4 +1,4 @@
-// A query is a trace the program steps through itself (CHK-540 to CHK-547): `let q = world.query(r)`, one loop over
+// A query is a trace the program steps through itself (CHK-553 to CHK-560): `let q = world.query(r)`, one loop over
 // `q.candidates` in the let's block, and `q.hit` after it.
 // A test here binds no acceleration pool, so every query meets nothing (EVAL-95); tests/interpret/query-test.cc runs
 // them against pools.
@@ -35,12 +35,12 @@ fun probe() -> ray => ray(origin = pos3(0.0, 0.0, -1.0), direction = vec3(0.0, 0
     decals.found[i * 2] = int4(ids[0], ids[1], ids[2], ids[3])
     decals.found[i * 2 + 1] = int4(ids[4], ids[5], ids[6], ids[7])
 
-// a function may be handed a candidate or a query, which stands for the name it was given (CHK-541)
+// a function may be handed a candidate or a query, which stands for the name it was given (CHK-554)
 fun is_near(c: query_candidate[.triangles], limit: float) -> bool => c.t < limit
 
 fun nearest(q: trace_query[.triangles]) -> float => q.hit.t
 
-// a return out of the loop ends the traversal with the function (CHK-542, EMIT-277)
+// a return out of the loop ends the traversal with the function (CHK-555, EMIT-278)
 fun first_cut(r: ray){scene} -> int:
     let q = scene.world.query(r, flags = ray_flags.cull_back_facing)
     for c in q.candidates:
@@ -74,7 +74,7 @@ fun first_cut(r: ray){scene} -> int:
     let h = q.hit
     scene.hits[id.x] = float4(h.t, boxes as float, if h.kind == hit_kind.procedural => 1.0 else 0.0, 0.0)
 
-// without a pool a query meets nothing: its loop never runs, and its hit is the ray's end (CHK-546)
+// without a pool a query meets nothing: its loop never runs, and its hit is the ray's end (CHK-559)
 test {scene}:
     let q = scene.world.query(probe())
     let mut n = 0
@@ -147,7 +147,7 @@ test {scene}:
         let ok = c.commit(1.0)
     true
 
-// the body is a decision, whose writes through a binding the driver would repeat (CHK-543)
+// the body is a decision, whose writes through a binding the driver would repeat (CHK-556)
 @expect(error = "stage-not-allowed")
 @compute(64) fun writing_body(@thread_id id: int3){scene}:
     let q = scene.world.query(probe())

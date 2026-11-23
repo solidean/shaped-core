@@ -2,8 +2,8 @@
 
 SGL traces rays two ways, and a device grants each apart: an **inline trace** from any stage, and a **ray-tracing pipeline** of stages the GPU schedules.
 This file is the model — the vocabulary both share, each half's declarations, and what each target writes.
-[CHK-320 to CHK-332, CHK-342 to CHK-345 and CHK-540 to CHK-547](semantics/checking.md#ray-tracing) are its rules, and [AST-150 and AST-153](syntax/ast.md#pipelines) its syntax.
-[EMIT-135 to EMIT-139 and EMIT-275 to EMIT-277](semantics/emitting.md#ray-tracing) are what a target writes.
+[CHK-320 to CHK-332, CHK-342 to CHK-345 and CHK-553 to CHK-560](semantics/checking.md#ray-tracing) are its rules, and [AST-150 and AST-153](syntax/ast.md#pipelines) its syntax.
+[EMIT-135 to EMIT-139 and EMIT-276 to EMIT-278](semantics/emitting.md#ray-tracing) are what a target writes.
 The vocabulary is SGL source in `prelude/raytracing.sgl`, which a reader may open like any other file.
 Back to the [specification](_index.md).
 
@@ -161,7 +161,7 @@ A mixed hit is one flat struct rather than a choice of two, since SGL has neithe
 
 ### Stepping through a trace
 
-**`world.query(r, …)` starts a trace and hands back the query, which the program steps through itself** (CHK-540).
+**`world.query(r, …)` starts a trace and hands back the query, which the program steps through itself** (CHK-553).
 `for c in q.candidates:` meets each candidate the traversal cannot decide alone, and `q.hit` is what it committed, read once the loop is over.
 
 ```sgl sketch
@@ -171,21 +171,21 @@ for c in q.candidates:
 let h = q.hit
 ```
 
-* **A query is the trace it started, and it stays where its `let` put it** (CHK-541).
+* **A query is the trace it started, and it stays where its `let` put it** (CHK-554).
   It is not a value: no other local, field, array element, `if` or `return` holds it, and so neither does a candidate.
   A function may take either one as a parameter, which stands for the name it was given, since every call is inlined.
-* **A query is stepped through once, by one loop, in the block of its `let`** (CHK-542).
+* **A query is stepped through once, by one loop, in the block of its `let`** (CHK-555).
   The loop stands at the `let`'s own level, so nothing runs the loop more often than the trace, or skips it.
   A query in the body of a loop is a new trace each time round, with its own loop.
 * **`break` ends the traversal and keeps what it committed; `continue` leaves the candidate uncommitted** and goes on to the next.
   `return` ends both the traversal and the function.
-* **The body is a decision** (CHK-543): it writes its own locals and those around it, and nothing through a binding, since the driver decides how many candidates there are and in what order.
+* **The body is a decision** (CHK-556): it writes its own locals and those around it, and nothing through a binding, since the driver decides how many candidates there are and in what order.
 * **The body may trace again**: a query or a `world.trace` inside it is a trace of its own, with its own query.
-* **`flags` are a constant and `mask` is not** (CHK-540).
+* **`flags` are a constant and `mask` is not** (CHK-553).
   The mask is ANDed with each instance's 8-bit mask, as a trace's is, and the default 255 meets every instance.
 * A query needs `ray_query` where the entry point reaches it, as a trace does (CHK-322).
 
-**A candidate reads what the traversal stopped at** (CHK-544):
+**A candidate reads what the traversal stopped at** (CHK-557):
 
 | member | on | is |
 |---|---|---|
@@ -213,11 +213,11 @@ let h = q.hit
 * **`accept_first_hit_and_end_search` ends the traversal at the first commit that commits**, on every target, once the candidate's body is done.
 * A member reads the query where it stands, so an `assert`'s condition reads none; a `let` keeps what one read.
 
-**`q.hit` is the committed hit, read after the loop alone** (CHK-546).
+**`q.hit` is the committed hit, read after the loop alone** (CHK-559).
 It is a `triangle_hit` on `.triangles`, a `procedural_hit[void]` on `.procedural` and a `mixed_hit[void]` on `.mixed`: the hit types a trace gives, with the attributes left to the program.
 Where nothing was committed it `is_hit` false, and its `t` is the ray's `t_max`.
 
-**`world.trace` is this loop** (CHK-547).
+**`world.trace` is this loop** (CHK-560).
 A trace with a constant `flags` means exactly what this sketch of the prelude's means, decision for decision:
 
 ```sgl sketch
@@ -277,7 +277,7 @@ binding decals:
     decals.found[i * 2 + 1] = int4(ids[4], ids[5], ids[6], ids[7])
 ```
 
-Writing `decals.found` inside the loop would be `stage-not-allowed` (CHK-543), and reading `q.hit` there `query-hit-too-early`.
+Writing `decals.found` inside the loop would be `stage-not-allowed` (CHK-556), and reading `q.hit` there `query-hit-too-early`.
 On dx12 it is, abridged to the shader's body, with the reads DXC folds away left out (bindings and names as EMIT-135 and the minting place them):
 
 ```hlsl
@@ -317,7 +317,7 @@ void gather_decals(uint3 sgl_thread_id : SV_DispatchThreadID)
 
 `RAY_FLAG_SKIP_TRIANGLES` is the structure's own: a `.procedural` query skips the triangle path, as its trace does.
 The body tests no kind, since on `.procedural` every candidate is a box (`CANDIDATE_PROCEDURAL_PRIMITIVE`).
-No `q.hit` is read, so no committed read is written (EMIT-275).
+No `q.hit` is read, so no committed read is written (EMIT-276).
 
 ### Native and emulated
 
@@ -325,10 +325,10 @@ No `q.hit` is read, so no committed read is written (EMIT-275).
 The prelude's `trace` holds both through an internal `by_target(native, emulated)`, and the flat tree keeps both until the legalizer picks one.
 
 * **The native form** steps through the target's own query, HLSL's `RayQuery` or MSL's `intersection_query`, with each decision inlined into the branch of its candidate.
-  The native form of `world.trace` is the candidate loop (EMIT-275), and the loop is how a program writes one itself.
+  The native form of `world.trace` is the candidate loop (EMIT-276), and the loop is how a program writes one itself.
 * **The emulated form** is a software traversal written in SGL, in the prelude and `@internal` (CHK-323), over sg's acceleration pool.
   WGSL writes it, since WebGPU has no query, and the interpreter runs it too, so a `test` traces against a pool its driver binds (EVAL-95).
-  A candidate loop's body is inlined where the walk meets a candidate (EMIT-276), so WGSL and the interpreter step through a query too.
+  A candidate loop's body is inlined where the walk meets a candidate (EMIT-277), so WGSL and the interpreter step through a query too.
   HLSL writes it where a compile asks, which a package's `SOFTWARE_TRACE` does and nothing does on its own.
   Its pool layout is an internal contract between sg and the prelude, [raytracing-polyfill.md](../raytracing-polyfill.md).
 * `t` and the barycentrics of the two forms agree within a tolerance, never bit for bit.

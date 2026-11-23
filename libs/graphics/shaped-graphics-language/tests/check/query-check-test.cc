@@ -2,7 +2,7 @@
 
 using namespace sgl_test;
 
-// The candidate loop's rules (CHK-540 to CHK-546): what the checker refuses of a query and its candidates, from the text
+// The candidate loop's rules (CHK-553 to CHK-559): what the checker refuses of a query and its candidates, from the text
 // and, for a query a function is handed, from the inlined tree.
 // What a query does when it runs is the corpus's (tests/corpus/types/queries.sgl) and the interpreter's
 // (tests/interpret/query-test.cc).
@@ -52,7 +52,7 @@ void accepted(cc::string_view declarations, cc::string_view body)
 
 TEST("sgl check - a query is a let of world.query, stepped through by one loop, its hit read after it")
 {
-    // CHK-540, CHK-542, CHK-546: the loop in the let's block, the hit after it, any number of times
+    // CHK-553, CHK-555, CHK-559: the loop in the let's block, the hit after it, any number of times
     accepted("", "let q = scene.world.query(probe())\n"
                  "for c in q.candidates:\n"
                  "    if c.t < 4.0 => c.commit()\n"
@@ -84,7 +84,7 @@ TEST("sgl check - a query is a let of world.query, stepped through by one loop, 
 
 TEST("sgl check - a query's flags are a constant, and its arguments those of a trace")
 {
-    // CHK-540
+    // CHK-553
     refused("",
             "let f = if id.x > 0 => ray_flags.force_opaque else ray_flags.none\n"
             "let q = scene.world.query(probe(), flags = f)\n"
@@ -100,7 +100,7 @@ TEST("sgl check - a query's flags are a constant, and its arguments those of a t
 
 TEST("sgl check - a query and a candidate stay where their let and their loop put them")
 {
-    // CHK-541
+    // CHK-554
     refused("", "let mut q = scene.world.query(probe())\n", "query-escapes", "`let mut` of a query");
     refused("", "let q = scene.world.query(probe())\nlet p = q\n", "query-escapes");
     refused("", "let q = scene.world.query(probe())\nfor c in q.candidates:\n    let d = c\n", "query-escapes",
@@ -126,7 +126,7 @@ TEST("sgl check - a query and a candidate stay where their let and their loop pu
 
 TEST("sgl check - a function may be handed a query or a candidate, which stands for the name it was given")
 {
-    // CHK-541: a parameter stands for its argument
+    // CHK-554: a parameter stands for its argument
     auto const helpers
         = cc::string_view("fun near(c: query_candidate[.triangles], limit: float) -> bool => c.t < limit\n"
                           "fun take(c: query_candidate[.triangles]):\n    c.commit()\n"
@@ -135,7 +135,7 @@ TEST("sgl check - a function may be handed a query or a candidate, which stands 
                       "for c in q.candidates:\n"
                       "    if near(c, 5.0) => take(c)\n"
                       "scene.hits[id.x] = float4(nearest(q))\n");
-    // CHK-546: a hit read through a parameter is judged where the call is inlined
+    // CHK-559: a hit read through a parameter is judged where the call is inlined
     refused(helpers,
             "let q = scene.world.query(probe())\n"
             "scene.hits[id.x] = float4(nearest(q))\n"
@@ -144,14 +144,14 @@ TEST("sgl check - a function may be handed a query or a candidate, which stands 
     refused("fun inside(q: trace_query[.triangles], c: query_candidate[.triangles]) -> float => q.hit.t + c.t\n",
             "let q = scene.world.query(probe())\nfor c in q.candidates:\n    let t = inside(q, c)\n",
             "query-hit-too-early", "stands inside it");
-    // CHK-542: a query a function is handed is stepped through where its let stands
+    // CHK-555: a query a function is handed is stepped through where its let stands
     refused("fun step(q: trace_query[.triangles]):\n    for c in q.candidates:\n        c.commit()\n",
             "let q = scene.world.query(probe())\nstep(q)\n", "query-traversal-misplaced", "a query a function is handed");
 }
 
 TEST("sgl check - a candidate loop stands in its query's block, once, and nowhere else does its candidates")
 {
-    // CHK-542
+    // CHK-555
     refused("", "let q = scene.world.query(probe())\nif id.x > 0:\n    for c in q.candidates:\n        c.commit()\n",
             "query-traversal-misplaced", "at its level");
     refused("", "let q = scene.world.query(probe())\nfor i in 0 ..< 2:\n    for c in q.candidates:\n        c.commit()\n",
@@ -170,7 +170,7 @@ TEST("sgl check - a candidate loop stands in its query's block, once, and nowher
 
 TEST("sgl check - a candidate loop's body is a decision, which writes nothing through a binding")
 {
-    // CHK-543
+    // CHK-556
     refused("", "let q = scene.world.query(probe())\nfor c in q.candidates:\n    scene.hits[id.x] = float4(c.t)\n",
             "stage-not-allowed", "candidate loop's body");
     // its own locals and the ones around it are its to write
@@ -180,7 +180,7 @@ TEST("sgl check - a candidate loop's body is a decision, which writes nothing th
 
 TEST("sgl check - a candidate's members are its kind's, and a commit of the other kind is no overload")
 {
-    // CHK-544
+    // CHK-557
     refused("", "let q = scene.world.query(probe())\nfor c in q.candidates:\n    let o = c.is_opaque\n",
             "unknown-member", "holds triangles");
     refused("", "let q = scene.boxes.query(probe())\nfor c in q.candidates:\n    let t = c.t\n", "unknown-member",
@@ -202,7 +202,7 @@ TEST("sgl check - a candidate's members are its kind's, and a commit of the othe
                  "    s += c.triangle().t + c.box().t_current\n"
                  "    if c.commit() or c.commit(c.t_min) => continue\n"
                  "scene.hits[id.x] = float4(s, q.hit.t, 0.0, 0.0)\n");
-    // CHK-545
+    // CHK-558
     refused("", "let q = scene.world.query(probe())\nfor c in q.candidates:\n    let _ = c.commit(1.0)\n",
             "no-matching-overload", "meets no box");
     refused("", "let q = scene.boxes.query(probe())\nfor c in q.candidates:\n    let _ = c.commit()\n",
@@ -218,7 +218,7 @@ TEST("sgl check - a candidate's members are its kind's, and a commit of the othe
 
 TEST("sgl check - a query's hit is read after its loop alone")
 {
-    // CHK-546
+    // CHK-559
     refused("", "let q = scene.world.query(probe())\nlet h = q.hit\n", "query-hit-too-early", "none before here");
     refused("", "let q = scene.world.query(probe())\nfor c in q.candidates:\n    let t = q.hit.t\n",
             "query-hit-too-early", "c.t_current");
@@ -241,7 +241,7 @@ TEST("sgl check - a query and a candidate are spelled with their structure's geo
 
 TEST("sgl check - a candidate loop's body is non-uniform control flow, whatever its query's ray")
 {
-    // CHK-542: each invocation meets its own candidates, so a barrier or a derivative there is refused even where every
+    // CHK-555: each invocation meets its own candidates, so a barrier or a derivative there is refused even where every
     // invocation traces the same ray
     refused("", "let q = scene.world.query(probe())\nfor c in q.candidates:\n    workgroup_barrier()\n    c.commit()\n",
             "non-uniform-control-flow");
@@ -251,7 +251,7 @@ TEST("sgl check - a candidate loop's body is non-uniform control flow, whatever 
 
 TEST("sgl check - a mixed query that skips triangles is a query of its boxes")
 {
-    // CHK-540: the flags a target forbids beside `skip_triangles` are left out, and the boxes are met
+    // CHK-553: the flags a target forbids beside `skip_triangles` are left out, and the boxes are met
     accepted("", "let q = scene.mixed.query(probe(), flags = ray_flags.skip_triangles)\n"
                  "for c in q.candidates:\n"
                  "    let _ = c.commit(c.t_min)\n"
@@ -268,7 +268,7 @@ TEST("sgl check - a discarded query evaluates its arguments, and a reported quer
     accepted("fun lane(id: int3) -> int => id.x & 0xff\n",
              "let _ = scene.world.query(probe(), mask = lane(id))\nlet _ = scene.mixed.query(probe())\n"
              "scene.hits[id.x] = float4(1.0)\n");
-    // CHK-541: a query a call hands on is reported where it is used, and the scan finds it no second time
+    // CHK-554: a query a call hands on is reported where it is used, and the scan finds it no second time
     auto const report
         = reports_of_body("fun same(q: trace_query[.triangles]) -> trace_query[.triangles]:\n    return q\n",
                           "let q = scene.world.query(probe())\nfor c in q.candidates:\n    c.commit()\n"
@@ -277,7 +277,7 @@ TEST("sgl check - a discarded query evaluates its arguments, and a reported quer
     for (auto at = report.find("query-escapes"); at >= 0; at = report.find("query-escapes", at + 1))
         ++escapes;
     CHECK(escapes == 1).dump("report", report);
-    // CHK-542: a second loop is misplaced, and no escape besides
+    // CHK-555: a second loop is misplaced, and no escape besides
     auto const twice
         = reports_of_body("", "let q = scene.world.query(probe())\nfor c in q.candidates:\n    c.commit()\n"
                               "for c in q.candidates:\n    c.commit()\n");

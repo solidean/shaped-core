@@ -255,7 +255,7 @@ hit_group lit for rs:
 
 TEST("sgl emit - a return or a yield out of a candidate loop reads the candidate before it aborts the query")
 {
-    // EMIT-277: the abort comes before the leave, never before the value the leave hands on, which reads the candidate
+    // EMIT-278: the abort comes before the leave, never before the value the leave hands on, which reads the candidate
     auto const source = cc::string_view(R"(require ray_query
 
 binding scene:
@@ -300,7 +300,7 @@ fun nearest_past(r: ray, n: int){scene} -> float:
 
 TEST("sgl emit - a commit in the right of an and stays conditional when it ends the search")
 {
-    // EVAL-80 and CHK-545: `x and c.commit()` commits only where x holds, accept_first_hit_and_end_search or not
+    // EVAL-80 and CHK-558: `x and c.commit()` commits only where x holds, accept_first_hit_and_end_search or not
     auto const source = cc::string_view(R"(require ray_query
 
 binding scene:
@@ -326,7 +326,7 @@ binding scene:
 
 TEST("sgl emit - a commit that ends the search marks it only where it commits, in an or, an if or a statement")
 {
-    // EMIT-277: the mark is as conditional as the commit, so neither comes before the test that guards it
+    // EMIT-278: the mark is as conditional as the commit, so neither comes before the test that guards it
     struct shape
     {
         cc::string_view body;
@@ -369,7 +369,7 @@ binding scene:
 
 TEST("sgl emit - a pixel stage's color, a value block and a loop's value read the candidate before the abort")
 {
-    // EMIT-277: the minted struct of a pixel stage's return, an `if` returned and a sum over a `loop:`'s value are
+    // EMIT-278: the minted struct of a pixel stage's return, an `if` returned and a sum over a `loop:`'s value are
     // each evaluated before the abort the return hands on past
     auto const source = cc::string_view(R"(require ray_query
 
@@ -426,7 +426,7 @@ fun via_loop(r: ray){scene} -> float:
 
 TEST("sgl emit - a return that leaves no candidate loop keeps its value where it was")
 {
-    // EMIT-277: only a leave that aborts a traversal reads its value into a local of its own first
+    // EMIT-278: only a leave that aborts a traversal reads its value into a local of its own first
     auto const source = cc::string_view(R"(require ray_query
 
 binding scene:

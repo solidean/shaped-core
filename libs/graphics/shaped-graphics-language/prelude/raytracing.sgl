@@ -454,22 +454,22 @@ fun is_occluded(world: acceleration_structure[.triangles], r: ray, .mask: int = 
 // ---- queries --------------------------------------------------------------------------------------------------------
 //
 // `let q = world.query(r)` starts a trace the program steps through itself, `for c in q.candidates:`, and `q.hit` is
-// what it committed (CHK-540 to CHK-546).
+// what it committed (CHK-553 to CHK-559).
 // The checker types the query, its candidates and their members, and the flattener writes the loop from the internal
-// functions at the end of this file, in a trace's two forms (EMIT-275, EMIT-276); a query's call is never inlined.
+// functions at the end of this file, in a trace's two forms (EMIT-276, EMIT-277); a query's call is never inlined.
 
-/// Starts a trace of `r` against `world`, which the program steps through with `for c in q.candidates:` (CHK-540).
+/// Starts a trace of `r` against `world`, which the program steps through with `for c in q.candidates:` (CHK-553).
 /// `flags` is a constant, and `mask` is ANDed with each instance's 8-bit mask.
 fun query(world: acceleration_structure[.triangles], r: ray, .flags: ray_flags = ray_flags.none, .mask: int = 255) -> trace_query[.triangles]:
     let mut q: trace_query[.triangles] = undefined()
     return q
 
-/// Starts a trace of `r` against boxes of procedural geometry, which the program steps through (CHK-540).
+/// Starts a trace of `r` against boxes of procedural geometry, which the program steps through (CHK-553).
 fun query(world: acceleration_structure[.procedural], r: ray, .flags: ray_flags = ray_flags.none, .mask: int = 255) -> trace_query[.procedural]:
     let mut q: trace_query[.procedural] = undefined()
     return q
 
-/// Starts a trace of `r` against triangles and boxes both, which the program steps through (CHK-540).
+/// Starts a trace of `r` against triangles and boxes both, which the program steps through (CHK-553).
 fun query(world: acceleration_structure[.mixed], r: ray, .flags: ray_flags = ray_flags.none, .mask: int = 255) -> trace_query[.mixed]:
     let mut q: trace_query[.mixed] = undefined()
     return q
@@ -1389,7 +1389,7 @@ fun hit_object.reorder(self, hint: uint, bits: int) => hit_object_reorder_by_hin
 
 // ---- the candidate loop ---------------------------------------------------------------------------------------------
 //
-// What the flattener writes a query's loop from (EMIT-275, EMIT-276), which no program calls.
+// What the flattener writes a query's loop from (EMIT-276, EMIT-277), which no program calls.
 // The native form starts the target's query, steps it, and hands each step to the loop's body, `body(q)`.
 // The emulated form walks the pool, commits what the target would commit without asking, and hands every other
 // candidate to the body as a `walk_candidate`; what is committed is a `query_walk`.
@@ -1458,14 +1458,14 @@ fun hit_object.reorder(self, hint: uint, bits: int) => hit_object_reorder_by_hin
 @internal fun query_native_triangle(q: ray_query, r: ray) -> triangle_candidate => candidate_of(q, r)
 @internal fun query_native_box(q: ray_query, r: ray) -> procedural_box => box_of(q, r, query_native_t_current(q, r))
 
-/// Accepts a triangle candidate; on a mixed query, a box is left as it is (CHK-545).
+/// Accepts a triangle candidate; on a mixed query, a box is left as it is (CHK-558).
 @internal fun query_native_commit(q: ray_query, r: ray, is_mixed: bool) -> bool:
     if is_mixed:
         if not ray_query_candidate_is_triangle(q) => return false
     ray_query_commit_triangle(q)
     return true
 
-/// Reports a box's primitive hit at `t`, which commits only within the ray's range: `t_min` to `t_current` (CHK-545).
+/// Reports a box's primitive hit at `t`, which commits only within the ray's range: `t_min` to `t_current` (CHK-558).
 @internal fun query_native_commit_at(q: ray_query, r: ray, t: float, is_mixed: bool) -> bool:
     if is_mixed:
         if ray_query_candidate_is_triangle(q) => return false
@@ -1680,14 +1680,14 @@ fun hit_object.reorder(self, hint: uint, bits: int) => hit_object_reorder_by_hin
 @internal fun query_emulated_box(w: walk_candidate, s: query_walk, r: ray) -> procedural_box:
     return procedural_box(s.t, r, query_emulated_object_ray(w, s, r), w.instance_id, w.instance_index, w.geometry_index, w.primitive_index, w.object_to_world, w.world_to_object)
 
-/// Accepts a triangle candidate; `ends` where the flags end the search at the first commit (CHK-545).
+/// Accepts a triangle candidate; `ends` where the flags end the search at the first commit (CHK-558).
 @internal fun query_emulated_commit(s: mut query_walk, w: walk_candidate, r: ray, is_mixed: bool, ends: bool) -> bool:
     if is_mixed:
         if not w.is_triangle => return false
     s = query_walk(1, w.t, w.instance_id, w.instance_index, w.geometry_index, w.primitive_index, w.barycentrics, w.is_front_face, w.object_to_world, w.world_to_object, s.is_ended or ends)
     return true
 
-/// Reports a box's primitive hit at `t`, within the ray's range alone (CHK-545).
+/// Reports a box's primitive hit at `t`, within the ray's range alone (CHK-558).
 @internal fun query_emulated_commit_at(s: mut query_walk, w: walk_candidate, r: ray, t: float, is_mixed: bool, ends: bool) -> bool:
     if is_mixed:
         if w.is_triangle => return false

@@ -50,7 +50,7 @@ fun store(id: int3, h: triangle_hit){scene}:
 @compute(8, 8) fun trace_cells_accepting(@thread_id id: int3){scene}:
     store(id, scene.world.trace(cell_ray(id), c => hit_decision.accept))
 
-// The same rays stepped through by a candidate loop, cutting primitive 1 out as `cutout` does (CHK-547).
+// The same rays stepped through by a candidate loop, cutting primitive 1 out as `cutout` does (CHK-560).
 @compute(8, 8) fun query_cells(@thread_id id: int3){scene}:
     let q = scene.world.query(cell_ray(id))
     for c in q.candidates:

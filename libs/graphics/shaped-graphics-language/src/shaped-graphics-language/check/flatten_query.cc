@@ -5,7 +5,7 @@ using namespace sgl;
 using namespace sgl::check;
 using namespace sgl::check::impl;
 
-// Queries in the flat tree (EMIT-275 to EMIT-277).
+// Queries in the flat tree (EMIT-276 to EMIT-278).
 //
 // `let q = world.query(r, …)` writes its arguments alone, each evaluated once, and `q` stands for a position in
 // `queries`; nothing of the target is started before the loop, which no statement between could tell.
@@ -22,7 +22,7 @@ using namespace sgl::check::impl;
 // `body` is the loop's body, written again in the frame the `for` stood in wherever the prelude's loop calls it.
 // There a `break` leaves `$exit`, a `continue` leaves the candidate's own block, and a candidate's member is the
 // prelude's `query_native_m` or `query_emulated_m` of what the form hands the body.
-// In the native form every leave out of the body is preceded by the target's abort (EMIT-277).
+// In the native form every leave out of the body is preceded by the target's abort (EMIT-278).
 
 namespace
 {
@@ -146,7 +146,7 @@ void sgl::check::impl::flattener::flatten_query_let(origin from, ast::stmt_id id
     if (!is_valid(given[3]))
         given[3] = add_expr(parameters[3].type, let.value, flat_int_literal{.value = 255});
 
-    // CHK-540: the flags are a constant once the entry point is inlined, which decides what the loop meets
+    // CHK-553: the flags are a constant once the entry point is inlined, which decides what the loop meets
     auto const flags_value = slots[2] >= 0 ? values[slots[2]] : given[2];
     auto const is_flags_constant = is_constant(c.out, entry, flags_value);
     auto const evaluated = is_flags_constant ? evaluate_constant(c.out, entry, flags_value) : outcome{};
@@ -208,7 +208,7 @@ void sgl::check::impl::flattener::flatten_candidate_loop(origin from, ast::stmt_
     auto const skips_triangles = (bits & flag_bit(c.out, flags_type, "skip_triangles")) != 0;
     auto const skips_boxes = (bits & flag_bit(c.out, flags_type, "skip_procedural")) != 0;
     auto const ends = (bits & flag_bit(c.out, flags_type, "accept_first_hit_and_end_search")) != 0;
-    // CHK-540: a query of no kind its structure holds meets nothing, which a mask of 0 asks of every form
+    // CHK-553: a query of no kind its structure holds meets nothing, which a mask of 0 asks of every form
     auto const meets_nothing = (geometry == 0 && skips_triangles) || (geometry == 1 && skips_boxes)
                             || (geometry == 2 && skips_triangles && skips_boxes);
     // the start of a mixed query drops the facing culls beside `skip_triangles`, which the target forbids together
@@ -266,7 +266,7 @@ void sgl::check::impl::flattener::flatten_candidate_loop(origin from, ast::stmt_
             flat_expr_id const start_arguments[] = {local_ref(handle, where), again(queries[q].world, where),
                                                     again(queries[q].ray, where), again(queries[q].flags, where), mask()};
             run(start, start_arguments, {});
-            // EMIT-277: a commit that ends the search is an exit of its own, taken once the candidate's body is done
+            // EMIT-278: a commit that ends the search is an exit of its own, taken once the candidate's body is done
             if (ends)
             {
                 auto const ended = add_local(local_kind::temporary, "ended", bool_type());
@@ -368,7 +368,7 @@ auto sgl::check::impl::flattener::call_candidate_body(ast::expr_id id, i32 loop,
     frames.push_back(cc::move(body_frame));
     auto const stand_in = add_expr(candidate_type, for_stmt.variable, flat_int_literal{.value = index});
     current()->bound.push_back({.where = {.kind = target_kind::local, .index = i32(l.loop)}, .literal = stand_in});
-    // CHK-543: the body is a decision, which the driver runs as often as it meets candidates
+    // CHK-556: the body is a decision, which the driver runs as often as it meets candidates
     auto const outer_decision = inlined_decision;
     auto const outer_candidate = is_candidate_body;
     inlined_decision = stage::any_hit;
@@ -382,7 +382,7 @@ auto sgl::check::impl::flattener::call_candidate_body(ast::expr_id id, i32 loop,
     auto const candidate = add_list(block);
     block = statements;
     add_stmt({.file = l.file, .stmt = l.loop}, flat_block{.label = next, .body = candidate});
-    // EMIT-277: a commit under `accept_first_hit_and_end_search` ends the traversal once the candidate's body is done
+    // EMIT-278: a commit under `accept_first_hit_and_end_search` ends the traversal once the candidate's body is done
     if (l.is_native && is_valid(l.ended))
     {
         auto const abort = prelude_symbol(c, "ray_query_abort");
@@ -449,7 +449,7 @@ auto sgl::check::impl::flattener::flatten_query_member(ast::expr_id id, target c
     auto const q = query_of(value);
     if (q < 0 || where.index < 0)
     {
-        // CHK-541: a member of what a call, an `if` or a field handed on, which held the query to hand it
+        // CHK-554: a member of what a call, an `if` or a field handed on, which held the query to hand it
         if (is_valid(value) && is_query_kind(c.out.at(entry.at(value).type).kind))
             return refuse_query(diagnostic_kind::query_escapes, {.file = file(), .expr = object},
                                 "a query is the `let` of its `world.query` and a candidate the variable of its loop, "
@@ -459,7 +459,7 @@ auto sgl::check::impl::flattener::flatten_query_member(ast::expr_id id, target c
     auto const member = query_member(where.index);
     if (member == query_member::hit)
     {
-        // CHK-546: after the query's loop alone, which a query handed to a function shows only once inlined
+        // CHK-559: after the query's loop alone, which a query handed to a function shows only once inlined
         auto const& query = queries[q];
         if (query.query >= 0)
             return fail();
@@ -504,7 +504,7 @@ auto sgl::check::impl::flattener::flatten_query_member(ast::expr_id id, target c
                 flat_expr_id const commit_arguments[] = {handle, ray, t, mixed};
                 committed = query_helper(id, "query_native_commit_at", commit_arguments);
             }
-            // EMIT-277: a commit that ends the search marks it, inside the commit's own block, so it stays as conditional as
+            // EMIT-278: a commit that ends the search marks it, inside the commit's own block, so it stays as conditional as
             // the commit; the candidate's body ends the traversal after it
             if (is_valid(committed) && is_valid(candidate.ended))
             {
@@ -545,7 +545,7 @@ auto sgl::check::impl::flattener::flatten_query_member(ast::expr_id id, target c
 
 namespace
 {
-/// The first node of a tree reachable from `body` whose type holds a query or a candidate (CHK-541).
+/// The first node of a tree reachable from `body` whose type holds a query or a candidate (CHK-554).
 struct query_escape_walk
 {
     checked_module const& m;
