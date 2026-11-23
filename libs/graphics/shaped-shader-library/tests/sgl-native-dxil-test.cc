@@ -120,11 +120,17 @@ TEST("slib - SGL's DXIL of a splat a mix or a clamp reads beside a scaling passe
                                        "    let filled = float3(w)\n"
                                        "    let picked = if input.uv.x > 0.5 => pass.v.xyz else filled\n"
                                        "    let s = pass.v.xyz * w\n"
-                                       "    return float4(picked.x + s.x, picked.y, picked.z, 1.0)\n";
+                                       "    let t = picked + s\n"
+                                       "    return float4(t.x, t.y, t.z, 1.0)\n"
+                                       "\n"
+                                       "@pixel fun branched_ps(input: link){pass} -> float4:\n"
+                                       "    let w = pass.k.w\n"
+                                       "    let picked = if input.uv.x > 0.5 => pass.v else float4(w)\n"
+                                       "    return picked * w\n";
     auto compiler = ssc::dxc::compiler::create();
     if (compiler.has_error())
         SKIP("no DXC");
-    for (auto const entry : {"cartoon_ps", "fade_tint_ps", "clamped_ps", "chosen_ps"})
+    for (auto const entry : {"cartoon_ps", "fade_tint_ps", "clamped_ps", "chosen_ps", "branched_ps"})
     {
         auto const e = written(source, entry);
         REQUIRE(e.has_value());

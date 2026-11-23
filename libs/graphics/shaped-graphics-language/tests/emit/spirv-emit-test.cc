@@ -314,7 +314,13 @@ TEST("sgl spirv - a splat a mix or a clamp reads too is written, though a scalin
                                        "    let filled = float3(w)\n"
                                        "    let picked = if input.uv.x > 0.5 => pass.v.xyz else filled\n"
                                        "    let s = pass.v.xyz * w\n"
-                                       "    return float4(picked.x + s.x, picked.y, picked.z, 1.0)\n";
+                                       "    let t = picked + s\n"
+                                       "    return float4(t.x, t.y, t.z, 1.0)\n"
+                                       "\n"
+                                       "@pixel fun branched_ps(input: link){pass} -> float4:\n"
+                                       "    let w = pass.k.w\n"
+                                       "    let picked = if input.uv.x > 0.5 => pass.v else float4(w)\n"
+                                       "    return picked * w\n";
 #if defined(CC_OS_WINDOWS)
     constexpr auto probe = "spirv-val --version > NUL 2>&1";
 #else
@@ -322,13 +328,18 @@ TEST("sgl spirv - a splat a mix or a clamp reads too is written, though a scalin
 #endif
     auto const has_validator = std::system(probe) == 0;
     auto modules = spirv_batch();
-    // chosen_ps: the splat is a choice's other arm, operand 2 of a select or of a phi alike
-    for (auto const entry : {"cartoon_ps", "fade_tint_ps", "clamped_ps", "chosen_ps"})
+    // the splat is a choice's other arm, operand 2: of a vector select in chosen_ps, whose lanes are read together so
+    // it is not split into scalar selects of the splat's scalar, and of a phi in branched_ps, whose arm loads
+    for (auto const entry : {"cartoon_ps", "fade_tint_ps", "clamped_ps", "chosen_ps", "branched_ps"})
     {
         auto const e = written(source, entry, sgl::emit::native_route::require);
         REQUIRE(e.has_value());
         auto const& words = e.value().spirv;
         CHECK(counted(words, 142) == 1).dump("entry", entry); // the scaling is still OpVectorTimesScalar
+        if (cc::string_view(entry) == "chosen_ps")
+            CHECK(counted(words, 169) == 1); // one OpSelect of the whole vector
+        if (cc::string_view(entry) == "branched_ps")
+            CHECK(counted(words, 245) == 1); // one OpPhi of the whole vector
         modules.add(words, "splats", entry);
     }
     if (!has_validator)

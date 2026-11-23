@@ -139,6 +139,68 @@ TEST("sgl float - code a floor raises above fast does not warn of a NaN test at 
     REQUIRE(floored.has_value());
     for (auto const& w : floored.value().warnings)
         CHECK(!w.contains("nan-test-at-fast")).dump("warning", w);
+
+    // WebGPU weakening the floor back to fast compiles the test at fast again, so it warns, before the weakening
+    auto const weakened = sgl::compile_to_text({.source = source,
+                                                .entry_point = "cs",
+                                                .target = target::wgsl,
+                                                .weakens_float = true,
+                                                .float_floor = float_level::specials});
+    REQUIRE(weakened.has_value()).dump("error", weakened.has_error() ? weakened.error() : cc::string());
+    REQUIRE(weakened.value().warnings.size() == 2);
+    CHECK(weakened.value().warnings[0].contains("nan-test-at-fast")).dump("warning", weakened.value().warnings[0]);
+    CHECK(weakened.value().warnings[1].contains("float-guarantee-weakened")).dump("warning", weakened.value().warnings[1]);
+}
+
+TEST("sgl float - a polyfill's fused level warns of a weakening only where one happened")
+{
+    // the geometry stage states nothing, and the vertex stage its compute half runs raises the fused entry point
+    constexpr auto source = "require geometry_shader\n"
+                            "\n"
+                            "@vertex struct corner_in:\n"
+                            "    position: float2\n"
+                            "\n"
+                            "struct staged:\n"
+                            "    @position position: hpos4\n"
+                            "    color: float4\n"
+                            "\n"
+                            "@float(.specials) @vertex fun corner_vs(v: corner_in) -> staged:\n"
+                            "    return {position = hpos4(v.position.x, v.position.y, 0.0, 1.0), color = float4(1.0)}\n"
+                            "\n"
+                            "@geometry(max_vertices = 3)\n"
+                            "fun tri_gs(tri: staged[3], stream: mut triangle_stream[staged]):\n"
+                            "    for i in 0 ..< 3:\n"
+                            "        stream.emit(tri[i])\n";
+    auto const half = [&](target t, bool weakens)
+    {
+        return sgl::compile_to_text({.source = source,
+                                     .source_name = "fused.sgl",
+                                     .entry_point = "tri_gs",
+                                     .target = t,
+                                     .weakens_float = weakens,
+                                     .mesh = sgl::emit::mesh_form::compute,
+                                     .polyfill_vertex = "corner_vs"});
+    };
+    // kept: the fused level, and no weakening warned of, though the geometry stage alone is at fast
+    auto const kept = half(target::hlsl_dx12, false);
+    REQUIRE(kept.has_value()).dump("error", kept.has_error() ? kept.error() : cc::string());
+    CHECK(kept.value().float_guarantee == float_level::specials);
+    CHECK(kept.value().float_raised_by == "corner_vs");
+    for (auto const& w : kept.value().warnings)
+        CHECK(!w.contains("float-guarantee-weakened")).dump("warning", w);
+    // weakened: warned of, naming the vertex stage, though the geometry stage alone is at the fast it runs at
+    auto const weakened = half(target::wgsl, true);
+    REQUIRE(weakened.has_value()).dump("error", weakened.has_error() ? weakened.error() : cc::string());
+    CHECK(weakened.value().float_guarantee == float_level::fast);
+    auto warned = 0;
+    for (auto const& w : weakened.value().warnings)
+        if (w.contains("float-guarantee-weakened"))
+        {
+            ++warned;
+            CHECK(w.contains("'corner_vs'")).dump("warning", w);
+            CHECK(w.contains("'tri_gs'")).dump("warning", w);
+        }
+    CHECK(warned == 1);
 }
 
 TEST("sgl float - describe reports the level a floor raises an entry point to, and that the floor raised it")
