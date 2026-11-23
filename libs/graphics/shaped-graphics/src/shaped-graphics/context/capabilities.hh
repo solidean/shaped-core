@@ -269,13 +269,15 @@ enum class sg::feature
     /// stand under a branch on one (SGL's CHK-533).
     /// D3D12 grants it with wave operations, on the Shader Model 6.8 every device here runs; vulkan with
     /// `VK_KHR_shader_quad_control` and `VK_KHR_shader_maximal_reconvergence`.
-    /// WebGPU has none, since its helpers may sit out a quad operation; metal waits on a run on Apple hardware.
+    /// Metal grants it on every device, its helper threads voting in a fragment function's `quad_any`: measured on an M4.
+    /// WebGPU has none, since its helpers may sit out a quad operation.
     quad_control,
 
     /// `set_viewports` takes up to `max_viewports` viewports, and a vertex stage picks one per primitive with SGL's `@viewport_index`.
     /// D3D12 grants it with the option that lets a vertex stage write the layer, which the viewport shares.
     /// Vulkan grants it with `multiViewport` and `shaderOutputViewportIndex`.
-    /// WebGPU has one viewport alone; metal waits on a run on Apple hardware.
+    /// Metal grants it on every device, with `setViewports:count:` and `[[viewport_array_index]]`.
+    /// WebGPU has one viewport alone.
     multi_viewport,
 };
 

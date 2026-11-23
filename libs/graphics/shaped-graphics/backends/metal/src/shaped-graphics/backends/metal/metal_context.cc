@@ -225,6 +225,12 @@ bool metal_context::supports(sg::feature f) const
     case sg::feature::device_coherence:
         // Inferred from the floor rather than probed: `coherent(device)` is MSL 3.2, older than the macOS / iOS 26 floor.
         return true;
+    case sg::feature::quad_control:
+        // Helper threads vote in `quad_any` and `quad_all`: measured on an M4, where CHK-533's derivative under a vote is exact.
+        return true;
+    case sg::feature::multi_viewport:
+        // `setViewports:count:` and a vertex function's `[[viewport_array_index]]` are on every Apple GPU, up to 16.
+        return true;
     case sg::feature::helper_lane_query:
         // `simd_is_helper_thread()` is in every MSL the macOS / iOS 26 floor compiles, so nothing is probed.
         return true;
