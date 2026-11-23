@@ -239,19 +239,26 @@ TEST("sgl emit - an element's length keeps its mark in the helper, and a zero is
                      "@compute(64) fun cs(@thread_id id: int3){work}:\n"
                      "    work.values[id.x] = work.views[nonuniform (id.x % 4)][id.x] + work.pairs[id.x].y\n"
                      "    work.values[0] = int(work.views[0].length + work.raw[nonuniform (id.x % 4)].load(0u))\n");
+    // vulkan asks each length per element, at uniform indices, only where the device's driver needs it
+    // (debt-sgl-vulkan-element-length-asked-at-uniform-indices)
+    auto const around = sgl::check::feature_set(sgl::check::feature::nonuniform_length_workaround);
     for (auto const t : {sgl::emit::target::hlsl_dx12, sgl::emit::target::hlsl_vulkan})
-    {
-        auto const text = sgl::compile_to_text(
-            {.source = source, .entry_point = "cs", .target = t, .guards_undefined = undefined_guard::define});
-        REQUIRE(text.has_value()).dump("error", text.has_error() ? text.error() : cc::string());
-        if (t == sgl::emit::target::hlsl_dx12)
-            CHECK(text.value().text.contains("[NonUniformResourceIndex(i)].GetDimensions(n, stride);"))
-                .dump("text", text.value().text);
-        else // asked per element, at uniform indices (debt-sgl-vulkan-element-length-asked-at-uniform-indices)
-            CHECK(text.value().text.contains("[3].GetDimensions(k, stride);\n    n = i == 3u ? k : n;"))
-                .dump("text", text.value().text);
-        CHECK(text.value().text.contains(")0;")).dump("text", text.value().text);
-    }
+        for (auto const features : {sgl::check::feature_set(), around})
+        {
+            auto const text = sgl::compile_to_text({.source = source,
+                                                    .entry_point = "cs",
+                                                    .target = t,
+                                                    .guards_undefined = undefined_guard::define,
+                                                    .device_features = features});
+            REQUIRE(text.has_value()).dump("error", text.has_error() ? text.error() : cc::string());
+            if (t == sgl::emit::target::hlsl_vulkan && features == around)
+                CHECK(text.value().text.contains("[3].GetDimensions(k, stride);\n    n = i == 3u ? k : n;"))
+                    .dump("text", text.value().text);
+            else
+                CHECK(text.value().text.contains("[NonUniformResourceIndex(i)].GetDimensions(n, stride);"))
+                    .dump("text", text.value().text);
+            CHECK(text.value().text.contains(")0;")).dump("text", text.value().text);
+        }
 }
 
 TEST("sgl emit - metal bounds a binding array's own index by its size, and reads no length (LEGAL-65)")
