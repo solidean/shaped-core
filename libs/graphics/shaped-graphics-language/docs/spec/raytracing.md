@@ -2,8 +2,8 @@
 
 SGL traces rays two ways, and a device grants each apart: an **inline trace** from any stage, and a **ray-tracing pipeline** of stages the GPU schedules.
 This file is the model — the vocabulary both share, each half's declarations, and what each target writes.
-[CHK-320 to CHK-332 and CHK-342 to CHK-345](semantics/checking.md#ray-tracing) are its rules, and [AST-150 and AST-153](syntax/ast.md#pipelines) its syntax.
-[EMIT-135 to EMIT-139](semantics/emitting.md#ray-tracing) are what a target writes.
+[CHK-320 to CHK-332, CHK-342 to CHK-345 and CHK-540 to CHK-547](semantics/checking.md#ray-tracing) are its rules, and [AST-150 and AST-153](syntax/ast.md#pipelines) its syntax.
+[EMIT-135 to EMIT-139 and EMIT-275 to EMIT-277](semantics/emitting.md#ray-tracing) are what a target writes.
 The vocabulary is SGL source in `prelude/raytracing.sgl`, which a reader may open like any other file.
 Back to the [specification](_index.md).
 
@@ -159,14 +159,176 @@ An opaque box's report is accepted as it is, as an opaque triangle is.
 
 A mixed hit is one flat struct rather than a choice of two, since SGL has neither an optional type nor an enum that carries values; the [incubator](incubator/raytracing-futures.md) holds both.
 
+### Stepping through a trace
+
+**`world.query(r, …)` starts a trace and hands back the query, which the program steps through itself** (CHK-540).
+`for c in q.candidates:` meets each candidate the traversal cannot decide alone, and `q.hit` is what it committed, read once the loop is over.
+
+```sgl sketch
+let q = world.query(r, flags = ray_flags.cull_back_facing, mask = 0x01)
+for c in q.candidates:
+    if c.is_triangle and c.t < limit => c.commit()
+let h = q.hit
+```
+
+* **A query is the trace it started, and it stays where its `let` put it** (CHK-541).
+  It is not a value: no other local, field, array element, `if` or `return` holds it, and so neither does a candidate.
+  A function may take either one as a parameter, which stands for the name it was given, since every call is inlined.
+* **A query is stepped through once, by one loop, in the block of its `let`** (CHK-542).
+  The loop stands at the `let`'s own level, so nothing runs the loop more often than the trace, or skips it.
+  A query in the body of a loop is a new trace each time round, with its own loop.
+* **`break` ends the traversal and keeps what it committed; `continue` leaves the candidate uncommitted** and goes on to the next.
+  `return` ends both the traversal and the function.
+* **The body is a decision** (CHK-543): it writes its own locals and those around it, and nothing through a binding, since the driver decides how many candidates there are and in what order.
+* **The body may trace again**: a query or a `world.trace` inside it is a trace of its own, with its own query.
+* **`flags` are a constant and `mask` is not** (CHK-540).
+  The mask is ANDed with each instance's 8-bit mask, as a trace's is, and the default 255 meets every instance.
+* A query needs `ray_query` where the entry point reaches it, as a trace does (CHK-322).
+
+**A candidate reads what the traversal stopped at** (CHK-544):
+
+| member | on | is |
+|---|---|---|
+| `is_triangle`, `is_procedural` | every candidate | its kind; on `.triangles` and `.procedural` one is the constant `true` |
+| `instance_id` | every candidate | the id the host gave the instance, 24 bits: DXR's `InstanceID`, Vulkan's `InstanceCustomIndex`, Metal's user instance id |
+| `instance_index` | every candidate | the instance's position in its TLAS |
+| `geometry_index`, `primitive_index`, `ray`, `object_ray`, `object_to_world`, `world_to_object` | every candidate | as a `procedural_box`'s |
+| `t_min` | every candidate | the ray's `t_min` |
+| `t_current` | every candidate | the `t` committed so far, or the ray's `t_max` where nothing is |
+| `t`, `barycentrics`, `is_front_face`, `cluster_id` | a triangle | as a `triangle_candidate`'s |
+| `is_opaque` | a box | whether its geometry is opaque, after the instance's and the ray's forcing |
+| `c.triangle()` | a triangle | a `triangle_candidate`: a value, which may be stored |
+| `c.box()` | a box | a `procedural_box` whose `t_current` is the candidate's: a value, which may be stored |
+| `c.commit() -> bool` | a triangle | accepts it |
+| `c.commit(t) -> bool` | a box | reports its primitive hit at `t` |
+
+* **A box is no hit until the body commits it**, opaque or not: `is_opaque` only tells the body what an any-hit decision would have been asked.
+  A procedural candidate with no commit is a box the shader found empty.
+* **`c.commit(t)` commits only within the ray's range**: from `t_min` to `t_current`, both included.
+  Outside it the commit does nothing and gives `false`, as a report outside it is no hit.
+  It gives `true` where it committed, so the body knows when to keep the attributes it computed.
+* **The attributes are the body's own**: the query keeps `t` and the ids of what it committed, and the program keeps whatever else it wants in a local.
+* **A member of the other kind on a query of one kind is an error**, `c.t` on `.procedural`.
+  On `.mixed` it reads an undefined value on a candidate of the other kind, and a commit of the other kind does nothing and gives `false`.
+* **`accept_first_hit_and_end_search` ends the traversal at the first commit that commits**, on every target, once the candidate's body is done.
+* A member reads the query where it stands, so an `assert`'s condition reads none; a `let` keeps what one read.
+
+**`q.hit` is the committed hit, read after the loop alone** (CHK-546).
+It is a `triangle_hit` on `.triangles`, a `procedural_hit[void]` on `.procedural` and a `mixed_hit[void]` on `.mixed`: the hit types a trace gives, with the attributes left to the program.
+Where nothing was committed it `is_hit` false, and its `t` is the ray's `t_max`.
+
+**`world.trace` is this loop** (CHK-547).
+A trace with a constant `flags` means exactly what this sketch of the prelude's means, decision for decision:
+
+```sgl sketch
+// world.trace(r, any_hit, flags = f, mask = m) on .triangles
+let q = world.query(r, flags = f, mask = m)
+for c in q.candidates:
+    let d = any_hit(c.triangle())
+    if d != hit_decision.ignore => c.commit()
+    if d == hit_decision.accept_and_end_search => break
+let h = q.hit
+
+// world.trace(r, intersection, any_hit, flags = f, mask = m) on .procedural
+let q = world.query(r, flags = f, mask = m)
+let mut best: report[A] = report.none()
+for c in q.candidates:
+    let b = c.box()
+    let reported = intersection(b)
+    if not (reported.is_hit and reported.t >= c.t_min and reported.t <= c.t_current) => continue
+    let mut d = hit_decision.accept
+    if not c.is_opaque => d = any_hit(candidate_of_box(b, reported))   // the prelude's @internal helper
+    if d != hit_decision.ignore and c.commit(reported.t) => best = reported
+    if d == hit_decision.accept_and_end_search => break
+let h = q.hit   // with best.attributes
+```
+
+A mixed trace is the two in one loop, branching on `c.is_triangle`.
+The only thing a trace adds is that a decision is a function, where a loop's body is code in place.
+
+### The decal lookup
+
+A decal is an instance of a unit box in a `.procedural` structure, and a point lies on it where it lies in that box.
+The lookup collects up to 8 decals a point lies in, commits none, and writes their ids after the loop, where binding writes are allowed.
+
+```sgl
+require ray_query
+
+binding decals:
+    world: acceleration_structure[.procedural]
+    points: buffer[float4]
+    found: mut buffer[int4]
+
+@compute(8, 8) fun gather_decals(@thread_id id: int3){decals}:
+    let i = id.x + id.y * 8
+    let p = decals.points[i]
+    let r = ray(origin = pos3(p.x, p.y, p.z), direction = vec3(0.0, 0.0, 1.0), t_max = 1.0e-4)
+    @indexed(.memory) let mut ids = int[8].filled(-1)
+    let mut count = 0
+    let q = decals.world.query(r, mask = 0x02)
+    for c in q.candidates:
+        // the ray starts at the point, so its object-space origin is the point in the decal's box
+        let o = c.object_ray.origin
+        if abs(o.x) <= 0.5 and abs(o.y) <= 0.5 and abs(o.z) <= 0.5:
+            ids[count] = c.instance_id
+            count += 1
+            if count == 8 => break
+    decals.found[i * 2] = int4(ids[0], ids[1], ids[2], ids[3])
+    decals.found[i * 2 + 1] = int4(ids[4], ids[5], ids[6], ids[7])
+```
+
+Writing `decals.found` inside the loop would be `stage-not-allowed` (CHK-543), and reading `q.hit` there `query-hit-too-early`.
+On dx12 it is, abridged to the shader's body, with the reads DXC folds away left out (bindings and names as EMIT-135 and the minting place them):
+
+```hlsl
+[numthreads(8, 8, 1)]
+void gather_decals(uint3 sgl_thread_id : SV_DispatchThreadID)
+{
+    int3 id = int3(sgl_thread_id);
+    int i = id.x + id.y * 8;
+    float4 p = decals_points[i];
+    int ids[8] = {-1, -1, -1, -1, -1, -1, -1, -1};
+    int count = 0;
+    RayQuery<RAY_FLAG_SKIP_TRIANGLES> q;
+    RayDesc ray_desc;
+    ray_desc.Origin = float3(p.x, p.y, p.z);
+    ray_desc.TMin = 0.0f;
+    ray_desc.Direction = float3(0.0f, 0.0f, 1.0f);
+    ray_desc.TMax = 1.0e-4f;
+    q.TraceRayInline(decals_world, (uint(RAY_FLAG_SKIP_TRIANGLES) & ~1024u), uint(2), ray_desc);
+    while (q.Proceed())
+    {
+        float3 o = q.CandidateObjectRayOrigin();
+        if (abs(o.x) <= 0.5f && abs(o.y) <= 0.5f && abs(o.z) <= 0.5f)
+        {
+            ids[count] = int(q.CandidateInstanceID());
+            count += 1;
+            if (count == 8)
+            {
+                q.Abort();
+                break;
+            }
+        }
+    }
+    decals_found[i * 2] = int4(ids[0], ids[1], ids[2], ids[3]);
+    decals_found[i * 2 + 1] = int4(ids[4], ids[5], ids[6], ids[7]);
+}
+```
+
+`RAY_FLAG_SKIP_TRIANGLES` is the structure's own: a `.procedural` query skips the triangle path, as its trace does.
+The body tests no kind, since on `.procedural` every candidate is a box (`CANDIDATE_PROCEDURAL_PRIMITIVE`).
+No `q.hit` is read, so no committed read is written (EMIT-275).
+
 ### Native and emulated
 
 **A trace has two forms, and every target writes exactly one** ([EMIT-135](semantics/emitting.md#ray-tracing)).
 The prelude's `trace` holds both through an internal `by_target(native, emulated)`, and the flat tree keeps both until the legalizer picks one.
 
 * **The native form** steps through the target's own query, HLSL's `RayQuery` or MSL's `intersection_query`, with each decision inlined into the branch of its candidate.
+  The native form of `world.trace` is the candidate loop (EMIT-275), and the loop is how a program writes one itself.
 * **The emulated form** is a software traversal written in SGL, in the prelude and `@internal` (CHK-323), over sg's acceleration pool.
   WGSL writes it, since WebGPU has no query, and the interpreter runs it too, so a `test` traces against a pool its driver binds (EVAL-95).
+  A candidate loop's body is inlined where the walk meets a candidate (EMIT-276), so WGSL and the interpreter step through a query too.
   HLSL writes it where a compile asks, which a package's `SOFTWARE_TRACE` does and nothing does on its own.
   Its pool layout is an internal contract between sg and the prelude, [raytracing-polyfill.md](../raytracing-polyfill.md).
 * `t` and the barycentrics of the two forms agree within a tolerance, never bit for bit.

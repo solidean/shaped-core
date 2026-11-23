@@ -33,6 +33,8 @@ flow checker::check_statements(function_scope& scope, ast::range_of<ast::stmt_id
     auto result = flow::falls_through;
     auto is_reported = false;
     auto const& ast = ast_of(scope.file);
+    // CHK-542: a candidate loop stands among the statements of its query's `let`
+    scope.blocks.push_back(statements);
     for (auto const s : ast.at(statements))
     {
         // A test never runs where it stands, so it is no code a jump in front of it makes unreachable.
@@ -46,6 +48,7 @@ flow checker::check_statements(function_scope& scope, ast::range_of<ast::stmt_id
         }
         result = then(result, check_stmt(scope, s));
     }
+    scope.blocks.remove_back();
     return result;
 }
 
@@ -97,7 +100,12 @@ void checker::check_message(function_scope& scope, ast::expr_id message, bool ta
     {
         // `print total` prints the one value as it is
         if (takes_value)
-            (void)check_expr(scope, message);
+        {
+            // CHK-541: a print records values, and a query or a candidate is none
+            if (auto const type = check_expr(scope, message); type != error_type && is_query_kind(out.at(type).kind))
+                report(diagnostic_kind::query_escapes, file, span_of(file, message),
+                       cc::format("a print records values, and {} is none", out.name_of(type)));
+        }
         else
             unsupported(file, span_of(file, message), "an assert message that is no quoted literal");
         return;
@@ -106,7 +114,10 @@ void checker::check_message(function_scope& scope, ast::expr_id message, bool ta
     for (auto const part : ast.at(literal->interpolations))
     {
         auto const type = check_expr(scope, part);
-        if (type != error_type && !is_printable(type))
+        if (type != error_type && is_query_kind(out.at(type).kind))
+            report(diagnostic_kind::query_escapes, file, span_of(file, part),
+                   cc::format("a message interpolates a value, and {} is none", out.name_of(type)));
+        else if (type != error_type && !is_printable(type))
             report(diagnostic_kind::type_mismatch, file, span_of(file, part),
                    cc::format("a message interpolates a scalar, a plain vector or an enum, and this is {}",
                               out.name_of(type)));
@@ -332,6 +343,9 @@ void checker::check_let(function_scope& scope, ast::stmt_id id, ast::let_stmt co
 
     if (auto const* const a = find_attribute(file, ast.at(id).attributes, "indexed"))
         judge_indexed(file, *a, type);
+    // CHK-541: a query is the `let` of its `world.query`, and a candidate no let's at all
+    if (!judge_query_let(scope, id, let, type))
+        type = error_type;
 
     if (!ast::is_valid(let.pattern))
         return;
@@ -767,6 +781,9 @@ void checker::check_for(function_scope& scope, ast::stmt_id id, ast::for_stmt co
     auto const& ast = ast_of(file);
     auto const int_type = type_of_builtin(builtins::k_int, file, span_of(file, id));
 
+    // CHK-542: a query's candidates are the one thing besides an int range a `for` runs over
+    if (is_candidates(file, loop.iterable))
+        return check_candidate_loop(scope, id, loop);
     auto const walk = ast::is_valid(loop.iterable) ? range_walk_of(file, loop.iterable) : range_walk();
     auto const* const r = walk.range;
     // CHK-415: a step is an int constant of at least 1, so the walk's length is known from its bounds alone

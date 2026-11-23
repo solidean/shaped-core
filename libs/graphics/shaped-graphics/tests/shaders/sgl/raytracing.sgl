@@ -50,6 +50,13 @@ fun store(id: int3, h: triangle_hit){scene}:
 @compute(8, 8) fun trace_cells_accepting(@thread_id id: int3){scene}:
     store(id, scene.world.trace(cell_ray(id), c => hit_decision.accept))
 
+// The same rays stepped through by a candidate loop, cutting primitive 1 out as `cutout` does (CHK-547).
+@compute(8, 8) fun query_cells(@thread_id id: int3){scene}:
+    let q = scene.world.query(cell_ray(id))
+    for c in q.candidates:
+        if c.primitive_index != 1 => c.commit()
+    store(id, q.hit)
+
 // The same rays halfway through the frame's interval, which moving vertices and instances stand at.
 @compute(8, 8) fun trace_cells_midway(@thread_id id: int3){scene}:
     let c = cell_ray(id)
@@ -192,3 +199,31 @@ fun store_mixed(id: int3, h: mixed_hit[sphere_attributes]){mixed_scene}:
 // the same rays, deciding nothing
 @compute(8, 8) fun trace_mixed_all(@thread_id id: int3){mixed_scene}:
     store_mixed(id, mixed_scene.world.trace(mixed_ray(id), sphere_report))
+
+// ---- a candidate loop: raytracing.md's decal lookup ----------------------------------------------------------------
+//
+// A decal is an instance of the unit box around the origin in a procedural structure, and a point lies on it where it
+// lies in that box. Each thread collects up to 8 decals its point lies in, of mask 2, commits none, and writes their ids
+// after the loop, -1 where it found fewer.
+
+binding decal_scene:
+    world: acceleration_structure[.procedural]
+    points: buffer[float4]
+    found: mut buffer[int4]
+
+@compute(64) fun gather_decals(@thread_id id: int3){decal_scene}:
+    let i = id.x
+    let p = decal_scene.points[i]
+    let r = ray(origin = pos3(p.x, p.y, p.z), direction = vec3(0.0, 0.0, 1.0), t_max = 1.0e-4)
+    @indexed(.memory) let mut ids = int[8].filled(-1)
+    let mut count = 0
+    let q = decal_scene.world.query(r, mask = 0x02)
+    for c in q.candidates:
+        // the ray starts at the point, so its object-space origin is the point in the decal's box
+        let o = c.object_ray.origin
+        if abs(o.x) <= 0.5 and abs(o.y) <= 0.5 and abs(o.z) <= 0.5:
+            ids[count] = c.instance_id
+            count += 1
+            if count == 8 => break
+    decal_scene.found[i * 2] = int4(ids[0], ids[1], ids[2], ids[3])
+    decal_scene.found[i * 2 + 1] = int4(ids[4], ids[5], ids[6], ids[7])

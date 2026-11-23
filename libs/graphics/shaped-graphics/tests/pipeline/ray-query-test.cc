@@ -1,6 +1,7 @@
 #include "../shaders/shader_fixtures.hh"
 #include "pipeline_harness.hh"
 
+#include <clean-core/algorithm/sort.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/math/random.hh>
 #include <clean-core/string/format.hh>
@@ -146,6 +147,18 @@ ASYNC_INVOCABLE_TEST("sg - an inline trace finds the nearest triangle, and the a
     if (!ctx->supports(sg::feature::ray_query))
         SKIP("this device has no ray queries");
     auto const pipeline = co_await shaders::raytracing::trace_cells.acquire_pipeline(*ctx);
+    co_await trace_grid(ctx, pipeline, true);
+}
+
+ASYNC_INVOCABLE_TEST("sg - a candidate loop commits what it accepts, and its hit is the nearest it committed",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::ray_query))
+        SKIP("this device has no ray queries");
+    auto const pipeline = co_await shaders::raytracing::query_cells.acquire_pipeline(*ctx);
     co_await trace_grid(ctx, pipeline, true);
 }
 
@@ -692,4 +705,98 @@ ASYNC_INVOCABLE_TEST("sg - an inline trace of a mixed structure without decision
         SKIP("this device has no ray queries");
     auto const pipeline = co_await shaders::raytracing::trace_mixed_all.acquire_pipeline(*ctx);
     co_await trace_mixed_grid(ctx, pipeline, false);
+}
+
+// raytracing.md's decal lookup, a candidate loop that commits nothing (CHK-540 to CHK-546).
+// One BLAS of the unit box around the origin, opaque, and instances of it along x: ids 100 to 103 of mask 2 at x = 1,
+// 1.6, 3 and 5, and id 104 of mask 1 at x = 5 again, which the lookup's mask leaves out.
+// Each of 64 threads looks up the point (k / 8, 0.1, -0.2), and finds every decal of mask 2 whose box holds it.
+
+namespace
+{
+struct decal_instance
+{
+    float x = 0;
+    u32 id = 0;
+    u8 mask = 2;
+};
+
+constexpr decal_instance k_decals[] = {{1, 100}, {1.6f, 101}, {3, 102}, {5, 103}, {5, 104, 1}};
+} // namespace
+
+ASYNC_INVOCABLE_TEST("sg - a candidate loop collects every decal a point lies in, by the instance's mask",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::ray_query))
+        SKIP("this device has no ray queries");
+    auto const pipeline = co_await shaders::raytracing::gather_decals.acquire_pipeline(*ctx);
+    if (auto* const home = ctx->device_home())
+        co_await cc::async_resume_on(*home);
+
+    constexpr auto count = 64;
+    float const box[] = {-0.5f, -0.5f, -0.5f, 0.5f, 0.5f, 0.5f};
+    auto const input = ctx->persistent.create_buffer_from_data(box, sg::buffer_usage::accel_structure_build_input);
+    auto points = cc::vector<tg::vec4f>();
+    for (auto k = 0; k < count; ++k)
+        points.push_back(tg::vec4f(float(k) / 8, 0.1f, -0.2f, 0));
+    auto const point_buffer = ctx->persistent.create_buffer_from_data(points, sg::buffer_usage::readonly_buffer);
+    auto const usage = sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src;
+    auto const found = ctx->persistent.create_buffer_from_data(cc::vector<tg::vec4i>::create_defaulted(count * 2), usage);
+
+    auto cmd = ctx->create_command_list();
+    auto const aabbs = sg::blas_aabbs{.aabbs = input.raw(), .aabb_count = 1, .is_opaque = true};
+    auto const blas = cmd->raytracing.build_blas(cc::span<sg::blas_aabbs const>(&aabbs, 1));
+    auto instances = cc::vector<sg::tlas_instance>();
+    for (auto const& d : k_decals)
+        instances.push_back(
+            {.blas = blas, .transform = {1, 0, 0, d.x, 0, 1, 0, 0, 0, 0, 1, 0}, .instance_id = d.id, .mask = d.mask});
+    auto const tlas = cmd->raytracing.build_tlas(instances);
+
+    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::raytracing::decal_scene>();
+    auto const group = ctx->transient.create_binding_group(
+        *cmd, layout,
+        shaders::raytracing::decal_scene{.world = tlas->as_view(),
+                                         .points = point_buffer.as_readonly_buffer(),
+                                         .found = found.as_readwrite_buffer()});
+    cmd->compute.bind_pipeline(*pipeline);
+    cmd->compute.bind_group(0, *group);
+    cmd->compute.dispatch_threads(count);
+    auto const found_back = cmd->download.data_from_buffer(found);
+    ctx->submit_command_list(cc::move(cmd));
+
+    auto const got = co_await found_back.data();
+    REQUIRE(got.size() == count * 2);
+    for (auto k = 0; k < count; ++k)
+    {
+        auto const x = float(k) / 8;
+        auto want = cc::vector<int>();
+        for (auto const& d : k_decals)
+            if (d.mask == 2 && tg::abs(x - d.x) <= 0.5f)
+                want.push_back(int(d.id));
+        auto have = cc::vector<int>();
+        for (auto j = 0; j < 8; ++j)
+        {
+            auto const id = got[k * 2 + j / 4][j % 4];
+            if (id >= 0)
+                have.push_back(id);
+        }
+        cc::sort(have);
+        // a point on a box's face lies in it, and a GPU may round the object-space origin either way there
+        auto const on_face = [&]
+        {
+            for (auto const& d : k_decals)
+                if (tg::abs(tg::abs(x - d.x) - 0.5f) < 1e-4f)
+                    return true;
+            return false;
+        }();
+        if (on_face)
+            continue;
+        CHECK(have.size() == want.size()).context(cc::format("point {}", k));
+        for (auto j = isize(0); j < have.size() && j < want.size(); ++j)
+            CHECK(have[j] == want[j]).context(cc::format("point {}", k));
+    }
+    co_return;
 }

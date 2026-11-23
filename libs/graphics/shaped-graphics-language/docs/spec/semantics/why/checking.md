@@ -878,3 +878,49 @@ A loop counter is stated because the loop is in the source, where a reader sees 
 `.select` writes what the restructured encoder wrote by hand, separate locals chosen by the index, which keeps the values in registers and measured as fast as the hand-written form.
 It stops at 8 elements, since each read is a choice over all of them, and a larger array costs more in choices than scratch does.
 The annotation stands on the `let`, since that is where the cost is decided: a parameter is whatever its call passes after inlining, so a helper needs no annotation of its own.
+
+## CHK-540
+
+A constant `flags` decides at check time which candidates a loop can meet, whether a commit ends the search, and which flags the target is never handed together.
+It is also what HLSL's `RayQuery<flags>` takes as its template (EMIT-159), so every query of a compile is specialized on its flags.
+A mask is data on every target and decides nothing the checker reads, so it stays any `int`.
+
+## CHK-541
+
+A query is the target's traversal state: SPIR-V holds it in a `Function` variable of `OpTypeRayQueryKHR` that nothing copies or stores.
+HLSL's `RayQuery` and MSL's `intersection_query` are objects of the same kind.
+A candidate is no state of its own, only the query read at one step, and a read is valid only in the state the query is in where it stands (EMIT-243).
+So both stay where they were made, as a hit object does (CHK-516), and `c.triangle()` and `c.box()` are how a program keeps what it read.
+
+## CHK-542
+
+One loop in the `let`'s block, at its level, is a rule a reader checks by eye and the checker checks without following any control flow.
+It also makes "stepped through once" true at run time: no loop around the candidate loop that is not around the `let` too, and no branch that skips the traversal and then reads its hit.
+`continue` costs nothing to allow, since leaving a candidate uncommitted is what every target does with a candidate the shader does not commit.
+
+## CHK-544
+
+A member of the other kind on a single-kind query can only be a mistake, so it is an error.
+On `.mixed` the kind is known at run time alone, and a program reads such a member under `if c.is_triangle`.
+Refusing it would need flow typing, and the hit types already leave the other kind's fields undefined.
+
+## CHK-545
+
+Vulkan's valid usage, and WebGPU's draft, require a generated hit to lie between the ray's `t_min` and the committed `t`, and DXR leaves one outside undefined.
+So SGL tests it before the target's commit, and an out-of-range commit means what an out-of-range report already means: no hit.
+The `bool` is what tells the body whether to keep its attributes, since the query keeps only `t`.
+No target's commit takes more than that, `CommitProceduralPrimitiveHit(t)` and `commit_bounding_box_intersection(t)` alike.
+A commit of the other kind is a branch on the candidate's type, which costs a compare and makes `.mixed` defined where the targets leave it undefined.
+`accept_first_hit_and_end_search` ends a DXR query at a shader's commit, and SGL writes the end itself where a target might go on, as the prelude's procedural trace already does.
+The body still runs to its end, which is what lets a trace's procedural decision keep what it reported after the commit that ended its search.
+
+## CHK-546
+
+Inside the loop, what is committed changes with every step, and a read there would be a hit the traversal has not settled.
+The target's committed reads are defined there, so it is SGL that refuses, to keep `q.hit` the trace's answer.
+`void` attributes make the hit types the same ones a trace gives, so code that shades a trace's hit shades a query's.
+
+## CHK-547
+
+Stating the trace as the loop makes the two one feature with one meaning, and the native form of a trace already is this loop with its decisions inlined.
+A trace keeps taking flags that are no constant, which a query does not, so the equivalence is stated for a constant `flags`.

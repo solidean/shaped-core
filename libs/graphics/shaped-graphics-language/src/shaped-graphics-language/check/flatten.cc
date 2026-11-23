@@ -118,7 +118,8 @@ void sgl::check::impl::flattener::judge_stage(ast::expr_id call, symbol_id calle
                                     .call = call,
                                     .callee = callee,
                                     .decision = decision,
-                                    .is_inlined_decision = inlined_decision != stage::none});
+                                    .is_inlined_decision = inlined_decision != stage::none,
+                                    .is_candidate_body = is_candidate_body});
         return;
     }
     // CHK-531: a write through a binding in a vertex, geometry or tessellation stage needs what vulkan asks of the
@@ -178,6 +179,7 @@ void sgl::check::impl::flattener::judge_decision_store(flat_expr_id place, ast::
                                     .call = target,
                                     .decision = decision,
                                     .is_inlined_decision = inlined_decision != stage::none,
+                                    .is_candidate_body = is_candidate_body,
                                     .is_buffer_store = true});
         return;
     }
@@ -838,6 +840,7 @@ void checker::flatten_test(i32 index)
     auto const& body = ast_of(test.file).at(test.declaration).node.as<ast::test_decl>().body;
     for (auto const stmt : ast_of(test.file).at(body.statements))
         f.flatten_stmt(stmt);
+    f.judge_queries();
     f.judge_text_types();
     // CHK-265: the test's `require` and a helper's that the test reaches are used by the calls that need them
     for (auto const& u : f.feature_uses)
@@ -1129,6 +1132,7 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
         f.flatten_return({.file = s.file, .expr = body.value}, body.value);
     for (auto const stmt : ast_of(s.file).at(body.statements))
         f.flatten_stmt(stmt);
+    f.judge_queries();
     f.judge_text_types();
     f.place_target_layouts();
 
@@ -1250,11 +1254,15 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
         auto const* const record = v.is_buffer_store ? nullptr : out.builtin_function(out.at(v.callee).intrinsic);
         auto const is_any_hit = v.decision == stage::any_hit;
         auto const what
-            = v.is_inlined_decision
+            = v.is_candidate_body ? cc::string("this stands in a candidate loop's body")
+            : v.is_inlined_decision
                 ? cc::format("an inline trace calls this as its {} decision", is_any_hit ? "any-hit" : "intersection")
                 : cc::format("this is reached from an {} entry point", check::stage_name(v.decision));
         auto const how_often
-            = is_any_hit
+            = v.is_candidate_body
+                ? cc::string("which runs once per candidate the traversal meets, a number and an order the driver "
+                             "decides")
+            : is_any_hit
                 ? cc::string("which runs an implementation-defined number of times: for candidates the traversal "
                              "later rejects, and more than once per candidate unless the geometry sets "
                              "NO_DUPLICATE_ANYHIT_INVOCATION, which Metal has no equivalent of")

@@ -31,6 +31,8 @@ struct stage_violation
     stage decision = stage::none;
     /// The decision is one an inline trace calls, rather than the entry point itself.
     bool is_inlined_decision = false;
+    /// The decision is a candidate loop's body (CHK-543).
+    bool is_candidate_body = false;
     /// The write is an assignment to a buffer's element, `call` its place; `callee` is then none.
     bool is_buffer_store = false;
     /// The callee is a builtin only a test calls (CHK-512).
@@ -52,6 +54,8 @@ struct flattener
     cc::vector<stage_violation> stage_violations;
     /// The decision an inline trace's loop is calling while its body is inlined: `any_hit` or `intersection` (CHK-404).
     stage inlined_decision = stage::none;
+    /// The decision being inlined is a candidate loop's body rather than a trace's decision (CHK-543).
+    bool is_candidate_body = false;
     /// A test's calls of a builtin only the ray-tracing stages reach, which a test cannot run yet.
     cc::vector<stage_violation> ray_stage_calls;
     /// A compute entry point's calls of a quad operation, whose workgroup then forms its quads along one axis (CHK-380).
@@ -197,6 +201,9 @@ struct flattener
         cc::vector<type_id> bindings;
         /// The instance whose body it was written in, whose tables hold its types; -1 outside one (CHK-338).
         i32 instance = -1;
+        /// The body of a candidate loop, a position in `candidate_loops`, which the prelude's loop hands each
+        /// candidate to (EMIT-275, EMIT-276); -1 for a function or a lambda.
+        i32 candidate_loop = -1;
     };
     cc::vector<closure> closures;
     /// Parallel to what `flatten_written` returned last: the closure a function argument hands over, -1 elsewhere.
@@ -247,8 +254,16 @@ struct flattener
         cc::vector<type_id> bindings;
         /// The instance of the generic function being written, whose tables its body reads; -1 for none (CHK-338).
         i32 instance = -1;
+        /// A copy of the tree's own frame, which a candidate loop's body is written in: its `return` is the tree's.
+        bool stands_for_root = false;
+        /// A candidate loop's body, written inside the prelude's loop: the frames below it are no calls of its own, so
+        /// a query of the body inlines that loop again without recursing.
+        bool is_candidate_body = false;
     };
     cc::vector<frame> frames;
+
+    /// The innermost frame is the tree's own body, or a candidate loop's body written in its stead.
+    [[nodiscard]] bool is_root_frame() const { return frames.size() == 1 || frames.back().stands_for_root; }
 
     /// The innermost frame, as a handle rather than a reference.
     ///
@@ -930,6 +945,86 @@ struct flattener
     void flatten_stmt(ast::stmt_id id);
 
     void flatten_expr_stmt(origin from, ast::expr_id value);
+
+    // ---- queries (check/flatten_query.cc) ----------------------------------------------------------------------------
+
+    /// A query of the tree, made where its `let` stands (CHK-540), or a candidate of one, met in its loop (CHK-542).
+    /// A name of either stands for an int literal of its type whose value is its position here, which nothing but a
+    /// member, a loop or a parameter reads; any other node holding one is a query that escaped (CHK-541).
+    struct query_state
+    {
+        /// For a candidate, the query it is of; -1 for a query.
+        i32 query = -1;
+        /// A position in `k_geometry_kinds`.
+        i32 geometry = 0;
+        /// The structure, as a resource stands in for its parameter.
+        flat_expr_id world = flat_expr_id::none;
+        /// The ray, the flags and the mask, each evaluated once where the `let` stands.
+        flat_expr_id ray = flat_expr_id::none;
+        flat_expr_id flags = flat_expr_id::none;
+        flat_expr_id mask = flat_expr_id::none;
+        /// The flags' value, a constant (CHK-540).
+        u32 flag_bits = 0;
+        /// What `q.hit` reads, which the loop assigns.
+        local_id hit = local_id::none;
+        /// The statements that declare and assign `hit`, which nothing writes where no `q.hit` reads it.
+        cc::vector<flat_stmt_id> hit_writes;
+        bool is_hit_read = false;
+        /// Its loop is written, and its body is being written.
+        bool is_stepped = false;
+        bool is_stepping = false;
+        /// A candidate's: the form being written, and the target's query or the walk's candidate.
+        bool is_native = false;
+        local_id handle = local_id::none;
+        /// A candidate's in the emulated form: what the walk committed.
+        local_id walk = local_id::none;
+        /// A candidate's in the native form under `accept_first_hit_and_end_search`: a commit was made (EMIT-277).
+        local_id ended = local_id::none;
+    };
+    cc::vector<query_state> queries;
+
+    /// A candidate loop being written: the frame its body is written in, and how its body leaves it.
+    struct candidate_loop
+    {
+        i32 query = -1;
+        i32 file = 0;
+        ast::stmt_id loop = ast::stmt_id::none;
+        /// The frame the `for` stood in, which its body is written in again, once per form.
+        frame around;
+        /// The block a `break` leaves, around the form being written.
+        label_id exit = label_id::none;
+        bool is_native = false;
+        local_id handle = local_id::none;
+        local_id walk = local_id::none;
+        local_id ended = local_id::none;
+    };
+    cc::vector<candidate_loop> candidate_loops;
+    /// The native candidate loops whose bodies are being written, innermost last: an exit past one aborts it.
+    cc::vector<i32> open_native_loops;
+
+    /// The position in `queries` that `value` stands for; -1 where it is no query's or candidate's literal.
+    [[nodiscard]] i32 query_of(flat_expr_id value) const;
+    /// CHK-540: `let q = world.query(r, …)`, which binds `q` and writes nothing but its arguments.
+    void flatten_query_let(origin from, ast::stmt_id id, ast::let_stmt const& let);
+    /// CHK-542, EMIT-275, EMIT-276: the candidate loop as the two forms of a trace.
+    void flatten_candidate_loop(origin from, ast::stmt_id id, ast::for_stmt const& loop);
+    /// CHK-544 to CHK-546: a member of a candidate or a query, read or called.
+    flat_expr_id flatten_query_member(ast::expr_id id, type_id type, target const& where);
+    /// The loop's body for the candidate `values[0]`: the target's query, or the walk's candidate.
+    flat_expr_id call_candidate_body(ast::expr_id id, type_id type, i32 loop, cc::span<flat_expr_id const> values);
+    /// EMIT-277: before a leave of `target` from a native candidate loop's body, the abort of every loop it leaves;
+    /// `target` none for the tree's own return.
+    void abort_crossed(origin from, label_id target);
+    /// The prelude's internal `name`, inlined over `arguments` as a block; `none` where it failed.
+    flat_expr_id query_helper(ast::expr_id id,
+                              cc::string_view name,
+                              cc::span<flat_expr_id const> arguments,
+                              cc::span<i32 const> handed = {});
+    /// CHK-541: a node of the tree that holds a query or a candidate, which is one that escaped.
+    void judge_queries();
+    /// Reports `kind` at `at` of the file being written, once however many trees inline it, and fails the tree
+    /// without a second diagnostic; always `none`.
+    flat_expr_id refuse_query(diagnostic_kind kind, origin at, cc::string detail);
 
     /// Far beyond any program; it bounds the work on a tree the check pass should never have let through.
     static constexpr isize k_max_inline_depth = 256;

@@ -797,6 +797,24 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
   SGL's SPIR-V writes `OpRayQueryGetIntersectionClusterIdNV` and `ClusterIDNV`, with `SPV_NV_cluster_acceleration_structure`'s capability.
   HLSL for vulkan reaches them through inline SPIR-V, a template over both of a `RayQuery`'s parameters and a builtin input, which DXC has no names for.
   HLSL for dx12 writes Shader Model 6.10's `CandidateClusterID`, `CommittedClusterID` and `ClusterID`, and DXIL refuses it as `unsupported-yet` until then.
+* **EMIT-275** A query of the native form is EMIT-243's one query, and its candidate loop steps it.
+  The loop declares the query, starts the trace and is a loop over the target's proceed, and its body reads the candidate.
+  The `let` of `world.query` evaluates its arguments where it stands, and nothing between it and its loop can tell where the trace starts.
+  HLSL writes `RayQuery<flags> q;`, a `RayDesc` and `TraceRayInline` (EMIT-159), and `while (q.Proceed())` for the loop.
+  MSL writes `intersection_query<instancing, triangle_data>`, `reset` and `while (q.next())`.
+  A `.procedural` query writes `skip_triangles` and a `.triangles` one `skip_procedural` beside its flags, as a trace does.
+  `c.is_triangle` is the candidate's type, each member its target's candidate read, and `q.hit` the committed reads, built as a trace builds its result.
+  A query whose hit nothing reads writes no committed read.
+  `c.commit(t)` is the range test of CHK-545 around the target's commit, and on `.mixed` both commits test the candidate's type first.
+* **EMIT-276** A query of the emulated form is the walk of sg's acceleration pool, with the candidate loop's body inlined where the walk meets a candidate.
+  The walk commits an opaque triangle itself, as a target's traversal does, and hands the body every non-opaque triangle and every box the ray enters.
+  `c.commit()` and `c.commit(t)` set the walk's committed hit, and `t_current` reads it.
+  `break` ends the walk, and `continue` goes on with it; the body's own loops keep their own `break` and `continue`.
+  The interpreter runs this form (EVAL-95), so a `test` steps through a query against a pool its driver binds.
+* **EMIT-277** Every exit that leaves a candidate loop before the traversal is done writes the target's abort first ([why](why/emitting.md#emit-277)).
+  Those are a `break`, a `return` and a commit that ends the search.
+  A commit that ends the search marks it, and the abort follows once the candidate's body is done, so the body still reads its candidate.
+  So a query is ended wherever it is left, and no target keeps a traversal live past the loop.
 * **EMIT-185** A text keeps its entry point's float guarantee (CHK-435), or the compile refuses with `float-guarantee-not-kept`, naming the function that asked.
   Where the compile's floor raised the guarantee, the refusal names the floor instead.
   `hlsl-dx12` keeps every level: DXC compiles from `.specials` on with `-Gis`, and at `.ieee` with `-denorm preserve` too.
@@ -896,6 +914,31 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
   * Every one closes its tags with `sgl_motion`, which a file that traces defines once after `<metal_raytracing>`.
     A compile with `software_trace` defines it as `, instance_motion, primitive_motion`, and every other compile as nothing.
     `sgl_motion_time(t)` beside it passes a trace's time to `intersect` under the tags, and nothing where there are none.
+
+### What each target writes of a query
+
+| SGL | HLSL (DXIL) | SPIR-V | MSL | WGSL | interpreter |
+|---|---|---|---|---|---|
+| `let q = world.query(r, flags = f, mask = m)` | its arguments, evaluated once | the same | the same | the same | the same |
+| `for c in q.candidates:` | `RayQuery<f> q;` `q.TraceRayInline(world, f, m, desc)` (`dx.op.allocateRayQuery`, `rayQuery_TraceRayInline`), `while (q.Proceed())` | `OpVariable` of `OpTypeRayQueryKHR`, `OpRayQueryInitializeKHR`, `OpRayQueryProceedKHR` | `intersection_query<instancing, triangle_data> q;` `q.reset(ray, world, m, params)`, `while (q.next())` | the emulated walk's loop | the walk's loop |
+| `c.is_triangle` | `q.CandidateType() == CANDIDATE_NON_OPAQUE_TRIANGLE` | `OpRayQueryGetIntersectionTypeKHR` (candidate) `== 0` | `q.get_candidate_intersection_type() == intersection_type::triangle` | the walk's | the walk's |
+| `c.instance_id` | `CandidateInstanceID()` | `OpRayQueryGetIntersectionInstanceCustomIndexKHR` | `get_candidate_user_instance_id()` | the pool's | the pool's |
+| `c.instance_index` | `CandidateInstanceIndex()` | `OpRayQueryGetIntersectionInstanceIdKHR` | `get_candidate_instance_id()` | the pool's | the pool's |
+| `c.geometry_index`, `c.primitive_index` | `CandidateGeometryIndex()`, `CandidatePrimitiveIndex()` | `…GeometryIndexKHR`, `…PrimitiveIndexKHR` | `get_candidate_geometry_id()`, `get_candidate_primitive_id()` | the pool's | the pool's |
+| `c.t`, `c.barycentrics`, `c.is_front_face` | `CandidateTriangleRayT()`, `…Barycentrics()`, `…FrontFace()` | `OpRayQueryGetIntersectionTKHR`, `…BarycentricsKHR`, `…FrontFaceKHR` | `get_candidate_triangle_distance()`, `…barycentric_coord()`, `is_candidate_triangle_front_facing()` | the walk's | the walk's |
+| `c.is_opaque` | `!CandidateProceduralPrimitiveNonOpaque()` | `OpRayQueryGetIntersectionCandidateAABBOpaqueKHR` | `!is_candidate_non_opaque_bounding_box()` | the pool's | the pool's |
+| `c.t_min`, `c.t_current` | the ray's `t_min`, `CommittedRayT()` | the ray's `t_min`, `OpRayQueryGetIntersectionTKHR` (committed) | the ray's `t_min`, `get_committed_distance()` | the walk's | the walk's |
+| `c.object_ray`, transforms | `CandidateObjectRayOrigin()`, `…Direction()`, `CandidateObjectToWorld3x4()`, `CandidateWorldToObject3x4()` | `…ObjectRayOriginKHR`, `…ObjectRayDirectionKHR`, `…ObjectToWorldKHR`, `…WorldToObjectKHR` | `get_candidate_ray_origin()`, `…direction()`, `get_candidate_object_to_world_transform()`, `…world_to_object_transform()` | the pool's | the pool's |
+| `c.commit()` | `CommitNonOpaqueTriangleHit()` | `OpRayQueryConfirmIntersectionKHR` | `commit_triangle_intersection()` | the walk's | the walk's |
+| `c.commit(t)` | the range test, `CommitProceduralPrimitiveHit(t)` | the range test, `OpRayQueryGenerateIntersectionKHR` | the range test, `commit_bounding_box_intersection(t)` | the range test, the walk's | the walk's |
+| `break`, `return` out of the loop | `Abort()` and the exit | `OpRayQueryTerminateKHR` and the exit | `abort()` and the exit | the walk's end | the walk's end |
+| `q.hit` | `CommittedStatus()`, `CommittedRayT()`, `CommittedInstanceID()`, … | `OpRayQueryGetIntersectionTypeKHR` (committed) and the committed reads | `get_committed_intersection_type()`, `get_committed_distance()`, `get_committed_user_instance_id()`, … | the walk's | the walk's |
+
+WGSL writes the emulated form until WebGPU ships a ray query.
+The gpuweb ray-query proposal (PR #11056) as it stands maps the rows above onto its own calls.
+They are `rayQueryInitialize`, `rayQueryProceed`, `rayQueryCommitCandidate`, `rayQueryTerminate` and `rayQueryGetCommittedIntersection`.
+Those names were taken from a brief and not checked against the PR, and they change with it.
+MSL's user instance id is the one a pipeline's hit already reads through `[[user_instance_id]]`, which sg's instance descriptors carry.
 
 ## Subgroups, coherence and image atomics
 

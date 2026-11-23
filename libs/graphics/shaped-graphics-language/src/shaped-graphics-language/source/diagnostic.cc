@@ -220,6 +220,12 @@ cc::string_view sgl::to_string(diagnostic_kind kind)
         return "invalid-pipeline";
     case diagnostic_kind::recursive_trace:
         return "recursive-trace";
+    case diagnostic_kind::query_escapes:
+        return "query-escapes";
+    case diagnostic_kind::query_traversal_misplaced:
+        return "query-traversal-misplaced";
+    case diagnostic_kind::query_hit_too_early:
+        return "query-hit-too-early";
     case diagnostic_kind::nesting_too_deep:
         return "nesting-too-deep";
     case diagnostic_kind::shadows_unshadowable:
@@ -489,6 +495,12 @@ cc::string_view sgl::summary_of(diagnostic_kind kind)
         return "a `pipeline` whose stages or settings do not fit together";
     case diagnostic_kind::recursive_trace:
         return "a ray type whose trace reaches a shader that traces it again";
+    case diagnostic_kind::query_escapes:
+        return "a query or a candidate held anywhere but where its `let` or its loop put it";
+    case diagnostic_kind::query_traversal_misplaced:
+        return "a query's candidates stepped through anywhere but by one loop in the block of its `let`";
+    case diagnostic_kind::query_hit_too_early:
+        return "a query's hit read before its candidate loop is over";
     case diagnostic_kind::shadows_unshadowable:
         return "a name that would hide a `@shadowable(false)` symbol";
     case diagnostic_kind::test_captures_runtime_value:
@@ -664,6 +676,9 @@ sgl::severity sgl::default_severity_of(diagnostic_kind kind)
     case diagnostic_kind::stage_not_allowed:
     case diagnostic_kind::invalid_pipeline:
     case diagnostic_kind::recursive_trace:
+    case diagnostic_kind::query_escapes:
+    case diagnostic_kind::query_traversal_misplaced:
+    case diagnostic_kind::query_hit_too_early:
     case diagnostic_kind::nesting_too_deep:
     case diagnostic_kind::shadows_unshadowable:
     case diagnostic_kind::test_captures_runtime_value:
