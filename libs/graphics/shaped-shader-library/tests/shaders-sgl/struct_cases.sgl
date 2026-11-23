@@ -13,8 +13,8 @@ struct shape:
 
 // a material type index, as a host writes one, says the case; SGL places no enum in GPU memory
 struct material:
-    kind: int in 0..<2
-    sides: int in 1..=2
+    kind: int in 0 ..< 2
+    sides: int in 1 ..= 2
     roughness: float
     @when(kind == 0 and sides == 2)
     case thin_glass:

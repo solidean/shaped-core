@@ -1,7 +1,7 @@
 // a field may name the range its values lie in: an int or a uint with a fact attached, and no type of its own
 
 struct cell:
-    index: int in 0..<16
+    index: int in 0 ..< 16
     weight: float
 
 test cell(3, 0.5).index == 3
@@ -35,7 +35,7 @@ test:
 
 // a uint's range is written as an int's
 struct packed:
-    code: uint in 0..=255
+    code: uint in 0 ..= 255
 
 test packed(255u).code == 255u
 

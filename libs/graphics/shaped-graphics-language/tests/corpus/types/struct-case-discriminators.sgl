@@ -71,7 +71,7 @@ test:
 
 // a @when over a field with a range: its cases cover the range as an enum's cover its cases
 struct slot:
-    index: int in 0..<3
+    index: int in 0 ..< 3
     @when(index == 0)
     case first
     @when(index == 1)
