@@ -38,7 +38,7 @@ void sgl::check::impl::flattener::flatten_return(origin from, ast::expr_id value
         result = add_expr(pixel_targets, from.expr, flat_construct{.arguments = add_list(color)});
     }
     // EMIT-277: a return out of a native candidate loop's body aborts the traversal first
-    abort_crossed(from, return_label);
+    abort_crossed(from, return_label, &result);
     if (is_valid(return_label))
         add_stmt(from, flat_leave{.target = return_label, .value = result});
     else
@@ -938,8 +938,8 @@ void sgl::check::impl::flattener::flatten_expr_stmt(origin from, ast::expr_id va
         // by value: flattening the value may open a loop of its own
         auto const target = loops.back().value_block;
         is_failed = is_failed || !is_valid(target);
-        auto const value = flatten_expr(b->value);
-        abort_crossed(from, target);
+        auto value = flatten_expr(b->value);
+        abort_crossed(from, target, &value);
         return add_stmt(from, flat_leave{.target = target, .value = value});
     }
     if (x.node.is<ast::discard_expr>())
@@ -981,8 +981,8 @@ void sgl::check::impl::flattener::flatten_expr_stmt(origin from, ast::expr_id va
         }
         // by value: flattening the value may open a value block of its own
         auto const target = blocks.back();
-        auto const value = flatten_expr(y->value);
-        abort_crossed(from, target);
+        auto value = flatten_expr(y->value);
+        abort_crossed(from, target, &value);
         return add_stmt(from, flat_leave{.target = target, .value = value});
     }
     if (auto const* const c = x.node.try_as<ast::case_expr>())

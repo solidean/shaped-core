@@ -1419,7 +1419,7 @@ fun hit_object.reorder(self, hint: uint, bits: int) => hit_object_reorder_by_hin
 
 /// Steps the native query to its end, handing the body every candidate the target cannot decide alone.
 @internal fun query_native_step(q: ray_query, body: (ray_query) -> void):
-    while ray_query_proceed(q) => body(q)
+    while ray_query_step(q) => body(q)
 
 @internal fun query_native_is_triangle(q: ray_query, r: ray) -> bool => ray_query_candidate_is_triangle(q)
 @internal fun query_native_is_procedural(q: ray_query, r: ray) -> bool => not ray_query_candidate_is_triangle(q)

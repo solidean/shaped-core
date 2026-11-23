@@ -238,3 +238,26 @@ TEST("sgl check - a query and a candidate are spelled with their structure's geo
     CHECK(reports_for("fun f(c: query_candidate[.spheres]) -> int => 0\n").contains("wrong-kind-of-name"));
     CHECK(reports_for("fun f(c: query_candidate[.procedural]) -> bool => c.is_opaque\n") == "");
 }
+
+TEST("sgl check - a candidate loop's body is non-uniform control flow, whatever its query's ray")
+{
+    // CHK-542: each invocation meets its own candidates, so a barrier or a derivative there is refused even where every
+    // invocation traces the same ray
+    refused("", "let q = scene.world.query(probe())\nfor c in q.candidates:\n    workgroup_barrier()\n    c.commit()\n",
+            "non-uniform-control-flow");
+    refused("", "let q = scene.world.query(probe(), mask = id.x)\nfor c in q.candidates:\n    workgroup_barrier()\n",
+            "non-uniform-control-flow");
+}
+
+TEST("sgl check - a mixed query that skips triangles is a query of its boxes")
+{
+    // CHK-540: the flags a target forbids beside `skip_triangles` are left out, and the boxes are met
+    accepted("", "let q = scene.mixed.query(probe(), flags = ray_flags.skip_triangles)\n"
+                 "for c in q.candidates:\n"
+                 "    let _ = c.commit(c.t_min)\n"
+                 "scene.hits[id.x] = float4(q.hit.t)\n");
+    accepted("", "let q = scene.mixed.query(probe(), flags = ray_flags.skip_triangles | ray_flags.cull_back_facing)\n"
+                 "for c in q.candidates:\n"
+                 "    let _ = c.commit(c.t_min)\n"
+                 "scene.hits[id.x] = float4(q.hit.t)\n");
+}

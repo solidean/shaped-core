@@ -252,3 +252,74 @@ hit_group lit for rs:
                                        i + 1)))
             .context(names[i]);
 }
+
+TEST("sgl emit - a return or a yield out of a candidate loop reads the candidate before it aborts the query")
+{
+    // EMIT-277: the abort comes before the leave, never before the value the leave hands on, which reads the candidate
+    auto const source = cc::string_view(R"(require ray_query
+
+binding scene:
+    world: acceleration_structure[.triangles]
+    hits: mut buffer[float4]
+
+fun first_cut(r: ray){scene} -> int:
+    let q = scene.world.query(r)
+    for c in q.candidates:
+        if c.primitive_index > 3 => return c.primitive_index
+    return -1
+
+fun nearest_past(r: ray, n: int){scene} -> float:
+    let v = case n:
+        0 =>:
+            let q = scene.world.query(r)
+            for c in q.candidates:
+                if c.t > 1.0 => yield c.t
+            yield 0.0
+        _ => 2.0
+    return v
+
+@compute(64) fun main(@thread_id id: int3){scene}:
+    let r = ray(origin = pos3(id.x as float, 0.5, -1.0), direction = vec3(0.0, 0.0, 1.0))
+    scene.hits[id.x] = float4(first_cut(r) as float, nearest_past(r, id.x), 0.0, 0.0)
+)");
+    for (auto const t : {target::hlsl_dx12, target::msl})
+    {
+        auto const text = text_of_entry(source, "main", t);
+        auto const view = cc::string_view(text);
+        // every abort is followed by no candidate read before the loop's `break`
+        for (auto at = view.find(t == target::msl ? ".abort();" : ".Abort();"); at >= 0;
+             at = view.find(t == target::msl ? ".abort();" : ".Abort();", at + 1))
+        {
+            auto const end = view.find("break;", at);
+            REQUIRE(end > at);
+            auto const read = view.find(t == target::msl ? "get_candidate" : "Candidate", at);
+            CHECK((read < 0 || read > end)).dump("text", text);
+        }
+    }
+}
+
+TEST("sgl emit - a commit in the right of an and stays conditional when it ends the search")
+{
+    // EVAL-80 and CHK-545: `x and c.commit()` commits only where x holds, accept_first_hit_and_end_search or not
+    auto const source = cc::string_view(R"(require ray_query
+
+binding scene:
+    world: acceleration_structure[.triangles]
+    hits: mut buffer[float4]
+
+@compute(64) fun main(@thread_id id: int3){scene}:
+    let r = ray(origin = pos3(id.x as float, 0.5, -1.0), direction = vec3(0.0, 0.0, 1.0))
+    let q = scene.world.query(r, flags = ray_flags.accept_first_hit_and_end_search)
+    let mut asked = 0
+    for c in q.candidates:
+        if c.t < 10.0 and c.commit() => asked += 100
+    scene.hits[id.x] = float4(q.hit.t, asked as float, 0.0, 0.0)
+)");
+    auto const text = text_of_entry(source, "main", target::hlsl_dx12);
+    auto const view = cc::string_view(text);
+    auto const test = view.find("q.CandidateTriangleRayT() < 10.0");
+    auto const commit = view.find("q.CommitNonOpaqueTriangleHit();");
+    REQUIRE(test >= 0);
+    REQUIRE(commit >= 0);
+    CHECK(test < commit).dump("text", text);
+}

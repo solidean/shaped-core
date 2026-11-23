@@ -301,3 +301,93 @@ TEST("sgl query - the decal lookup collects every decal a point lies in, by the 
                       "    gathered(float3(15.0, 15.0, 15.0)) == int4(0, -1, -1, -1)\n")
           == "");
 }
+
+TEST("sgl query - a box's commit takes t_min and t_current themselves, and a NaN commits nothing")
+{
+    // CHK-545: `t_min <= t <= t_current`, both ends included; a NaN is in no range
+    CHECK(mixed_failures_of("test {scenes}:\n"
+                            "    let q = scenes.ball.query(along_z(2.75, 0.75))\n"
+                            "    let mut good = true\n"
+                            "    for c in q.candidates:\n"
+                            "        let zero = c.t_min\n"
+                            "        let nan = zero / zero\n"
+                            "        good = good and not c.commit(nan)\n"
+                            "        good = good and c.commit(c.t_current)\n"
+                            "        good = good and c.t_current == 3.0e38\n"
+                            "        good = good and c.commit(1.5)\n"
+                            "        good = good and not c.commit(1.75)\n"
+                            "        good = good and c.commit(c.t_current) and c.t_current == 1.5\n"
+                            "        good = good and c.commit(c.t_min) and c.t_current == 0.0\n"
+                            "    good\n"
+                            "    q.hit.is_hit and q.hit.t == 0.0\n")
+          == "");
+}
+
+TEST("sgl query - under accept_first_hit_and_end_search the rest of a committing body runs, then the walk ends")
+{
+    // CHK-545: a commit that commits ends the traversal once the body is done, a `continue` after it too
+    CHECK(failures_of("test {scenes}:\n"
+                      "    let q = scenes.cutout.query(along_z(0.25, 0.25), flags = "
+                      "ray_flags.accept_first_hit_and_end_search)\n"
+                      "    let mut n = 0\n"
+                      "    let mut after = 0\n"
+                      "    for c in q.candidates:\n"
+                      "        n += 1\n"
+                      "        c.commit()\n"
+                      "        after += 1\n"
+                      "        if after > 0 => continue\n"
+                      "        after += 100\n"
+                      "    n == 1 and after == 1 and q.hit.is_hit\n")
+          == "");
+}
+
+TEST("sgl query - a mixed query that skips triangles meets its boxes alone")
+{
+    // CHK-540: `skip_triangles` on `.mixed` leaves the boxes; the ball is the one candidate on this ray
+    CHECK(mixed_failures_of("test {scenes}:\n"
+                            "    let q = scenes.mixed.query(along_z(2.75, 0.75), flags = ray_flags.skip_triangles)\n"
+                            "    let mut triangles = 0\n"
+                            "    let mut boxes = 0\n"
+                            "    for c in q.candidates:\n"
+                            "        if c.is_triangle:\n"
+                            "            triangles += 1\n"
+                            "        else:\n"
+                            "            boxes += 1\n"
+                            "            let reported = ball_report(c.box())\n"
+                            "            if reported.is_hit => c.commit(reported.t)\n"
+                            "    triangles == 0 and boxes == 1\n"
+                            "    q.hit.kind == hit_kind.procedural and q.hit.instance_id == 11\n")
+          == "");
+}
+
+TEST("sgl query - early exits through loops in the body, a helper and a candidate handed on keep the walk right")
+{
+    // CHK-541, CHK-542: a return from a loop inside the body leaves the traversal and the function
+    CHECK(failures_of("fun deep(r: ray){scenes} -> int:\n"
+                      "    let q = scenes.cutout.query(r)\n"
+                      "    for c in q.candidates:\n"
+                      "        let mut i = 0\n"
+                      "        while i < 4:\n"
+                      "            if c.primitive_index == i => return 10 + c.primitive_index\n"
+                      "            i += 1\n"
+                      "    return -1\n"
+                      "fun take(c: query_candidate[.triangles]) -> bool => c.commit()\n"
+                      "fun count_of(q: trace_query[.triangles]) -> int => q.hit.primitive_index\n"
+                      "test {scenes}:\n"
+                      "    let mut total = 0\n"
+                      "    for k in 0 ..< 3:\n"
+                      "        let d = deep(along_z(0.25, 0.25))\n"
+                      "        total += if d == 10 or d == 11 => 1 else 0\n"
+                      "    total == 3\n"
+                      "    deep(along_z(0.75, 0.75)) == -1\n"
+                      "test {scenes}:\n"
+                      "    let q = scenes.cutout.query(along_z(0.25, 0.25))\n"
+                      "    let mut n = 0\n"
+                      "    for c in q.candidates:\n"
+                      "        n += 1\n"
+                      "        loop:\n"
+                      "            if c.primitive_index == 0 and take(c) => break\n"
+                      "            break\n"
+                      "    n == 2 and q.hit.is_hit and count_of(q) == 0\n")
+          == "");
+}

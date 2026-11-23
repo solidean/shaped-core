@@ -83,6 +83,8 @@ test {scene}:
     n == 0
     q.hit.t == 100.0 and not q.hit.is_hit
     nearest(q) == 100.0
+    // `let _` evaluates the ray, and a query nobody steps through starts no trace
+    let _ = scene.world.query(probe())
     first_cut(probe()) == -1
 
 test {scene}:

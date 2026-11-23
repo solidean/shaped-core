@@ -811,8 +811,10 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
   `c.commit()` and `c.commit(t)` set the walk's committed hit, and `t_current` reads it.
   `break` ends the walk, and `continue` goes on with it; the body's own loops keep their own `break` and `continue`.
   The interpreter runs this form (EVAL-95), so a `test` steps through a query against a pool its driver binds.
-* **EMIT-277** Every exit that leaves a candidate loop before the traversal is done writes the target's abort first ([why](why/emitting.md#emit-277)).
-  Those are a `break`, a `return` and a commit that ends the search.
+* **EMIT-277** Every exit that leaves a candidate loop before the traversal is done writes the target's abort ([why](why/emitting.md#emit-277)).
+  Those are a `break`, a `return`, a `yield` out of a value block around the loop, and a commit that ends the search.
+  The abort comes after the value the exit hands on, which may read the candidate, and before the exit itself.
+  A `discard` ends the invocation, and its traversal with it.
   A commit that ends the search marks it, and the abort follows once the candidate's body is done, so the body still reads its candidate.
   So a query is ended wherever it is left, and no target keeps a traversal live past the loop.
 * **EMIT-185** A text keeps its entry point's float guarantee (CHK-435), or the compile refuses with `float-guarantee-not-kept`, naming the function that asked.
@@ -927,7 +929,7 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
 | `c.geometry_index`, `c.primitive_index` | `CandidateGeometryIndex()`, `CandidatePrimitiveIndex()` | `…GeometryIndexKHR`, `…PrimitiveIndexKHR` | `get_candidate_geometry_id()`, `get_candidate_primitive_id()` | the pool's | the pool's |
 | `c.t`, `c.barycentrics`, `c.is_front_face` | `CandidateTriangleRayT()`, `…Barycentrics()`, `…FrontFace()` | `OpRayQueryGetIntersectionTKHR`, `…BarycentricsKHR`, `…FrontFaceKHR` | `get_candidate_triangle_distance()`, `…barycentric_coord()`, `is_candidate_triangle_front_facing()` | the walk's | the walk's |
 | `c.is_opaque` | `!CandidateProceduralPrimitiveNonOpaque()` | `OpRayQueryGetIntersectionCandidateAABBOpaqueKHR` | `!is_candidate_non_opaque_bounding_box()` | the pool's | the pool's |
-| `c.t_min`, `c.t_current` | the ray's `t_min`, `CommittedRayT()` | the ray's `t_min`, `OpRayQueryGetIntersectionTKHR` (committed) | the ray's `t_min`, `get_committed_distance()` | the walk's | the walk's |
+| `c.t_min`, `c.t_current` | the ray's `t_min`; `CommittedRayT()` where something is committed, else the ray's `t_max` | the ray's `t_min`; `OpRayQueryGetIntersectionTKHR` (committed) likewise | the ray's `t_min`; `get_committed_distance()` likewise | the walk's | the walk's |
 | `c.object_ray`, transforms | `CandidateObjectRayOrigin()`, `…Direction()`, `CandidateObjectToWorld3x4()`, `CandidateWorldToObject3x4()` | `…ObjectRayOriginKHR`, `…ObjectRayDirectionKHR`, `…ObjectToWorldKHR`, `…WorldToObjectKHR` | `get_candidate_ray_origin()`, `…direction()`, `get_candidate_object_to_world_transform()`, `…world_to_object_transform()` | the pool's | the pool's |
 | `c.commit()` | `CommitNonOpaqueTriangleHit()` | `OpRayQueryConfirmIntersectionKHR` | `commit_triangle_intersection()` | the walk's | the walk's |
 | `c.commit(t)` | the range test, `CommitProceduralPrimitiveHit(t)` | the range test, `OpRayQueryGenerateIntersectionKHR` | the range test, `commit_bounding_box_intersection(t)` | the range test, the walk's | the walk's |

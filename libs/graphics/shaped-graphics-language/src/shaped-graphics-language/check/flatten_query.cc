@@ -80,8 +80,9 @@ auto sgl::check::impl::flattener::query_helper(ast::expr_id id,
 void sgl::check::impl::flattener::flatten_query_let(origin from, ast::stmt_id id, ast::let_stmt const& let)
 {
     auto const record_index = tables().call_at(let.value);
+    auto const is_discarded = ast::is_valid(let.pattern) && ast().at(let.pattern).node.is<ast::wildcard>();
     auto const* const name = ast::is_valid(let.pattern) ? ast().at(let.pattern).node.try_as<ast::name>() : nullptr;
-    if (record_index < 0 || name == nullptr)
+    if (record_index < 0 || (name == nullptr && !is_discarded))
     {
         mark_failed();
         return;
@@ -102,7 +103,7 @@ void sgl::check::impl::flattener::flatten_query_let(origin from, ast::stmt_id id
         mark_failed();
         return;
     }
-    auto state = query_state{.geometry = c.out.at(tables().type_at(let.pattern)).format};
+    auto state = query_state{.geometry = c.out.at(tables().type_at(let.value)).format};
     // EVAL-80: each argument evaluated once, in the order written, where the `let` stands
     flat_expr_id given[4] = {flat_expr_id::none, flat_expr_id::none, flat_expr_id::none, flat_expr_id::none};
     for (auto k = isize(0); k < values.size(); ++k)
@@ -162,6 +163,9 @@ void sgl::check::impl::flattener::flatten_query_let(origin from, ast::stmt_id id
     state.ray = given[1];
     state.flags = given[2];
     state.mask = given[3];
+    // CHK-55: `let _ = world.query(r)` evaluates the arguments, and a query nobody steps through starts no trace
+    if (is_discarded)
+        return;
     auto const index = i32(queries.size());
     queries.push_back(state);
     auto const stand_in = add_expr(tables().type_at(let.pattern), let.value, flat_int_literal{.value = index});
@@ -207,10 +211,8 @@ void sgl::check::impl::flattener::flatten_candidate_loop(origin from, ast::stmt_
     // CHK-540: a query of no kind its structure holds meets nothing, which a mask of 0 asks of every form
     auto const meets_nothing = (geometry == 0 && skips_triangles) || (geometry == 1 && skips_boxes)
                             || (geometry == 2 && skips_triangles && skips_boxes);
-    // the target forbids the facing culls beside `skip_triangles`, and the start of a mixed query drops them then
-    auto const start = geometry == 2 && skips_triangles && !meets_nothing
-                         ? cc::string("query_native_start_mixed_boxes")
-                         : cc::format("query_native_start_{}", geometry_name);
+    // the start of a mixed query drops the facing culls beside `skip_triangles`, which the target forbids together
+    auto const start = cc::format("query_native_start_{}", geometry_name);
 
     auto const hit = add_local(local_kind::var, "hit", hit_type);
     queries[q].hit = hit;
@@ -284,7 +286,13 @@ void sgl::check::impl::flattener::flatten_candidate_loop(origin from, ast::stmt_
         }
         else
         {
-            auto const walk_type = c.out.functions[c.out.at(prelude_symbol(c, "query_walk_start")).info].result;
+            auto const walk_start = prelude_symbol(c, "query_walk_start");
+            if (!is_valid(walk_start) || c.out.at(walk_start).info < 0)
+            {
+                block = cc::move(outer);
+                return fail();
+            }
+            auto const walk_type = c.out.functions[c.out.at(walk_start).info].result;
             auto const walk = add_local(local_kind::var, "walk", walk_type);
             flat_expr_id const start_arguments[] = {again(queries[q].ray, where)};
             add_stmt(from, flat_var{.local = walk, .value = query_helper(where, "query_walk_start", start_arguments)});
@@ -322,12 +330,9 @@ void sgl::check::impl::flattener::flatten_candidate_loop(origin from, ast::stmt_
                                                flat_by_target{.native = native, .emulated = emulated})});
 }
 
-auto sgl::check::impl::flattener::call_candidate_body(ast::expr_id id,
-                                                      type_id type,
-                                                      i32 loop,
-                                                      cc::span<flat_expr_id const> values) -> flat_expr_id
+auto sgl::check::impl::flattener::call_candidate_body(ast::expr_id id, i32 loop, cc::span<flat_expr_id const> values)
+    -> flat_expr_id
 {
-    (void)type;
     // by value: writing the body may open loops of its own, and the vector moves
     auto const l = candidate_loops[loop];
     if (values.empty() || !is_valid(values[0]))
@@ -400,8 +405,22 @@ auto sgl::check::impl::flattener::call_candidate_body(ast::expr_id id,
     return add_expr(checked_module::void_type, id, flat_block{.label = add_label("body"), .body = body});
 }
 
-void sgl::check::impl::flattener::abort_crossed(origin from, label_id target)
+void sgl::check::impl::flattener::abort_crossed(origin from, label_id target, flat_expr_id* value)
 {
+    auto const crosses
+        = [&](i32 loop) { return !is_valid(target) || index_of(target) <= index_of(candidate_loops[loop].exit); };
+    auto is_any = false;
+    for (auto const loop : open_native_loops)
+        is_any = is_any || crosses(loop);
+    if (!is_any)
+        return;
+    // the value is read before the abort, since what it reads of the candidate is gone after it
+    if (value != nullptr && is_valid(*value) && !is_substitutable(*value))
+    {
+        auto const kept = add_local(local_kind::temporary, "left", entry.at(*value).type);
+        add_stmt(from, flat_let{.local = kept, .value = *value});
+        *value = local_ref(kept, from.expr);
+    }
     for (auto i = open_native_loops.size() - 1; i >= 0; --i)
     {
         auto const& l = candidate_loops[open_native_loops[i]];
@@ -414,9 +433,8 @@ void sgl::check::impl::flattener::abort_crossed(origin from, label_id target)
     }
 }
 
-auto sgl::check::impl::flattener::flatten_query_member(ast::expr_id id, type_id type, target const& where) -> flat_expr_id
+auto sgl::check::impl::flattener::flatten_query_member(ast::expr_id id, target const& where) -> flat_expr_id
 {
-    (void)type;
     auto const& node = ast().at(id).node;
     auto object = ast::expr_id::none;
     auto arguments = cc::span<ast::argument const>();
@@ -486,18 +504,22 @@ auto sgl::check::impl::flattener::flatten_query_member(ast::expr_id id, type_id 
                 flat_expr_id const commit_arguments[] = {handle, ray, t, mixed};
                 committed = query_helper(id, "query_native_commit_at", commit_arguments);
             }
-            // EMIT-277: a commit that ends the search marks it, and the candidate's body ends the traversal after it
+            // EMIT-277: a commit that ends the search marks it, inside the commit's own block, so it stays as conditional as
+            // the commit; the candidate's body ends the traversal after it
             if (is_valid(committed) && is_valid(candidate.ended))
             {
+                auto const at = origin{.file = file(), .expr = id};
+                auto const label = add_label("committed");
                 auto const kept = add_local(local_kind::temporary, "committed", bool_type());
-                add_stmt({.file = file(), .expr = id}, flat_let{.local = kept, .value = committed});
                 flat_stmt_id const mark[]
-                    = {make_stmt({.file = file(), .expr = id},
-                                 flat_assign{.place = local_ref(candidate.ended, id),
-                                             .value = add_expr(bool_type(), id, flat_bool_literal{.value = true})})};
-                add_stmt({.file = file(), .expr = id},
-                         flat_if{.condition = local_ref(kept, id), .then_body = add_list(mark)});
-                committed = local_ref(kept, id);
+                    = {make_stmt(at, flat_assign{.place = local_ref(candidate.ended, id),
+                                                 .value = add_expr(bool_type(), id, flat_bool_literal{.value = true})})};
+                flat_stmt_id const body[] = {
+                    make_stmt(at, flat_let{.local = kept, .value = committed}),
+                    make_stmt(at, flat_if{.condition = local_ref(kept, id), .then_body = add_list(mark)}),
+                    make_stmt(at, flat_leave{.target = label, .value = local_ref(kept, id)}),
+                };
+                committed = add_expr(bool_type(), id, flat_block{.label = label, .body = add_list(body)});
             }
             return committed;
         }
@@ -608,6 +630,8 @@ struct query_escape_walk
 
 void sgl::check::impl::flattener::judge_queries()
 {
+    if (is_query_refused)
+        return;
     // a hit nothing reads is never written, so a target reads nothing of what the traversal committed
     for (auto const& q : queries)
         if (q.query < 0 && !q.is_hit_read)
@@ -631,7 +655,8 @@ auto sgl::check::impl::flattener::refuse_query(diagnostic_kind kind, origin at, 
     auto const where = ast::is_valid(at.expr) ? c.span_of(at.file, at.expr) : c.span_of(at.file, at.stmt);
     unroll_reports.push_back(
         {.kind = kind, .file = at.file, .where = where, .detail = cc::move(detail), .site = innermost_call()});
-    // reported, so the tree's failure needs no `unsupported-yet` of its own
+    // reported, so the tree's failure needs no `unsupported-yet` of its own, and no escape the scan would find again
     meets_error = true;
+    is_query_refused = true;
     return fail();
 }

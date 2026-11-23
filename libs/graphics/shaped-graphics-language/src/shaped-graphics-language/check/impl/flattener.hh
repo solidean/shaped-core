@@ -982,6 +982,8 @@ struct flattener
         local_id ended = local_id::none;
     };
     cc::vector<query_state> queries;
+    /// A query rule was reported, which the escape scan then reports no second time.
+    bool is_query_refused = false;
 
     /// A candidate loop being written: the frame its body is written in, and how its body leaves it.
     struct candidate_loop
@@ -1009,12 +1011,13 @@ struct flattener
     /// CHK-542, EMIT-275, EMIT-276: the candidate loop as the two forms of a trace.
     void flatten_candidate_loop(origin from, ast::stmt_id id, ast::for_stmt const& loop);
     /// CHK-544 to CHK-546: a member of a candidate or a query, read or called.
-    flat_expr_id flatten_query_member(ast::expr_id id, type_id type, target const& where);
+    flat_expr_id flatten_query_member(ast::expr_id id, target const& where);
     /// The loop's body for the candidate `values[0]`: the target's query, or the walk's candidate.
-    flat_expr_id call_candidate_body(ast::expr_id id, type_id type, i32 loop, cc::span<flat_expr_id const> values);
+    flat_expr_id call_candidate_body(ast::expr_id id, i32 loop, cc::span<flat_expr_id const> values);
     /// EMIT-277: before a leave of `target` from a native candidate loop's body, the abort of every loop it leaves;
     /// `target` none for the tree's own return.
-    void abort_crossed(origin from, label_id target);
+    /// The leave's `value`, where it has one, is evaluated into a local first, since it may read the candidate.
+    void abort_crossed(origin from, label_id target, flat_expr_id* value = nullptr);
     /// The prelude's internal `name`, inlined over `arguments` as a block; `none` where it failed.
     flat_expr_id query_helper(ast::expr_id id,
                               cc::string_view name,

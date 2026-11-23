@@ -1631,7 +1631,7 @@ HLSL writes it on dx12 and vulkan; WebGPU has none, and sg's metal backend does 
 * **CHK-542** `for c in q.candidates:` is a **candidate loop**: its body runs once per candidate the traversal of `q` meets, and `c` is a `query_candidate[.g]` ([why](why/checking.md#chk-542)).
   `q.candidates` stands behind a `for`'s `in` and nowhere else, or `query-traversal-misplaced`.
   The loop stands in the block of its query's `let`, after it and at its level, and a query has one loop at most; a loop anywhere else, or a second one, is `query-traversal-misplaced`.
-  `break` ends the traversal, keeping what it committed, `continue` goes on to the next candidate, and a `return` ends the traversal with the function.
+  `break` ends the traversal, keeping what it committed, `continue` goes on to the next candidate, and a `return` or a `yield` ends the traversal with what it leaves.
   Each names the innermost loop around it, by CHK-119, so a `break` in a loop inside the body leaves that loop alone.
   An attribute on a candidate loop is `unsupported-yet`, by CHK-39, since how often it runs is the driver's.
   Its body is in non-uniform control flow (CHK-284), since each invocation meets its own candidates.
