@@ -37,6 +37,15 @@ struct shape:
 ```
 
 A positional payload's fields are `.0`, `.1`, as a tuple's are ([structural-types.md](structural-types.md)).
+A paren payload may also have a block, and the two add up: the paren fields first, then the block's fields and cases.
+Positional construction covers the paren fields alone, and the block's are named or take their defaults.
+
+```sgl sketch
+case sphere(center: float3, radius: float):
+    emissive: bool = false
+    case solid
+    case hollow(thickness: float)
+```
 
 **Sibling cases are separate scopes**, so `glass.ior: float` and `metal.ior: float3` may coexist.
 Each is reached once the value is narrowed to its case, and `m.ior` on the whole `material` is an error.
@@ -65,6 +74,7 @@ struct material:
 
 `tint` has one offset in `glass` and in `metal`, and reads on any set within them, `material.glass or material.metal` among them.
 `emissive` has no `tint`, and its own fields may occupy the words `tint` takes elsewhere.
+`@cases` names sets as well as leaves, so `@cases(.dielectric, .metal)` gives `tint` to every case below `dielectric`.
 Declaring it once at the owner keeps the layout decision in one place; a field declared in each case and unified afterwards could fail to fit, and say so far from the cause.
 
 **A value is not its memory.**
@@ -85,10 +95,11 @@ Where the tag lands is deterministic and documented, since the host reads the sa
 
 **A field's type may name a range**: `x: int in 0..<10`.
 It parses already: `:` and `in` share level 7 and associate left ([OP-2](../syntax/operators.md)), so the line is `(x: int) in (0..<10)`.
-What changes is the member table ([AST-78](../syntax/ast.md#members)), which gains a row: a membership whose left side is a field reads as that field with a refined type.
+What changes is the member table ([AST-78](../syntax/ast.md#members)), which gains a row: a membership whose left side is a field reads as a ranged field.
 The same row serves a parameter and a `let`; in an expression the line keeps meaning an ascription, then a membership test.
-`x: (int in 0..<10)` is the same type spelled in a type position, and reaches every place a type stands.
-A value converts into a refined type where the check pass can prove it fits; otherwise `as` converts it, checked under `SC_SHADER_UNDEFINED`'s `REPORT` as a downcast is.
+A ranged field is an `int` with a fact attached, not a type of its own, so no type position spells the range.
+Overloading and generics see `int`, and arithmetic on it gives a plain `int`: the range constrains only what may be stored.
+A store into it needs a value the check pass can prove fits; otherwise `as` converts it, checked under `SC_SHADER_UNDEFINED`'s `REPORT` as a downcast is.
 
 **Or the program names the discriminator**, with a `@when` on each case that is a predicate over common fields alone:
 
@@ -175,7 +186,7 @@ Sets as types, `@cases`, `@tag(.external)`, `@unchecked`, ranged integers and `T
 
 ## What it touches
 
-* The AST: `case` as a declaration inside a struct block, nested, `is` and `is not` as word operators, and the member row of a refined field.
+* The AST: `case` as a declaration inside a struct block, nested, `is` and `is not` as word operators, and the member row of a ranged field.
 * The check pass: the variant tree as a type kind, sets and their conversions, flow-sensitive narrowing, and a constructor per constructible case.
   Also the predicate fragment with its disjointness and coverage check, and the read-only discriminating fields.
 * Layout: niche placement, the common fields' offsets and the word region, in the [layout rules](../semantics/emitting.md#layout) beside `@padding(.none)`.
@@ -192,11 +203,9 @@ Sets as types, `@cases`, `@tag(.external)`, `@unchecked`, ranged integers and `T
 * An arm names several cases as `.spot or .sun` already, which is the spelling a set of variants takes in a type position.
 * `as` is a `cast` node in the AST already.
 * Attributes are an open, additive set, so `@when`, `@unchecked`, `@cases` and `@tag` need no grammar of their own.
-* `x: int in 0..<10` already parses as `(x: int) in (0..<10)` (OP-2), which a member row can read as a refined field.
+* `x: int in 0..<10` already parses as `(x: int) in (0..<10)` (OP-2), which a member row can read as a ranged field.
 * `bool` is an enum of the prelude, so a `bool` field is a finite domain like any enum field.
 
 ## Open
 
-* How `@cases` is spelled, and whether it names cases only or sets as well, `@cases(.dielectric, .metal)`.
-* Whether a payload in parens may also have a block, `case sphere(radius: float):` with fields below — the question `struct` has too.
-* Whether a refined type is a type of its own or `int` with a fact attached, which decides what overloading sees.
+Nothing is open today.
