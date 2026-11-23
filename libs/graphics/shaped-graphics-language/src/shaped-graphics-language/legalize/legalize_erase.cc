@@ -155,6 +155,20 @@ struct void_eraser
     legalize_options const* expanding = nullptr;
     /// LEGAL-64: V0 lowers each assert instead of dropping it.
     bool lowers_asserts = false;
+    /// LEGAL-73: what a guard of what has no value is lowered as, or dropped where `none` or `define`.
+    undefined_guard guards = undefined_guard::none;
+    /// Whether the tree holds such a guard, which stands inside block expressions where nothing else of V0 does.
+    bool has_guards = false;
+
+    /// Whether check `k` is lowered rather than dropped: an assert where asserts are, and a guard where guards are.
+    [[nodiscard]] bool lowers(flat_check const& k) const
+    {
+        if (k.site < 0 || k.site >= out.e.check_sites.size() || !out.e.check_sites[k.site].stops)
+            return false;
+        if (out.e.check_sites[k.site].guards_undefined)
+            return guards == undefined_guard::report || guards == undefined_guard::abort;
+        return lowers_asserts;
+    }
 
     /// LEGAL-64: assert `k`'s body, then its message printed and the invocation ended where the condition is false.
     void lower_assert(flat_stmt const& s, flat_check const& k, stmt_list& into, int depth)
@@ -179,7 +193,9 @@ struct void_eraser
             for (auto const v : out.e.at(site.message_values))
                 values.push_back(expr(v, 0));
         auto failed = cc::vector<flat_stmt_id>();
-        if (!erases_prints)
+        // LEGAL-73: `abort` ends the invocation of a failed guard and says nothing
+        auto const is_silent = site.guards_undefined && guards != undefined_guard::report;
+        if (!erases_prints && !is_silent)
             failed.push_back(out.print(message, values));
         end_invocation(out, failed);
         into.push_back(out.if_(out.not_(out.local(nodes[0].value)), failed));
@@ -213,19 +229,22 @@ struct void_eraser
     }
 
     /// `id` with every read of a void local, and every void field of a value without an effect, as void's value.
+    /// LEGAL-73: a guard of what has no value is the one check inside an expression, a block's, which V0 reaches too.
     flat_expr_id expr(flat_expr_id id, int depth)
     {
-        if (!is_known(out.e, id) || depth > k_max_depth || !erases_void)
+        if (!is_known(out.e, id) || depth > k_max_depth || (!erases_void && !has_guards))
             return id;
         auto copy = out.e.at(id);
-        if (copy.type == checked_module::void_type && copy.node.is<flat_local_ref>())
+        if (erases_void && copy.type == checked_module::void_type && copy.node.is<flat_local_ref>())
             return unit(copy);
         if (auto* const member = copy.node.try_as<flat_member>())
         {
-            if (copy.type == checked_module::void_type && !has_effect(out.e, member->object))
+            if (erases_void && copy.type == checked_module::void_type && !has_effect(out.e, member->object))
                 return unit(copy);
             member->object = expr(member->object, depth + 1);
         }
+        else if (auto* const block = copy.node.try_as<flat_block>())
+            block->body = body(block->body, depth);
         else if (auto* const construct = copy.node.try_as<flat_construct>())
             construct->arguments = exprs(construct->arguments, depth);
         else if (auto* const call = copy.node.try_as<flat_call>())
@@ -340,9 +359,7 @@ struct void_eraser
             }
             auto copy = out.e.at(id);
             // V0: a check and its body are gone, whatever they compute
-            if (auto const* const k = copy.node.try_as<flat_check>(); k != nullptr && lowers_asserts && k->site >= 0
-                                                                      && k->site < out.e.check_sites.size()
-                                                                      && out.e.check_sites[k->site].stops)
+            if (auto const* const k = copy.node.try_as<flat_check>(); k != nullptr && lowers(*k))
             {
                 lower_assert(copy, *k, result, depth);
                 continue;
@@ -421,9 +438,21 @@ stmt_list sgl::check::impl::expand_prints(flat_builder& out, stmt_list const& bo
     return void_eraser{.out = out, .erases_void = false, .expanding = &options}.erase(body, 0);
 }
 
-stmt_list sgl::check::impl::erase_checks(flat_builder& out, stmt_list const& body, bool erases_prints, bool lowers_asserts)
+stmt_list sgl::check::impl::erase_checks(flat_builder& out,
+                                         stmt_list const& body,
+                                         bool erases_prints,
+                                         bool lowers_asserts,
+                                         undefined_guard guards)
 {
-    return void_eraser{.out = out, .erases_void = false, .erases_prints = erases_prints, .lowers_asserts = lowers_asserts}
+    auto has_guards = false;
+    for (auto const& site : out.e.check_sites)
+        has_guards = has_guards || site.guards_undefined;
+    return void_eraser{.out = out,
+                       .erases_void = false,
+                       .erases_prints = erases_prints,
+                       .lowers_asserts = lowers_asserts,
+                       .guards = guards,
+                       .has_guards = has_guards}
         .erase(body, 0);
 }
 

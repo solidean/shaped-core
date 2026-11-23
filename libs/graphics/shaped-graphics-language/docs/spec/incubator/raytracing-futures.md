@@ -65,4 +65,4 @@ With `T?`, `report.none()` would be `none`; with payload-carrying enums, a mixed
 
 * Whether recursion is a feature of the device or a promise the shader makes with a declared bound.
 * Whether a megakernel pipeline is emitted by SGL or assembled by slib from separately emitted functions.
-* `T?` and value-carrying enums are one mechanism, a struct with cases, if [sum-types.md](sum-types.md) holds.
+* `T?` and value-carrying enums are one mechanism, a struct with cases (CHK-540), which [sum-types.md](sum-types.md) leaves for later.

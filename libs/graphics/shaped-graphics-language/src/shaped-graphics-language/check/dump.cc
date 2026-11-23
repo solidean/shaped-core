@@ -94,6 +94,22 @@ struct dumper
             if (type.is_opaque)
                 out += " opaque";
             members(type.members);
+            // CHK-540: each case with its leaves, then each variant field at its words
+            for (auto const& c : m.at(type.struct_cases))
+            {
+                out.appendf(" (case {}", c.name);
+                if (c.leaf >= 0)
+                    out.appendf(" leaf:{}", c.leaf);
+                if (c.parent >= 0)
+                    out.appendf(" in:{}", m.at(type.struct_cases)[c.parent].name);
+                if (!c.is_buildable)
+                    out += " view";
+                out += ")";
+            }
+            for (auto const& v : m.at(type.variant_fields))
+                out.appendf(" (variant {} : {} words:{}..<{})", v.name, m.name_of(v.type), v.word, v.word + v.word_count);
+            if (type.has_cases() && !type.is_covered)
+                out += " uncovered";
         }
         else if (s.kind == symbol_kind::enumeration)
         {

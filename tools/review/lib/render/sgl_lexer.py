@@ -34,9 +34,9 @@ _CONTROL_BUILTINS = frozenset({
     "subgroup_bit_and", "subgroup_bit_or", "subgroup_bit_xor", "subgroup_inclusive_add", "subgroup_inclusive_mul",
     "subgroup_exclusive_add", "subgroup_exclusive_mul", "subgroup_broadcast", "subgroup_broadcast_first",
     "subgroup_shuffle", "subgroup_shuffle_up", "subgroup_shuffle_down", "subgroup_shuffle_xor",
-    "quad_broadcast", "quad_swap_x", "quad_swap_y", "quad_swap_diagonal",
+    "quad_broadcast", "quad_swap_x", "quad_swap_y", "quad_swap_diagonal", "quad_all", "quad_any", "subgroup_elect",
 })
-_WORD_OPERATORS = frozenset({"and", "or", "not", "in", "as"})
+_WORD_OPERATORS = frozenset({"and", "or", "not", "in", "as", "is"})
 _CONSTANTS = frozenset({"true", "false"})
 # A symbol directly after one of these names a function or a type.
 _NAMES_FUNCTION = frozenset({"fun"})

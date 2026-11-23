@@ -86,6 +86,12 @@ The worked examples are WGSL, since it is the strictest target: no `do … while
   Under `define` it zeroes workgroup memory instead: an array member element by element in that stride, any other member in invocation 0, and an atomic by its store.
   A `workgroup_barrier` follows either, so no mark lands before a clear and no read before the zero.
   A target whose workgroup memory starts at zero, as WebGPU's does, gets no prologue.
+* **LEGAL-73** (G1, V0) A **guard** of what has no value is an assert that `SC_SHADER_UNDEFINED` keeps rather than diagnostics.
+  It is the check of an `as` of cases (CHK-550), and of a store into a field with a range (CHK-549).
+  Under `report` it is lowered as LEGAL-64 lowers an assert, its message printed, and under `abort` it ends the invocation and prints nothing.
+  Where a barrier, a derivative or a subgroup operation may still follow it sets the flag of LEGAL-65 instead.
+  Under `none` and `define` it is dropped with its body, which only computes its condition.
+  A guard stands inside the block expression of the value it checks, the one check that does, which V0 reaches there too.
 * **LEGAL-72** Right after G1, each local array its let states `@indexed(.select)` (CHK-538) is one local per element, so no target holds an array an index computed at run time reaches.
   A copy of one takes its annotation, so a parameter bound to it is a local per element too.
   Its declaration declares each element's local with that element of its value: an argument of an array literal as it stands, or else an element of a `let` bound to the value once.

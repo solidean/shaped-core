@@ -15,7 +15,7 @@ Back to the [phases](_index.md); the reasons are in [why/operators.md](why/opera
 | 4 | [keyword form](forms.md#keyword-forms) | | `assert a == b, "msg"` |
 | 5 | `and` `or` `not` | left | `a and not b` |
 | 6 | comparisons `<` `<=` `==` `!=` `>=` `>` | chained | `0 <= i < n` |
-| 7 | `:` `as` `in` | left | `x as int in bounds : bool` |
+| 7 | `:` `as` `in` `is` | left | `x as int in bounds : bool` |
 | 8 | function arrow `->` | right | `(float) -> (float) -> float` |
 | 9 | ranges `..<` `..=` | none | `0..<n + 1` |
 | 10 | bit-like `&` `\|` `^` `<<` `>>` | left | `(x >> 16) ^ x` |
@@ -26,7 +26,7 @@ Back to the [phases](_index.md); the reasons are in [why/operators.md](why/opera
 | 15 | [postfix forms](forms.md#postfix-forms): calls and member access | | `f(x).y[i]` |
 | 16 | atoms | | `x`, `1.5`, `(a, b)` |
 
-* **OP-2** `and`, `or` and `not` share one level, `:` `as` `in` share one level, and the bit-like operators share one level ([why](why/operators.md#op-2)).
+* **OP-2** `and`, `or` and `not` share one level, `:` `as` `in` `is` share one level, and the bit-like operators share one level ([why](why/operators.md#op-2)).
 * **OP-3** `=>` binds looser than a keyword form and tighter than assignment ([why](why/operators.md#op-3)).
 * **OP-4** The bit-like operators bind tighter than comparisons ([why](why/operators.md#op-4)).
 * **OP-32** `->` has a level of its own, tighter than `:` `as` `in` and looser than the ranges, and it associates to the right ([why](why/operators.md#op-32)).
@@ -69,7 +69,8 @@ fun scaled(a: float) -> float => a * 2
 * **OP-10** An operator the language does not define is the normal error `unknown-operator`, and it is placed by OP-5 and OP-7.
 * **OP-11** `^` is exclusive or, and there is no exponent operator ([why](why/operators.md#op-11)).
 * **OP-12** `!` alone and every operator that starts with `?` are reserved, and they are the normal error `reserved-operator`.
-* **OP-13** `and`, `or`, `not`, `as` and `in` are **word operators**: symbols that the keyword table marks as operators.
+* **OP-13** `and`, `or`, `not`, `as`, `in` and `is` are **word operators**: symbols that the keyword table marks as operators.
+* **OP-34** Right after `is`, a `not` makes the two words one operator, `is not`: the operand after `is` may start with `not`, which no other operand of its level may.
 * **OP-14** `:`, `->` and `=>` are operators of the ladder, and they are not operator tokens.
 * **OP-30** The prefix `..` is the splat, and where it may stand is decided by the AST ([AST-28](ast.md#lists), [why](why/operators.md#op-30)).
 * **OP-31** The postfix `..` is reserved by OP-24, and it is kept free for a half-open range ([why](why/operators.md#op-31)).

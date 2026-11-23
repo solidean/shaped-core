@@ -1,0 +1,136 @@
+// a struct's own fields may say which case a value is: each case of a level carries a @when over them
+
+enum material_kind:
+    glass
+    metal
+    emissive
+
+struct material:
+    kind: material_kind
+    two_sided: bool
+    roughness: float
+
+    @when(kind == .glass and two_sided)
+    case thin_glass:
+        ior: float
+    @when(kind == .glass and not two_sided)
+    case glass:
+        ior: float
+        absorption: float3
+    @when(kind == .metal)
+    case metal:
+        f0: float3
+    @when(kind == .emissive)
+    case emissive:
+        radiance: float3
+
+// a case whose @when is a conjunction of equalities is built with its discriminating fields written for it
+test:
+    let g = material.glass(0.1, 1.5, float3(0.2))
+    g.kind == material_kind.glass and not g.two_sided
+
+// `is` reads the fields the @when reads, so it tells a value from the bytes a host wrote
+test:
+    let t = material.thin_glass(0.3, 1.33)
+    t is .thin_glass and t is not .glass
+
+// the four cover every value of kind and two_sided, so a case naming them all needs no `_`
+fun specular(m: material) -> float => case m:
+    .thin_glass or .glass => m.roughness * 0.5
+    .metal => m.f0.x
+    .emissive => 0.0
+
+test specular(material.metal(false, 0.0, float3(0.9))) == 0.9
+test specular(material.thin_glass(0.4, 1.5)) == 0.2
+
+// a nested @when adds to its outer case's, and reads the outer case's fields
+enum falloff_kind:
+    linear
+    quadratic
+
+struct light:
+    index: int
+    case point:
+        falloff: falloff_kind
+        @when(falloff == .linear)
+        case linear_point
+        @when(falloff == .quadratic)
+        case quadratic_point
+    case sun:
+        direction: float3
+
+test:
+    let a = light.linear_point(1)
+    let b = light.quadratic_point(2)
+    a is .linear_point and b is .quadratic_point and b is .point
+
+// a level the compiler's tag tells apart holds a level @whens tell apart, and either says which case a value is
+test:
+    let s = light.sun(3, float3(0.0, 1.0, 0.0))
+    s is .sun and s is not .point
+
+// a @when over a field with a range: its cases cover the range as an enum's cover its cases
+struct slot:
+    index: int in 0..<3
+    @when(index == 0)
+    case first
+    @when(index == 1)
+    case second:
+        weight: float
+    @when(index == 2)
+    case third
+
+fun weight_of(s: slot) -> float => case s:
+    .first => 1.0
+    .second => s.weight
+    .third => 0.0
+
+test weight_of(slot.first()) == 1.0
+test weight_of(slot.second(0.5)) == 0.5
+
+// a @when that is no conjunction of equalities makes a case nothing builds, which a value is stated to be with `as`
+struct reading:
+    value: float
+    @when(value > 0.0)
+    case positive
+    @when(value <= 0.0)
+    case non_positive
+
+fun sign_of(r: reading) -> float => case r:
+    .positive => 1.0
+    .non_positive => -1.0
+
+// a @when a check cannot judge is admitted unchecked, and its level's cases are then tried in order
+struct sample:
+    value: float
+    @unchecked @when(value * value > 1.0)
+    case outside
+    @unchecked @when(value * value <= 1.0)
+    case inside
+
+fun is_outside(s: sample) -> bool => case s:
+    .outside => true
+    _ => false
+
+// a field a @when reads says which case the value is, so no assignment through the struct changes it
+@expect(error = "not-assignable")
+test:
+    let mut g: material = material.glass(0.1, 1.5, float3(0.2))
+    g.kind = material_kind.metal
+    true
+
+// and a case whose @when is no conjunction of equalities is stated with `as`, since nothing builds one
+@expect(error = "wrong-kind-of-name")
+test reading.positive(1.0) is .positive
+
+// every target writes the @when tests over the struct's own fields
+binding shading:
+    readings: buffer[reading]
+    samples: buffer[sample]
+    slots: buffer[slot]
+    results: mut buffer[float]
+
+@compute(64) fun shade(@thread_id id: int3){shading}:
+    let m = material.metal(false, 0.0, float3(shading.readings[id.x].value))
+    let outside = if is_outside(shading.samples[id.x]) => 1.0 else 0.0
+    shading.results[id.x] = specular(m) * sign_of(shading.readings[id.x]) + outside + weight_of(shading.slots[id.x])

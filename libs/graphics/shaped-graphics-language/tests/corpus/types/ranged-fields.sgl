@@ -1,0 +1,47 @@
+// a field may name the range its values lie in: an int or a uint with a fact attached, and no type of its own
+
+struct cell:
+    index: int in 0..<16
+    weight: float
+
+test cell(3, 0.5).index == 3
+
+// a read is a plain int, and arithmetic on it leaves the range behind
+test:
+    let c = cell(15, 1.0)
+    c.index + 1 == 16
+
+// a constant outside the range is refused where it is stored
+@expect(error = "literal-not-representable")
+test cell(16, 0.5).index == 16
+
+// any other value is stored as it is, and checked where `SC_SHADER_UNDEFINED` asks, which a test always does
+@expect(.assert)
+test:
+    let n = 20
+    cell(n, 0.5).index == 20
+
+// an assignment stores into the field as a constructor does
+test:
+    let mut c = cell(0, 0.0)
+    c.index = 7
+    c.index == 7
+
+@expect(error = "literal-not-representable")
+test:
+    let mut c = cell(0, 0.0)
+    c.index = -1
+    true
+
+// a uint's range is written as an int's
+struct packed:
+    code: uint in 0..=255
+
+test packed(255u).code == 255u
+
+// every target writes a store into the range behind the check it asks for
+binding grid:
+    cells: mut buffer[cell]
+
+@compute(64) fun fill(@thread_id id: int3){grid}:
+    grid.cells[id.x] = cell(id.x % 16, 1.0)

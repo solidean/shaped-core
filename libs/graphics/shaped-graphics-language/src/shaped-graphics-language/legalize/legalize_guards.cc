@@ -1622,7 +1622,9 @@ struct guarder
                 for (auto const v : out.e.at(site.message_values))
                     values.push_back(v);
             auto failed = stmt_list();
-            failed.push_back(out.print(message, values));
+            // LEGAL-73: a guard of what has no value says so under `report` alone
+            if (!site.guards_undefined || reports)
+                failed.push_back(out.print(message, values));
             failed.push_back(out.assign(out.local(aborted), out.bool_literal(true)));
             sets_flag = true;
             list.push_back(out.if_(out.not_(out.local(condition)), failed));
@@ -1803,8 +1805,8 @@ struct guarder
         else if (auto* const n = copy.node.try_as<flat_check>())
         {
             n->body = body(n->body, depth, changed);
-            if (defers && lowers_asserts && n->site >= 0 && n->site < out.e.check_sites.size()
-                && out.e.check_sites[n->site].stops)
+            if (defers && n->site >= 0 && n->site < out.e.check_sites.size() && out.e.check_sites[n->site].stops
+                && (out.e.check_sites[n->site].guards_undefined ? guards && !defines : lowers_asserts))
                 return deferred_assert(copy, *n);
         }
         auto result = id;

@@ -153,6 +153,17 @@ struct sgl::ast::membership
     constexpr bool operator==(membership const&) const = default;
 };
 
+/// `x is .case` and `x is not .case`: whether a value of a struct with cases is in the cases a pattern names (AST-164).
+struct sgl::ast::case_test
+{
+    expr_id value = expr_id::none;
+    /// A leading-dot case, a case named through its struct, or such names joined by `or` in parens.
+    expr_id pattern = expr_id::none;
+    bool is_negated = false;
+
+    constexpr bool operator==(case_test const&) const = default;
+};
+
 /// `x : t` in expression position.
 struct sgl::ast::ascription
 {
@@ -325,6 +336,7 @@ struct sgl::ast::expr
                 comparison_chain,
                 cast,
                 membership,
+                case_test,
                 ascription,
                 range,
                 lambda,

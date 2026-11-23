@@ -184,6 +184,8 @@ One-liner per library:
   SGL has generics and ray tracing: inline traces on all four backends (emulated on webgpu), and ray-tracing pipelines on the other three.
   **SGL has modules**: `use view` reaches what the `.sgl` files declaring `module view` in a module directory declare, always as `view.name`.
   A shader package exports one with `module:view`, whose bindings the host reaches as `sgl_modules::view::frame`, one group serving every pipeline that lists it.
+  **SGL has sum types**: `case` inside a `struct` declares a variant, told apart by a tag the compiler places or by `@when` over the struct's own fields, and `is` narrows.
+  Every target and the host see one carrier struct; [checking.md](libs/graphics/shaped-graphics-language/docs/spec/semantics/checking.md#structs-with-cases) is the language.
   **To write SGL**: [docs/spec/](libs/graphics/shaped-graphics-language/docs/spec/_index.md) is the language.
   `uv run dev.py run sgl -- emit <file> --entry <name> --target <t>` shows what a shader becomes.
   **A rule of the language is tested as a `test` in a corpus file** under `tests/corpus/`, run by `uv run dev.py run sgl -- test <file>`; a C++ `TEST` is for what SGL cannot say yet.

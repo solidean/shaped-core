@@ -243,3 +243,35 @@ TEST("sgl ast - fun with a dotted name extends a type, and without parameters is
     CHECK(ast_of("fun ray.f{frame} => 1\n")
           == "(fun ray.f (params) (uses frame) => num:1) !! missing-parameter-list @4+5\n");
 }
+
+TEST("sgl ast - a struct's cases, each a name, a paren payload, a block, or both, nested to any depth")
+{
+    // AST-162: a case holds fields and cases; its attributes, a @when among them, stand on the case
+    CHECK(ast_of("struct shape:\n"
+                 "    tint: float3\n"
+                 "    case sphere(center: float3, radius: float)\n"
+                 "    case plane\n"
+                 "    @when(tint.x > 0.0)\n"
+                 "    case flat(float3):\n"
+                 "        offset: float = 0.0\n"
+                 "        case disk\n")
+          == "(struct shape\n"
+             "  (field tint : float3)\n"
+             "  (struct-case sphere (payload (field center : float3) (field radius : float)))\n"
+             "  (struct-case plane)\n"
+             "  (struct-case{@when((call:infix > (member tint x) num:0.0))} flat (payload (field : float3))\n"
+             "    (field offset : float = num:0.0)\n"
+             "    (struct-case disk)))");
+}
+
+TEST("sgl ast - a field whose type is followed by in reads as a field with a range")
+{
+    // AST-163: `(x: int) in (0..<10)` as the member table reads it
+    CHECK(ast_of("struct cell:\n    index: int in 0..<16 = 0\n")
+          == "(struct cell\n  (field index : int in (range ..< num:0 num:16) = num:0))");
+}
+
+TEST("sgl ast - a case in an enum's block is no case of a struct")
+{
+    CHECK(cc::string_view(ast_of("enum e:\n    case a\n")).contains("expected-member"));
+}

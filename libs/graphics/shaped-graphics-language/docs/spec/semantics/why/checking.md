@@ -878,3 +878,25 @@ A loop counter is stated because the loop is in the source, where a reader sees 
 `.select` writes what the restructured encoder wrote by hand, separate locals chosen by the index, which keeps the values in registers and measured as fast as the hand-written form.
 It stops at 8 elements, since each read is a choice over all of them, and a larger array costs more in choices than scratch does.
 The annotation stands on the `let`, since that is where the cost is decided: a parameter is whatever its call passes after inlining, so a helper needs no annotation of its own.
+
+## CHK-540
+
+A struct with cases is one carrier whatever its case, so the rest of the pipeline sees an ordinary struct: no legalizer, emitter or native writer knows a struct has cases.
+Every target lacks a union it could use, and WGSL cannot reinterpret memory, which is why the variant region is words that each field is the bits of.
+The 32 leaves are a mask of one word, which is what a case set is held as wherever the check pass keeps one.
+
+## CHK-543
+
+Two sibling cases that name a field alike share nothing by accident: sharing is declared, by `@cases`, so a field's offset never depends on what its siblings happen to call theirs.
+A part of a variant field as a place would need its words read, changed and written back, which nothing does yet.
+
+## CHK-545
+
+A constructor per leaf is what lets the compiler write the tag and the fields a `@when` fixes, which no caller could get wrong then.
+A case that holds cases has none: a value is always in a leaf, so naming an inner case says too little to build one.
+
+## CHK-549
+
+A range is a fact attached to the field, not a type of its own: overloading, generics and arithmetic would otherwise each need a rule for it.
+No `as` can name it for the same reason, so the store is where a value meets it: a constant is judged there, and any other value is checked where `SC_SHADER_UNDEFINED` asks for checks.
+

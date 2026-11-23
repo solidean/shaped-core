@@ -201,6 +201,39 @@ struct sgl::described_memory_member
     i32 size = 0;
 };
 
+/// One case of a struct with cases that stands in GPU memory (CHK-540), as a host tests and builds a value of it.
+struct sgl::described_case
+{
+    cc::string name;
+    /// The case it stands in; empty at the top.
+    cc::string parent;
+    /// Its position among the leaves, -1 for a case that holds cases.
+    i32 leaf = -1;
+    /// Whether a value is in it, as a C expression over the struct's members and its variant fields' accessors; empty
+    /// where nothing in the value says so.
+    cc::string condition;
+    /// Whether a constructor builds a value of it: a leaf whose every `@when` on its path is a conjunction of equalities.
+    bool is_buildable = false;
+    /// The members its constructor writes rather than takes, the tag among them, each with the C constant it writes.
+    cc::vector<cc::pair<cc::string, cc::string>> writes;
+};
+
+/// A field some cases of a struct hold (CHK-543): the words of the variant region it is the bits of.
+struct sgl::described_variant_field
+{
+    cc::string name;
+    cc::string type;
+    /// Where its first word is, and how many bytes its words take.
+    i32 offset = 0;
+    i32 size = 0;
+    /// The leaves that hold it.
+    cc::vector<cc::string> cases;
+    /// The case that declares it; empty for one `@cases` shares.
+    cc::string declared_in;
+    /// Whether a `@when` reads it, so nothing but a constructor writes it.
+    bool is_discriminant = false;
+};
+
 /// A struct that stands in GPU memory, placed by the rule of the one address space it is in (the spec's layout rules).
 /// A struct in both a constant block and a storage buffer is `layout-conflict`, so each has exactly one layout.
 struct sgl::described_memory_struct
@@ -216,6 +249,9 @@ struct sgl::described_memory_struct
     i32 size = 0;
     /// Without a void member, which takes no room.
     cc::vector<described_memory_member> members;
+    /// A struct with cases (CHK-540): its cases, each before those it holds, and its variant fields; empty otherwise.
+    cc::vector<described_case> cases;
+    cc::vector<described_variant_field> variant_fields;
 };
 
 struct sgl::described_entry_point

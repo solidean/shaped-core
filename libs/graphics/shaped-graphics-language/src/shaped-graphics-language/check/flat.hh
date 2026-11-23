@@ -684,6 +684,9 @@ struct sgl::check::flat_check_site
     /// The values are computed by the check's body, beside the condition.
     i32 message = -1;
     ast::range_of<flat_expr_id> message_values;
+    /// A guard of what has no value, `x as material.glass` of a value in another case (CHK-550): `SC_SHADER_UNDEFINED`
+    /// keeps it rather than diagnostics, `report` printing its message and `abort` alone ending the invocation (LEGAL-73).
+    bool guards_undefined = false;
 
     constexpr bool operator==(flat_check_site const&) const = default;
 };

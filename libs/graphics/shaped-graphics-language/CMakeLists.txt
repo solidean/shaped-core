@@ -105,6 +105,7 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/check/check_arrays.cc
     src/shaped-graphics-language/check/check_local_indices.cc
     src/shaped-graphics-language/check/check_case.cc
+    src/shaped-graphics-language/check/check_struct_cases.cc
     src/shaped-graphics-language/check/check_assignments.cc
     src/shaped-graphics-language/check/check_constants.cc
     src/shaped-graphics-language/check/check_decl.cc
@@ -131,6 +132,7 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/check/flatten.cc
     src/shaped-graphics-language/check/flatten_expr.cc
     src/shaped-graphics-language/check/flatten_call.cc
+    src/shaped-graphics-language/check/flatten_struct_cases.cc
     src/shaped-graphics-language/check/flatten_stmt.cc
     src/shaped-graphics-language/check/flatten_diff.cc
     src/shaped-graphics-language/check/flatten_diff_lower.cc
@@ -503,6 +505,7 @@ if(SC_BUILD_TESTS)
         tests/check/mesh-stage-check-test.cc
         tests/check/raytracing-pipeline-check-test.cc
         tests/check/enum-check-test.cc
+        tests/check/struct-case-check-test.cc
         tests/check/expression-check-test.cc
         tests/check/test-check-test.cc
         tests/check/source-flat-test-support.hh

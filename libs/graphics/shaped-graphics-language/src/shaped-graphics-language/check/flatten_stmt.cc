@@ -116,6 +116,13 @@ void sgl::check::impl::flattener::flatten_assign(origin from, ast::assign_stmt c
             return flatten_texel_store(from, assign, t);
     if (is_swizzled(assign.target) && sgl::is_valid(assign.op))
         return flatten_swizzle_assign(from, assign, c.text_of(file(), c.file_of(file()).at(assign.op).where));
+    // CHK-543: a field of a case is assigned word by word
+    if (tables().target_at(assign.target).kind == target_kind::variant_field && sgl::is_valid(assign.op))
+    {
+        if (!flatten_variant_assign(from, assign))
+            mark_failed();
+        return;
+    }
     auto const place = flatten_expr(assign.target);
     auto value = flatten_expr(assign.value);
     auto const op = sgl::is_valid(assign.op) ? c.text_of(file(), c.file_of(file()).at(assign.op).where) : "";
@@ -136,6 +143,10 @@ void sgl::check::impl::flattener::flatten_assign(origin from, ast::assign_stmt c
         flat_expr_id const arguments[] = {read_of_place(place, assign.target), value};
         value = builtin_call(assign.value, callee, arguments);
     }
+    // CHK-549: a field with a range holds a value of it
+    if (auto const& t = tables().target_at(assign.target); t.kind == target_kind::field && is_valid(t.symbol))
+        if (auto const& owner = c.out.at(c.out.at(t.symbol).type); t.index < i32(owner.members.count))
+            value = guard_range(value, c.out.at(owner.members)[t.index], assign.value);
     judge_decision_store(place, assign.target);
     add_stmt(from, flat_assign{.place = place, .value = value});
 }

@@ -103,6 +103,9 @@ auto sgl::check::impl::flattener::flatten_expr(ast::expr_id id) -> flat_expr_id
         }
         if (is_swizzled(id))
             return read_swizzle(swizzled_at(id), type, id);
+        // CHK-543: a field of a case is the words of the variant region it holds
+        if (where.kind == target_kind::variant_field)
+            return flatten_variant_read(id, *m);
         if (where.kind != target_kind::field)
             return fail();
         auto const object = flatten_expr(m->object);
@@ -148,8 +151,13 @@ auto sgl::check::impl::flattener::flatten_expr(ast::expr_id id) -> flat_expr_id
         return flatten_array_literal(id, type, *literal);
     if (auto const* const call = e.node.try_as<ast::call>())
         return flatten_call(id, type, where, *call);
+    if (auto const* const test = e.node.try_as<ast::case_test>())
+        return flatten_case_test(id, *test);
     if (auto const* const cast = e.node.try_as<ast::cast>())
     {
+        // CHK-550: a cast to cases the value may not be in is the value behind a guard
+        if (where.kind == target_kind::struct_cases)
+            return flatten_case_cast(id, *cast);
         auto const value = flatten_expr(cast->value);
         if (where.kind == target_kind::texel_conversion)
             return texel_conversion(value, type, id);
@@ -927,7 +935,7 @@ auto sgl::check::impl::flattener::with_bound_index(flat_expr_id place, ast::expr
 auto sgl::check::impl::flattener::is_inlined(symbol_id callee) const -> bool
 {
     auto const& s = c.out.at(callee);
-    return s.role != function_role::constructor && !is_valid(s.intrinsic);
+    return s.role != function_role::constructor && s.role != function_role::case_constructor && !is_valid(s.intrinsic);
 }
 
 auto sgl::check::impl::flattener::flatten_bound_call(ast::expr_id id, type_id type, call_record const& record)
@@ -1032,13 +1040,26 @@ auto sgl::check::impl::flattener::target_call(ast::expr_id id,
     for (auto const v : values)
         with_effect += calls_impure(v, 0) ? 1 : 0;
 
-    auto const call_of = [&](cc::span<flat_expr_id const> arguments)
+    auto const call_of = [&](cc::span<flat_expr_id const> written)
     {
+        // CHK-549: a constructor stores each argument into its field, and a field with a range holds a value of it
+        auto guarded = cc::vector<flat_expr_id>::create_copy_of(written);
+        if (s.role == function_role::constructor || s.role == function_role::case_constructor)
+        {
+            auto const parameters = c.out.at(c.out.functions[s.info].parameters);
+            for (auto p = isize(0); p < parameters.size() && p < guarded.size(); ++p)
+                if (auto const* const ranged = c.ranged_member(type, parameters[p].field))
+                    guarded[p] = guard_range(guarded[p], *ranged, id);
+        }
+        auto const arguments = cc::span<flat_expr_id const>(guarded);
         if (s.role == function_role::constructor)
             return add_expr(type, id, flat_construct{.arguments = add_list(arguments)});
+        // CHK-545: a leaf's construction reads a value once per word it takes, so each is bound first
+        if (s.role == function_role::case_constructor)
+            return construct_case(id, type, callee, arguments);
         return builtin_call(id, callee, arguments);
     };
-    if (in_order && with_effect < 2)
+    if (in_order && with_effect < 2 && s.role != function_role::case_constructor)
         return call_of(values);
 
     auto const parameters = c.out.at(c.out.functions[s.info].parameters);
@@ -1655,6 +1676,9 @@ auto sgl::check::impl::flattener::flatten_value_loop(ast::expr_id id, type_id ty
 
 auto sgl::check::impl::flattener::flatten_case_parts(ast::case_expr const& node, label_id value_block) -> flat_case
 {
+    // CHK-551: a struct with cases is taken apart by its cases
+    if (auto const t = tables().type_at(node.value); is_valid(t) && c.out.at(t).has_cases())
+        return flatten_struct_case_parts(node, value_block);
     auto const scrutinee = flatten_expr(node.value);
     auto result = flat_case{.scrutinee = scrutinee, .equality = equality_for(scrutinee)};
     if (is_valid(result.equality))

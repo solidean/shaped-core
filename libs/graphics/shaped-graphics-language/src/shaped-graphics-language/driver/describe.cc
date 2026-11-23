@@ -214,10 +214,50 @@ described_memory_struct describe_memory_struct(check::checked_module const& m,
     auto const members = m.at(m.at(type).members);
     for (auto i = isize(0); i < members.size(); ++i)
         if (members[i].type != check::checked_module::void_type)
-            result.members.push_back({.name = members[i].name,
-                                      .type = host_type_name_of(m, members[i].type),
-                                      .offset = placed.offsets[i],
-                                      .size = placed.sizes[i]});
+            result.members.push_back(
+                {.name = members[i].name,
+                 // an enum is held as the int its case is, which is what the host writes
+                 .type = m.is_plain_enum(members[i].type) ? cc::string("int") : host_type_name_of(m, members[i].type),
+                 .offset = placed.offsets[i],
+                 .size = placed.sizes[i]});
+    // CHK-540: a struct with cases, as a host tests and builds a value of it
+    auto const& t = m.at(type);
+    auto const cases = m.at(t.struct_cases);
+    for (auto const& c : cases)
+    {
+        auto writes = cc::vector<cc::pair<cc::string, cc::string>>();
+        for (auto rest = cc::string_view(c.host_writes); !rest.empty();)
+        {
+            auto const end = rest.find(';');
+            auto const one = end < 0 ? rest : rest.subview({.offset = 0, .size = end});
+            rest = end < 0 ? cc::string_view() : rest.subview(end + 1);
+            auto const equals = one.find('=');
+            if (equals > 0)
+                writes.push_back(
+                    {cc::string(one.subview({.offset = 0, .size = equals})), cc::string(one.subview(equals + 1))});
+        }
+        result.cases.push_back({.name = c.name,
+                                .parent = c.parent >= 0 ? cases[c.parent].name : cc::string(),
+                                .leaf = c.leaf,
+                                .condition = c.host_condition,
+                                .is_buildable = c.leaf >= 0 && c.is_buildable,
+                                .writes = cc::move(writes)});
+    }
+    for (auto const& v : m.at(t.variant_fields))
+    {
+        auto holders = cc::vector<cc::string>();
+        for (auto const& c : cases)
+            if (c.leaf >= 0 && (v.leaves & (u32(1) << c.leaf)) != 0)
+                holders.push_back(c.name);
+        result.variant_fields.push_back(
+            {.name = v.name,
+             .type = m.is_plain_enum(v.type) ? cc::string("int") : host_type_name_of(m, v.type),
+             .offset = placed.offsets[t.first_word + v.word],
+             .size = 4 * v.word_count,
+             .cases = cc::move(holders),
+             .declared_in = v.parent >= 0 ? cases[v.parent].name : cc::string(),
+             .is_discriminant = v.is_discriminant});
+    }
     return result;
 }
 

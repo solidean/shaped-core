@@ -220,6 +220,10 @@ cc::string_view checker::member_kind_of(symbol_id owner, cc::string_view name) c
         if (auto const* const c = d.try_as<ast::enum_case_decl>(); c != nullptr && text_of(o.file, c->name) == name)
             return "case";
     }
+    // CHK-540: a struct's cases and the fields they declare are members too
+    if (s != nullptr)
+        if (auto const found = case_member_kind(o.file, members, name); !found.empty())
+            return found;
     // CHK-386: every swizzle is a member as a field is, and a function of its name would never be reached
     auto const* const swizzled
         = s != nullptr ? find_attribute(o.file, ast.at(o.declaration).attributes, "swizzle") : nullptr;
@@ -509,7 +513,8 @@ void checker::declare_constructors(isize first)
             continue;
         auto const& decl = ast_of(s.file).at(s.declaration).node.as<ast::struct_decl>();
         // A struct nobody can name has no constructor anybody could call, and an opaque one has none (CHK-33).
-        if (decl.is_opaque || decl.name.empty())
+        // A value of a struct with cases is always in one, so its own name builds none (CHK-545).
+        if (decl.is_opaque || decl.name.empty() || declares_cases(ast_of(s.file), decl))
             continue;
         // Only a struct a lookup finds has a constructor there: a duplicate is found by nothing.
         auto const* const found = is_prelude_file(s.file) ? prelude_names.get_ptr(s.name)
@@ -680,6 +685,7 @@ void checker::declare(i32 file, ast::decl_id decl)
             {
                 add_symbol(named(symbol_kind::structure, s.name), s.name);
                 declare_members(owner, file, s.members);
+                declare_case_constructors(owner, file, s.members);
             }
             add_member_tests(file, s.members, cc::format("struct {}", text_of(file, s.name)));
         },
@@ -744,7 +750,7 @@ void checker::declare(i32 file, ast::decl_id decl)
             if (!p.extended_type.empty())
                 pending_extensions.push_back({.file = file, .declaration = decl});
         },
-        [&](ast::enum_case_decl const&) {}, [&](ast::invalid_decl const&) {});
+        [&](ast::enum_case_decl const&) {}, [&](ast::struct_case_decl const&) {}, [&](ast::invalid_decl const&) {});
 }
 
 symbol_state checker::demand(symbol_id id, i32 file, source_span where)
@@ -800,6 +806,8 @@ void checker::compile(symbol_id id)
     case symbol_kind::function:
         if (out.at(id).role == function_role::constructor)
             compile_constructor(id);
+        else if (out.at(id).role == function_role::case_constructor)
+            compile_case_constructor(id);
         else if (out.at(id).role == function_role::property)
             compile_property(id);
         else

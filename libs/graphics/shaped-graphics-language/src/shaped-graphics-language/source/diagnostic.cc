@@ -200,6 +200,8 @@ cc::string_view sgl::to_string(diagnostic_kind kind)
         return "non-exhaustive-case";
     case diagnostic_kind::duplicate_case_pattern:
         return "duplicate-case-pattern";
+    case diagnostic_kind::overlapping_cases:
+        return "overlapping-cases";
     case diagnostic_kind::missing_value_in_arm:
         return "missing-value-in-arm";
     case diagnostic_kind::needs_feature:
@@ -479,6 +481,8 @@ cc::string_view sgl::summary_of(diagnostic_kind kind)
         return "a `case` that neither names every case of its enum nor has a `_` arm";
     case diagnostic_kind::duplicate_case_pattern:
         return "two arms of one `case` that name the same case";
+    case diagnostic_kind::overlapping_cases:
+        return "two cases of one level whose `@when`s a value satisfies at once";
     case diagnostic_kind::missing_value_in_arm:
         return "a `case` arm that neither produces a value nor exits";
     case diagnostic_kind::needs_feature:
@@ -657,6 +661,7 @@ sgl::severity sgl::default_severity_of(diagnostic_kind kind)
     case diagnostic_kind::read_before_assignment:
     case diagnostic_kind::non_exhaustive_case:
     case diagnostic_kind::duplicate_case_pattern:
+    case diagnostic_kind::overlapping_cases:
     case diagnostic_kind::missing_value_in_arm:
     case diagnostic_kind::needs_feature:
     case diagnostic_kind::unknown_feature:

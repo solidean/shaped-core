@@ -87,6 +87,15 @@ TEST("sgl forms - the binary levels")
     CHECK(form_of("x as float * 2") == "(run id:x op:as (run id:float op:* num:2))");
 }
 
+TEST("sgl forms - is stands where as stands, and a not right after it makes the two words one operator")
+{
+    // OP-34: `is not` is `is` over a prefix `not`, which only the operand right after `is` may start with
+    CHECK(form_of("m is .glass") == "(run id:m op:is dot:glass)");
+    CHECK(form_of("m is not .glass") == "(run id:m op:is (prefix not dot:glass))");
+    CHECK(form_of("m is .glass and k") == "(run (run id:m op:is dot:glass) op:and id:k)");
+    CHECK(form_of("not m is .glass") == "(prefix not (run id:m op:is dot:glass))");
+}
+
 TEST("sgl forms - the arrow binds tighter than the ascription level and nests to the right")
 {
     CHECK(form_of("x : (int) -> int") == "(run id:x op:: (run (round id:int) op:-> id:int))");

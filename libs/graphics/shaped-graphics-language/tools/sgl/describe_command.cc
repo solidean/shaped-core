@@ -161,14 +161,51 @@ void write_memory_struct(babel::json::object_writer& o, sgl::described_memory_st
         o.write("module", cc::string_view(s.module));
     o.write("space", cc::string_view(s.space));
     o.write("size", s.size);
-    auto members = o.write_array("members");
-    for (auto const& m : s.members)
     {
-        auto mo = members.write_object(babel::json::layout::compact);
-        mo.write("name", cc::string_view(m.name));
-        mo.write("type", cc::string_view(m.type));
-        mo.write("offset", m.offset);
-        mo.write("size", m.size);
+        auto members = o.write_array("members");
+        for (auto const& m : s.members)
+        {
+            auto mo = members.write_object(babel::json::layout::compact);
+            mo.write("name", cc::string_view(m.name));
+            mo.write("type", cc::string_view(m.type));
+            mo.write("offset", m.offset);
+            mo.write("size", m.size);
+        }
+    }
+    if (s.cases.empty())
+        return;
+    {
+        auto cases = o.write_array("cases");
+        for (auto const& c : s.cases)
+        {
+            auto co = cases.write_object(babel::json::layout::compact);
+            co.write("name", cc::string_view(c.name));
+            if (!c.parent.empty())
+                co.write("parent", cc::string_view(c.parent));
+            co.write("leaf", c.leaf);
+            co.write("condition", cc::string_view(c.condition));
+            co.write("buildable", c.is_buildable);
+            auto writes = co.write_object("writes");
+            for (auto const& [field, value] : c.writes)
+                writes.write(field, cc::string_view(value));
+        }
+    }
+    auto variants = o.write_array("variant_fields");
+    for (auto const& v : s.variant_fields)
+    {
+        auto vo = variants.write_object(babel::json::layout::compact);
+        vo.write("name", cc::string_view(v.name));
+        vo.write("type", cc::string_view(v.type));
+        vo.write("offset", v.offset);
+        vo.write("size", v.size);
+        {
+            auto holders = vo.write_array("cases");
+            for (auto const& c : v.cases)
+                holders.write(cc::string_view(c));
+        }
+        if (!v.declared_in.empty())
+            vo.write("declared_in", cc::string_view(v.declared_in));
+        vo.write("discriminant", v.is_discriminant);
     }
 }
 

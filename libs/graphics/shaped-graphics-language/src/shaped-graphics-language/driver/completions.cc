@@ -14,7 +14,7 @@ constexpr cc::string_view k_keywords[] = {
     "fun",    "struct", "enum",     "binding", "pipeline", "sampler", "const",   "type",  "let",
     "mut",    "if",     "else",     "for",     "in",       "while",   "loop",    "scope", "case",
     "return", "break",  "continue", "yield",   "discard",  "test",    "require", "use",   "module",
-    "and",    "or",     "not",      "true",    "false",    "self",    "as",
+    "and",    "or",     "not",      "true",    "false",    "self",    "as",      "is",
 };
 
 struct completer
