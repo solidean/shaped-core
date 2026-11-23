@@ -128,7 +128,8 @@ Both are well-defined because every check along the path is one a program could 
   Its arms test in declaration order, the first match winning, and a `case` over it always needs a `_`.
 
 **Or the tag is nowhere in the value**: it lives in another buffer, or it is the hit kind the hardware reports.
-Such a struct is untagged — built and cast, never asked `is` — which an attribute on the struct says, `@tag(.external)` for one.
+Such a struct is untagged — built and cast, never asked `is` — which `@tag(.external)` on the struct says.
+It reads as `@padding(.none)` does, and the same attribute is where a forced placement would go, `@tag(.word)`.
 It is also how a GPU program avoids paying for its largest variant: a tag and an index into one buffer per kind.
 
 **`is` narrows, flow-sensitively, from the first version on.**
@@ -160,6 +161,18 @@ A uniform discriminator makes it a uniform branch ([uniformity.md](uniformity.md
 A tag in a padding word is a named member in C++, since a C++ copy need not keep padding bytes.
 Bytes read back from the GPU arrive by `bit_cast` or `memcpy`, never by reading a member that is not active.
 
+**Materials come first**, and a material's discriminator is the program's, so the first slice is the `@when` half:
+
+* Cases inside a struct, nested, in the block form and the paren form.
+* `@when` with nesting, its checked fragment, the disjointness and coverage check, and read-only discriminating fields.
+* Constructors for the constructible cases.
+* `is` and `is not` with flow-sensitive narrowing, and a `case` whose arms narrow.
+* The `as` downcast, checked under `REPORT`.
+* The memory layout — typed common fields and a word region — in buffers and in the C++ struct with its accessors.
+
+The compiler's own tag comes next, first in a word of its own and then niched, since a material needs neither.
+Sets as types, `@cases`, `@tag(.external)`, `@unchecked`, ranged integers and `T?` follow as their uses arrive, a mixed hit the first of them.
+
 ## What it touches
 
 * The AST: `case` as a declaration inside a struct block, nested, `is` and `is not` as word operators, and the member row of a refined field.
@@ -178,15 +191,12 @@ Bytes read back from the GPU arrive by `bit_cast` or `memcpy`, never by reading 
 * `case` is a keyword, and a struct block holds members rather than statements, so `case name:` inside one can only declare.
 * An arm names several cases as `.spot or .sun` already, which is the spelling a set of variants takes in a type position.
 * `as` is a `cast` node in the AST already.
-* Attributes are an open, additive set, so `@when`, `@unchecked`, `@cases` and the untagged attribute need no grammar of their own.
+* Attributes are an open, additive set, so `@when`, `@unchecked`, `@cases` and `@tag` need no grammar of their own.
 * `x: int in 0..<10` already parses as `(x: int) in (0..<10)` (OP-2), which a member row can read as a refined field.
 * `bool` is an enum of the prelude, so a `bool` field is a finite domain like any enum field.
 
 ## Open
 
-* How an untagged struct is spelled: `@tag(.external)`, `@untagged`, `@tag(.none)` or `@discriminator(.external)`.
-  `@tag(.external)` reads as `@padding(.none)` does, and the same attribute could force a placement, `@tag(.word)`.
 * How `@cases` is spelled, and whether it names cases only or sets as well, `@cases(.dielectric, .metal)`.
 * Whether a payload in parens may also have a block, `case sphere(radius: float):` with fields below — the question `struct` has too.
 * Whether a refined type is a type of its own or `int` with a fact attached, which decides what overloading sees.
-* Which slice comes first: sv's materials want `@when` from the start, a mixed hit wants niches and `T?`.
