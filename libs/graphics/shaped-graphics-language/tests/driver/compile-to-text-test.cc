@@ -270,22 +270,21 @@ TEST("sgl driver - what is judged of one entry point's inlined body is no error 
     CHECK(warned.value().warnings[0].contains("warning: needless-nonuniform: "));
 }
 
-// `main_thread` for the stack: this is the one test that deliberately builds a tree AT the limit, and the check pass
-// recurses over the AST before any flat-tree guard applies.
-// A worker thread has 512 KiB where the main thread has 8 MiB, and an unoptimized sanitizer build spends enough per
-// `check_expr` level to overflow the smaller one well before 40.
-TEST("sgl driver - a tree past the depth limit is refused by name, never as a hole a later pass trips over", main_thread)
+// This is the one test that deliberately builds a tree AT the limit, and the check pass recurses over the AST before
+// any flat-tree guard applies, so it holds `k_max_depth` to the stack of a pool worker, 8 MiB (walk.hh says why).
+// Not `main_thread`: a Windows main thread has 1 MiB, which 128 levels outgrow in an unoptimized ASan build.
+TEST("sgl driver - a tree past the depth limit is refused by name, never as a hole a later pass trips over")
 {
-    // The `let` is a level of its own, so 39 terms reach exactly 40 levels and 40 terms reach 41.
+    // The `let` is a level of its own, so 127 terms reach exactly 128 levels and 128 terms reach 129.
     // Every target, since each legalizes and emits the tree the check pass handed over.
     for (auto const t : sgl::emit::all_targets())
     {
-        auto const at_limit = sgl::compile_to_text({.source = sum_source(39), .entry_point = "main_ps", .target = t});
+        auto const at_limit = sgl::compile_to_text({.source = sum_source(127), .entry_point = "main_ps", .target = t});
         REQUIRE(at_limit.has_value()).context(at_limit.has_error() ? at_limit.error() : cc::string());
 
         auto const past
-            = error_of({.source = sum_source(40), .source_name = "sum.sgl", .entry_point = "main_ps", .target = t});
-        CHECK(past.contains("error: nesting-too-deep: 'main_ps' nests deeper than 40 levels")).context(past);
+            = error_of({.source = sum_source(128), .source_name = "sum.sgl", .entry_point = "main_ps", .target = t});
+        CHECK(past.contains("error: nesting-too-deep: 'main_ps' nests deeper than 128 levels")).context(past);
         CHECK(!past.contains("not-core")).context(past);
     }
 }

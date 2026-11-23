@@ -286,6 +286,6 @@ Every "why" is mirrored in a `why/` folder beside its rules, and ideas that are 
 Lambdas beyond an arrow body, and `mut self`.
 GLSL.
 Iterative walks: `interpret`'s `eval` and the legalizer's expression walks recurse, so the smallest stack a walk runs on bounds `k_max_depth`.
-That makes a 40-term sum `nesting-too-deep` (CHK-268).
+That makes a 128-term sum `nesting-too-deep` (CHK-268).
 Over an explicit work stack, with a cycle caught by an on-path bit rather than by depth, the limit could be far higher.
 Separate compilation, interfaces and the parallel driver of [the compilation model](spec/incubator/compilation-model.md).

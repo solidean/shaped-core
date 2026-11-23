@@ -16,3 +16,4 @@ svgf's `atrous_cs` binds `n_p_N = nd_p.xyz` 25 times, which L1 cannot merge sinc
 Tried on 2026-10-20 and taken back: a substituted `v.x` nests one level deeper at every use than the local it replaced.
 shaped-viewer's `openpbr_microfacet.sgl` then passes CHK-268's 40 levels in `ggx_lambda`, even with paths of one step.
 So this waits for the iterative walks `legalize/impl/walk.hh` names as the fix for that limit, or for a rule that weighs a use's depth.
+CHK-268 rose to 128 levels on 2026-11-23, so the attempt is worth trying again.

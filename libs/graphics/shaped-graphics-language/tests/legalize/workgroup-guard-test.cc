@@ -379,13 +379,14 @@ TEST("sgl guards - a site as deep as a program may nest is guarded, its guard pa
                           "    work.result[0] = {}\n",
                           sum);
     };
-    // the deepest sum the check pass takes
+    // the deepest sum the check pass takes, which the window must hold below its top so the check refused one
     auto deepest = 0;
-    for (auto terms = 30; terms <= 45; ++terms)
+    for (auto terms = 118; terms <= 133; ++terms)
         if (reports_of(check_sources(read_prelude(), source_of(terms))) == "")
             deepest = terms;
-    // past what a guard reached before its levels were kept free, 36 of the walks' 40
-    CHECK(deepest >= 37);
+    CHECK(deepest < 133);
+    // past what a guard reached before its levels were kept free, 124 of the program's 128 (it was 36 of 40)
+    CHECK(deepest >= 125);
     auto const r = legalize_one(source_of(deepest), undefined_guard::report);
     CHECK(!r.core.messages.empty()).dump("core", r.dump);
 }
