@@ -89,6 +89,44 @@ TEST("slib - SGL's own DXIL of real kernels passes the validator")
     }
 }
 
+TEST("slib - SGL's DXIL of a splat a mix or a clamp reads beside a scaling passes the validator")
+{
+    // the shapes that left SPIR-V's splat unwritten (post/stack's cartoon and fade tint); DXIL writes a lane at a time
+    constexpr cc::string_view source = "binding pass:\n"
+                                       "    k: float4\n"
+                                       "    v: float4\n"
+                                       "\n"
+                                       "struct link:\n"
+                                       "    @position position: hpos4\n"
+                                       "    uv: float2\n"
+                                       "\n"
+                                       "@pixel fun cartoon_ps(input: link){pass} -> float4:\n"
+                                       "    let r = mix(pass.v.xyz, float3(1.0), pass.k.x)\n"
+                                       "    let q = pass.v.xyz * pass.k.x\n"
+                                       "    return float4(r.x + q.x, r.y, r.z, 1.0)\n"
+                                       "\n"
+                                       "@pixel fun fade_tint_ps(input: link){pass} -> float4:\n"
+                                       "    let color = pass.v.xyz\n"
+                                       "    let tinted = mix(float3(1.0), color, pass.k.y) * (color * pass.k.y)\n"
+                                       "    return float4(tinted.x, tinted.y, tinted.z, 1.0)\n"
+                                       "\n"
+                                       "@pixel fun clamped_ps(input: link){pass} -> float4:\n"
+                                       "    let c = clamp(pass.v.xyz, float3(0.0), float3(pass.k.z))\n"
+                                       "    let s = c * pass.k.z\n"
+                                       "    return float4(s.x, s.y, s.z, 1.0)\n";
+    auto compiler = ssc::dxc::compiler::create();
+    if (compiler.has_error())
+        SKIP("no DXC");
+    for (auto const entry : {"cartoon_ps", "fade_tint_ps", "clamped_ps"})
+    {
+        auto const e = written(source, entry);
+        REQUIRE(e.has_value());
+        REQUIRE(!e.value().dxil.empty());
+        auto const refused = compiler.value().validate(e.value().dxil);
+        CHECK(!refused.has_value()).dump("entry", entry).dump("validator", refused.value_or(cc::string()));
+    }
+}
+
 TEST("slib - every entry point of the fixtures that SGL's DXIL lowers passes the validator")
 {
     auto compiler = ssc::dxc::compiler::create();

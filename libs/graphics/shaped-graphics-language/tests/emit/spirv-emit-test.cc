@@ -270,6 +270,56 @@ TEST("sgl spirv - a vector scaled by a scalar builds no splat, and an if around 
     CHECK(counted(words, 247) == 0); // nor the OpSelectionMerge it folded
 }
 
+TEST("sgl spirv - a splat a mix or a clamp reads too is written, though a scaling reads it without one")
+{
+#if defined(CC_OS_EMSCRIPTEN) || defined(CC_OS_IOS) || defined(CC_OS_TVOS)
+    SKIP("this platform runs no spirv-val, and has no std::system to start one with");
+#else
+    // a mix's weight and a clamp's upper bound are each operation's third operand, the index that once stood for
+    // "no splat" too, so the splat they shared with a scaling went unwritten (post/stack's cartoon and fade tint)
+    constexpr cc::string_view source = "binding pass:\n"
+                                       "    k: float4\n"
+                                       "    v: float4\n"
+                                       "\n"
+                                       "struct link:\n"
+                                       "    @position position: hpos4\n"
+                                       "    uv: float2\n"
+                                       "\n"
+                                       "@pixel fun cartoon_ps(input: link){pass} -> float4:\n"
+                                       "    let r = mix(pass.v.xyz, float3(1.0), pass.k.x)\n"
+                                       "    let q = pass.v.xyz * pass.k.x\n"
+                                       "    return float4(r.x + q.x, r.y, r.z, 1.0)\n"
+                                       "\n"
+                                       "@pixel fun fade_tint_ps(input: link){pass} -> float4:\n"
+                                       "    let color = pass.v.xyz\n"
+                                       "    let tinted = mix(float3(1.0), color, pass.k.y) * (color * pass.k.y)\n"
+                                       "    return float4(tinted.x, tinted.y, tinted.z, 1.0)\n"
+                                       "\n"
+                                       "@pixel fun clamped_ps(input: link){pass} -> float4:\n"
+                                       "    let c = clamp(pass.v.xyz, float3(0.0), float3(pass.k.z))\n"
+                                       "    let s = c * pass.k.z\n"
+                                       "    return float4(s.x, s.y, s.z, 1.0)\n";
+#if defined(CC_OS_WINDOWS)
+    constexpr auto probe = "spirv-val --version > NUL 2>&1";
+#else
+    constexpr auto probe = "spirv-val --version > /dev/null 2>&1";
+#endif
+    auto const has_validator = std::system(probe) == 0;
+    auto modules = spirv_batch();
+    for (auto const entry : {"cartoon_ps", "fade_tint_ps", "clamped_ps"})
+    {
+        auto const e = written(source, entry, sgl::emit::native_route::require);
+        REQUIRE(e.has_value());
+        auto const& words = e.value().spirv;
+        CHECK(counted(words, 142) == 1).dump("entry", entry); // the scaling is still OpVectorTimesScalar
+        modules.add(words, "splats", entry);
+    }
+    if (!has_validator)
+        SKIP("no spirv-val on the path");
+    modules.validate();
+#endif
+}
+
 TEST("sgl spirv - a pixel stage's surface is SPIR-V's own, and a discard goes on as a helper (EMIT-238)")
 {
     auto const e = written(k_pixel_surface, "surface_ps", sgl::emit::native_route::require);

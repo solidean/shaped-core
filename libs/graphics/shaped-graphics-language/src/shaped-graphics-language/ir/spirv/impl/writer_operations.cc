@@ -539,15 +539,16 @@ void writer::find_scalings()
         else if (is_splat(operands[0]))
             _splat_operand[k] = 0;
     }
-    // a splat any other operation reads is written still
+    // a splat any other operation reads is written still; k_no_splat is an operand index too (a mix's weight, a
+    // clamp's bound), so only a scaling skips the operand it scales by
     auto read_otherwise = cc::vector<bool>::create_filled(count, false);
     for (auto k = isize(0); k < count; ++k)
     {
         auto const& i = _p.instructions[k];
         auto const operands = _p.operands_of(i);
+        auto const scaled_by = _splat_operand[k] == k_no_splat ? isize(-1) : isize(_splat_operand[k]);
         for (auto o = isize(0); o < operands.size(); ++o)
-            if (operand_role(i.code, o) == operand::value && is_operation(value_ref(operands[o]))
-                && o != isize(_splat_operand[k]))
+            if (operand_role(i.code, o) == operand::value && is_operation(value_ref(operands[o])) && o != scaled_by)
                 read_otherwise[index_of(value_ref(operands[o]))] = true;
     }
     for (auto k = isize(0); k < count; ++k)
