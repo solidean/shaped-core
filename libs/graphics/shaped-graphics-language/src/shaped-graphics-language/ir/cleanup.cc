@@ -538,7 +538,9 @@ namespace
     }
     auto const is_same = [&](instruction const& a, instruction const& b)
     {
-        if (a.code != b.code || a.type != b.type || a.aux != b.aux || a.count != b.count)
+        // as share_common_values: `sub` names the math function or the operation's kind, and a guarantee stands on each
+        if (a.code != b.code || a.type != b.type || a.sub != b.sub || a.aux != b.aux || a.guarantee != b.guarantee
+            || a.count != b.count)
             return false;
         for (auto k = u32(0); k < a.count; ++k)
             if (p.operands[a.first + k] != p.operands[b.first + k])
