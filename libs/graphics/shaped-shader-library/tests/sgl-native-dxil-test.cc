@@ -127,6 +127,31 @@ TEST("slib - SGL's DXIL of a splat a mix or a clamp reads beside a scaling passe
     }
 }
 
+TEST("slib - SGL's DXIL of a sample at a level with an offset passes the validator, the offset immediates (EMIT-253)")
+{
+    constexpr cc::string_view source
+        = "binding work:\n"
+          "    image: texture_2d[float4]\n"
+          "    image_array: texture_2d_array[float4]\n"
+          "    smooth: sampler\n"
+          "    results: mut buffer[float4]\n"
+          "\n"
+          "@compute(64) fun run(@thread_id id: int3){work}:\n"
+          "    let uv = float2(id.x as float, 0.5) / 64.0\n"
+          "    let a = work.image.sample(uv, work.smooth, level = 0.0, offset = int2(-1, 2))\n"
+          "    let b = work.image_array.sample(uv, work.smooth, layer = 1, level = 1.0, offset = int2(7, -8))\n"
+          "    work.results[id.x] = a + b\n";
+    auto compiler = ssc::dxc::compiler::create();
+    if (compiler.has_error())
+        SKIP("no DXC");
+    auto const e = written(source, "run");
+    REQUIRE(e.has_value());
+    REQUIRE(!e.value().dxil.empty());
+    // the validator refuses a sampleLevel whose offsets are no immediates in -8..7
+    auto const refused = compiler.value().validate(e.value().dxil);
+    CHECK(!refused.has_value()).dump("validator", refused.value_or(cc::string()));
+}
+
 TEST("slib - every entry point of the fixtures that SGL's DXIL lowers passes the validator")
 {
     auto compiler = ssc::dxc::compiler::create();

@@ -485,7 +485,7 @@ enum class sgl::ir::op : sgl::u16
     hit_object_read,
     // ---- textures and images
     combine_sampler,
-    /// Operands: sampled image, coordinate, level, and an offset where `aux` is 1.
+    /// Operands: sampled image, coordinate, level, then an offset as `sample_implicit` takes one.
     sample_lod,
     /// Operands: sampled image, coordinate, then an offset where the call states one.
     /// A pixel stage's alone, whose level comes from its derivatives.

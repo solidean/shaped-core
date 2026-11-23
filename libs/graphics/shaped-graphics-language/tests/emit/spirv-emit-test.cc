@@ -320,6 +320,46 @@ TEST("sgl spirv - a splat a mix or a clamp reads too is written, though a scalin
 #endif
 }
 
+TEST("sgl spirv - a sample at a level takes its offset as ConstOffset beside Lod (EMIT-253)")
+{
+    auto const e = written("binding work:\n"
+                           "    image: texture_2d[float4]\n"
+                           "    image_array: texture_2d_array[float4]\n"
+                           "    smooth: sampler\n"
+                           "    results: mut buffer[float4]\n"
+                           "\n"
+                           "@compute(64) fun run(@thread_id id: int3){work}:\n"
+                           "    let uv = float2(id.x as float, 0.5) / 64.0\n"
+                           "    let a = work.image.sample(uv, work.smooth, level = 0.0, offset = int2(-1, 2))\n"
+                           "    let b = work.image_array.sample(uv, work.smooth, layer = 1, level = 1.0, offset = int2(7, -8))\n"
+                           "    let c = work.image.sample(uv, work.smooth, level = 2.0)\n"
+                           "    work.results[id.x] = a + b + c\n",
+                           "run", sgl::emit::native_route::require);
+    REQUIRE(e.has_value());
+    auto const& words = e.value().spirv;
+    // OpImageSampleExplicitLod: result type, result, sampled image, coordinate, then the image operands' mask
+    auto masks = cc::vector<u32>();
+    for (auto at = isize(5); at < words.size(); at += isize(words[at] >> 16))
+        if ((words[at] & 0xffffu) == 88)
+            masks.push_back(words[at + 5]);
+    REQUIRE(masks.size() == 3);
+    CHECK(masks[0] == 0xau); // Lod | ConstOffset
+    CHECK(masks[1] == 0xau);
+    CHECK(masks[2] == 0x2u); // Lod alone
+#if !defined(CC_OS_EMSCRIPTEN) && !defined(CC_OS_IOS) && !defined(CC_OS_TVOS)
+#if defined(CC_OS_WINDOWS)
+    constexpr auto probe = "spirv-val --version > NUL 2>&1";
+#else
+    constexpr auto probe = "spirv-val --version > /dev/null 2>&1";
+#endif
+    if (std::system(probe) != 0)
+        SKIP("no spirv-val on the path");
+    auto modules = spirv_batch();
+    modules.add(words, "level offsets", "run");
+    modules.validate();
+#endif
+}
+
 TEST("sgl spirv - a pixel stage's surface is SPIR-V's own, and a discard goes on as a helper (EMIT-238)")
 {
     auto const e = written(k_pixel_surface, "surface_ps", sgl::emit::native_route::require);

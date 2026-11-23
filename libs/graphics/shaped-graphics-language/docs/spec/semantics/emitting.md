@@ -601,8 +601,8 @@ fn main_ps(p: pixel_input) -> target_ {
 * **EMIT-252** A native route updates an `@atomic` image's texel through a place of its own, the image and the coordinate, with an array's layer as the coordinate's last lane.
   On SPIR-V it is `OpImageTexelPointer` of the image's variable, sample 0, in `Image` storage, which the atomics take as they take any pointer.
   On DXIL it is `atomicBinOp` or `atomicCompareExchange` of the image's handle, the coordinate's lanes as its offsets and `undef` past them.
-* **EMIT-253** A native route takes a `sample` or a `gather` offset as the constant CHK-280 makes it.
-  On SPIR-V it is the `ConstOffset` image operand of an `OpConstantComposite`, and on DXIL the immediate offsets of `sample` and `textureGather`, `undef` past its lanes.
+* **EMIT-253** A native route takes the offset of a `sample`, of a sample at a `level` and of a `gather` as the constant CHK-280 makes it.
+  On SPIR-V it is the `ConstOffset` image operand of an `OpConstantComposite`, after `Lod` at a level, and on DXIL the immediate offsets of `sample`, `sampleLevel` and `textureGather`, `undef` past its lanes.
 
 ## Lines
 

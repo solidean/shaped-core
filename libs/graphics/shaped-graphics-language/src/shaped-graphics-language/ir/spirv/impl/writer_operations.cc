@@ -691,6 +691,11 @@ void writer::instruction_of(u32 index)
                      literal_id(semantics)});
     }
     case rule_kind::sample_lod:
+        // the image operands stand in the order of their bits: Lod, then ConstOffset
+        if (operands.size() > 3)
+            return emit(_code, rule.opcode,
+                        {id_of(i.type), id, id_of_raw(operands[0]), id_of_raw(operands[1]), 0x2u | k_image_const_offset,
+                         id_of_raw(operands[2]), constant_composite(value_ref(operands[3]))});
         return emit(_code, rule.opcode,
                     {id_of(i.type), id, id_of_raw(operands[0]), id_of_raw(operands[1]), 0x2u, id_of_raw(operands[2])});
     case rule_kind::sample_implicit:
