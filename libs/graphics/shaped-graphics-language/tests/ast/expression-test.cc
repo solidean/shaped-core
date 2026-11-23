@@ -199,6 +199,14 @@ TEST("sgl ast - the type positions: cast, ascription, and membership beside them
     CHECK(expr_of("x as buffer[float]") == "(cast x : (index buffer float))");
 }
 
+TEST("sgl ast - is and is not test the cases of a value")
+{
+    // AST-164: one node, negated or not, whose pattern is any expression the check pass reads as cases
+    CHECK(expr_of("m is .glass") == "(is m .glass)");
+    CHECK(expr_of("m is not material.glass") == "(is-not m (member material glass))");
+    CHECK(expr_of("m is (.glass or .metal)") == "(is m (call:infix:short-circuit or .glass .metal))");
+}
+
 TEST("sgl ast - a range is a node of its own")
 {
     CHECK(expr_of("0 ..< n") == "(range ..< num:0 n)");

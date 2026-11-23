@@ -946,6 +946,65 @@ struct flattener
 
     void flatten_expr_stmt(origin from, ast::expr_id value);
 
+    // ---- structs with cases (flatten_struct_cases.cc) ---------------------------------------------------------------
+
+    /// The prelude's function `name` over exactly `parameters`; none where it declares none.
+    [[nodiscard]] symbol_id prelude_function(cc::string_view name, cc::span<type_id const> parameters) const;
+    /// The `as` from `from` to `to` the current file sees; none where it sees none.
+    [[nodiscard]] symbol_id conversion(type_id from, type_id to) const;
+    flat_expr_id uint_literal(u32 value, ast::expr_id from);
+    flat_expr_id call_named(cc::string_view name, flat_expr_id argument, ast::expr_id from);
+    flat_expr_id converted(flat_expr_id value, type_id to, ast::expr_id from);
+    flat_expr_id compared(cc::string_view op, flat_expr_id lhs, flat_expr_id rhs, ast::expr_id from);
+    /// `make` of `object` where it is substitutable and no block is asked for, and otherwise of a local it is bound to
+    /// first, as a block of `type` that leaves with what `make` gives.
+    template <class F>
+    flat_expr_id over_value(flat_expr_id object, type_id type, ast::expr_id from, bool always_block, F&& make);
+    /// CHK-543: the `uint` words of the substitutable `value` of `type`, appended to `words` in the variant region's
+    /// order: each scalar a word, a vector by its lanes, a struct by its members and an array by its elements.
+    bool encode_words(flat_expr_id value, type_id type, ast::expr_id from, cc::vector<flat_expr_id>& words);
+    /// The value of `type` the words from `at` on are the bits of, `at` moved past them.
+    flat_expr_id decode_words(cc::span<flat_expr_id const> words, isize& at, type_id type, ast::expr_id from);
+    /// The variant field `index` of the substitutable carrier `object` of `carrier`.
+    flat_expr_id read_variant(flat_expr_id object, type_id carrier, i32 index, ast::expr_id from);
+    /// Whether the substitutable `object` meets the `@when` of case `case_index`: a block that binds the fields it reads.
+    flat_expr_id when_test(flat_expr_id object, type_id carrier, i32 case_index, ast::expr_id from);
+    /// CHK-541: whether the substitutable `object` is in one of the leaves `tested`.
+    flat_expr_id cases_test(flat_expr_id object, type_id carrier, u32 tested, ast::expr_id from);
+    /// `x is .glass` and `x is not .glass` (CHK-542).
+    flat_expr_id flatten_case_test(ast::expr_id id, ast::case_test const& node);
+    /// `x.ior` of a variant field (CHK-543).
+    flat_expr_id flatten_variant_read(ast::expr_id id, ast::member const& member);
+    /// `value` where it is in `cases`, a guard `SC_SHADER_UNDEFINED` checks with `message` otherwise (CHK-550).
+    flat_expr_id guard_cases(flat_expr_id value, type_id carrier, u32 cases, ast::expr_id from, cc::string message);
+    /// A check of `condition` that only `SC_SHADER_UNDEFINED` keeps, in the block being written (LEGAL-73).
+    void guard(flat_expr_id condition, ast::expr_id from, cc::string message);
+    /// `x as material.glass` where `x` may be in other cases too (CHK-550).
+    flat_expr_id flatten_case_cast(ast::expr_id id, ast::cast const& node);
+    /// CHK-545: a leaf's construction, from one value per parameter of its constructor in parameter order.
+    flat_expr_id construct_case(ast::expr_id id, type_id type, symbol_id callee, cc::span<flat_expr_id const> arguments);
+    /// CHK-551: a `case` over a struct with cases, as a `case` over the tag, or over the position of the first arm whose
+    /// cases hold.
+    flat_case flatten_struct_case_parts(ast::case_expr const& node, label_id value_block);
+    /// CHK-549: `value` stored into `field`, behind a guard where its range may not hold it.
+    flat_expr_id guard_range(flat_expr_id value, member_info const& field, ast::expr_id from);
+    /// While a part of a variant field is assigned: that field's expression, read as the local it was decoded into.
+    struct substitution
+    {
+        i32 file = -1;
+        ast::expr_id expr = ast::expr_id::none;
+        local_id local = local_id::none;
+    };
+    substitution substituted;
+    /// The variant field nearest the root of assignment target `target` that a part of it is assigned, none otherwise.
+    [[nodiscard]] ast::expr_id variant_part_of(ast::expr_id target) const;
+    /// CHK-543: `x.f0.y = v`, the field decoded into a local, the part assigned there, and the field encoded again.
+    bool flatten_variant_part_assign(origin from, ast::assign_stmt const& assign, ast::expr_id field);
+    /// The words of variant field `index` of the carrier `object` written with the substitutable `value`.
+    bool store_variant(origin from, ast::member const& member, i32 index, flat_expr_id value, ast::expr_id target);
+    /// `x.ior = v` and `x.ior op= v` of a variant field, as an assignment to each of its words; false where it failed.
+    bool flatten_variant_assign(origin from, ast::assign_stmt const& assign);
+
     // ---- queries (check/flatten_query.cc) ----------------------------------------------------------------------------
 
     /// A query of the tree, made where its `let` stands (CHK-553), or a candidate of one, met in its loop (CHK-555).

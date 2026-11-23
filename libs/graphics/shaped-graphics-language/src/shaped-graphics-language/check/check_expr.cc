@@ -79,7 +79,8 @@ void checker::check_body_of(symbol_id id, i32 instance)
         if (has_receiver && i == 0)
         {
             scope.receiver = type;
-            scope.locals.push_back({.name = "self", .where = {.kind = target_kind::receiver}, .type = type});
+            scope.locals.push_back(
+                {.name = "self", .where = {.kind = target_kind::receiver}, .type = type, .cases = p.cases});
             continue;
         }
         // CHK-54: a parameter may have the name of a module-level symbol, which it hides in the body.
@@ -90,6 +91,7 @@ void checker::check_body_of(symbol_id id, i32 instance)
             .where = {.kind = target_kind::parameter, .index = i32(p.field)},
             .type = type,
             .is_mut = p.is_mut,
+            .cases = p.cases,
         });
     }
 
@@ -568,9 +570,15 @@ type_id checker::check_cast(function_scope& scope, ast::expr_id id, ast::cast co
     if (report_as_precedence(file, id))
         return error_type;
     auto const from = check_expr(scope, node.value);
+    auto cases = u32(0);
+    accepts_cases = &cases;
     auto const to = resolve_value_type(file, node.type);
+    accepts_cases = nullptr;
     if (from == error_type || to == error_type)
         return error_type;
+    // CHK-550: `m as material.glass` states a case the value is known to be in from elsewhere
+    if (cases != 0)
+        return check_case_cast(file, id, node, from, to, cases);
     if (from == to)
         return to;
     if (is_texel_type_expr(file, node.type))
@@ -635,6 +643,8 @@ type_id checker::check_expr(function_scope& scope, ast::expr_id expr)
                 report_capture(scope, where, *local);
                 return error_type;
             }
+            // CHK-552: a case's own method knows its receiver is in that case
+            set_cases(file, expr, local->cases);
             return local->type;
         },
         [&](ast::void_ref const&) { return void_type; },
@@ -649,6 +659,7 @@ type_id checker::check_expr(function_scope& scope, ast::expr_id expr)
         [&](ast::object const&) { return not_yet("an object with no struct to convert to"); },
         [&](ast::comparison_chain const& chain) { return check_chain(scope, expr, chain); }, [&](ast::cast const& node)
         { return check_cast(scope, expr, node); }, [&](ast::membership const&) { return not_yet("in"); },
+        [&](ast::case_test const& node) { return check_case_test(scope, expr, node); },
         [&](ast::ascription const&) { return not_yet("a type ascription"); },
         [&](ast::range const&) { return not_yet("a range"); }, [&](ast::lambda const&) { return not_yet("a lambda"); },
         [&](ast::case_expr const& c) { return check_case(scope, expr, c, true, nullptr, expected); },
@@ -828,6 +839,8 @@ type_id checker::check_name(function_scope& scope, ast::expr_id id, ast::name co
                 return error_type;
             }
         }
+        // CHK-542: what narrowed the name is what its value is known to be here
+        set_cases(file, id, local->cases);
         return local->type;
     }
     if (is_type_parameter_name(text))
@@ -1102,6 +1115,15 @@ type_id checker::check_member(function_scope& scope, ast::expr_id id, ast::membe
     // CHK-249: `a.foo` is the field where there is one, and a call of `foo` with `a` otherwise
     auto const& type = out.at(object);
     auto index = find_member(type.members);
+    // CHK-543: the tag and the words of a struct with cases are its layout's, which no name reaches
+    if (index >= 0 && out.at(type.members)[index].is_hidden)
+        index = -1;
+    if (index < 0 && type.has_cases())
+        if (auto const variant = check_variant_member(file, id, member, object); variant.has_value())
+        {
+            note_path_cases(scope, id);
+            return variant.value();
+        }
     // CHK-409: one letter of the second alphabet is its field, as a field's own letter is
     if (index < 0 && name.size() == 1 && type.has_swizzles)
         for (auto i = isize(0); i < type.swizzle_alias.size(); ++i)
@@ -1110,6 +1132,8 @@ type_id checker::check_member(function_scope& scope, ast::expr_id id, ast::membe
     if (index >= 0)
     {
         set_target(file, id, {.kind = target_kind::field, .symbol = type.symbol, .index = i32(index)});
+        // CHK-542: a path a test narrowed is known to be what it narrowed it to
+        note_path_cases(scope, id);
         return out.at(type.members)[index].type;
     }
     // CHK-386: a swizzle is found where a field is, so no function in scope ever stands for `v.xy`

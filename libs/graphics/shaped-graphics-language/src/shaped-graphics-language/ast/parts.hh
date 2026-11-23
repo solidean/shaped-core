@@ -58,6 +58,8 @@ struct sgl::ast::field
     bool is_named_only = false;
     /// A type position; `none` when no type was written, as for `self` and most lambda parameters.
     expr_id type = expr_id::none;
+    /// `x: int in 0..<10`: the range the field's values lie in, `none` for a field without one (AST-163).
+    expr_id range = expr_id::none;
     expr_id default_value = expr_id::none;
     range_of<attribute> attributes;
 

@@ -231,6 +231,20 @@ struct sgl::ast::enum_case_decl
     constexpr bool operator==(enum_case_decl const&) const = default;
 };
 
+/// `case name`, `case name(fields)`, and either with a block below, inside a `struct` or another such case (AST-162).
+struct sgl::ast::struct_case_decl
+{
+    source_span name;
+    /// The paren payload's fields in order, empty where none is written.
+    range_of<field> payload;
+    /// Whether parens were written, so `case none()` is told apart from `case none`.
+    bool has_payload = false;
+    /// The block's members, nested cases among them; empty without a block.
+    range_of<decl_id> members;
+
+    constexpr bool operator==(struct_case_decl const&) const = default;
+};
+
 struct sgl::ast::invalid_decl
 {
     constexpr bool operator==(invalid_decl const&) const = default;
@@ -258,7 +272,8 @@ struct sgl::ast::decl
                 test_decl,
                 field_decl,
                 property_decl,
-                enum_case_decl>
+                enum_case_decl,
+                struct_case_decl>
         node;
 
     bool operator==(decl const&) const = default;

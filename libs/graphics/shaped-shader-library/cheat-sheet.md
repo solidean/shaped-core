@@ -414,6 +414,9 @@ pass.set_inline_constants(shaders::compute::constants{.view_projection = vp}.to_
 auto const items = ctx.persistent.create_buffer_from_data(cc::vector<shaders::compute::particle>{...}, sg::buffer_usage::readwrite_buffer);
 //   every vector at its natural alignment, a 3-vector at 16, so the padding fields are real (the SGL spec's layout rules);
 //   `@padding(.none)` in the shader packs it as C++ does instead.
+// a struct with cases (SGL CHK-540) also gets `is_<case>()`, `<field>()` / `set_<field>(v)` per variant field (`<case>_<field>`
+//   where two cases name one alike), and `static T <leaf>(...)` writing the tag and what its @when fixes; never touch `_tag`/`_w0..`:
+auto const s = shaders::compute::shape::sphere(tg::vec3f(1), tg::vec3f(0), 2.0f);   // s.is_sphere(), s.center()
 // SGL `@padding(.natural) buffer[float3]` -> sg::readonly_buffer_view<slib::gpu_padded<tg::vec3f, 16>> (gpu_padded.hh):
 //   the shader must state which layout it means (CHK-532); a value and its padding,
 //   which a tg::vec3f converts to and from; under `@padding(.none)` it is plain tg::vec3f at a 12-byte stride.

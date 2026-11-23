@@ -84,6 +84,7 @@ self.count = 0
 * **AST-20** One comparison reads as an infix call.
 * **AST-21** A run of two or more comparisons reads as `comparison_chain`: each operand once, in order, with the operator tokens between them ([why](why/ast.md#ast-21)).
 * **AST-22** `as` reads as `cast`, `in` as `membership`, `:` in expression position as `ascription`, and `..<` and `..=` as `range`; none of them is a call.
+* **AST-164** `v is p` reads as `case_test` of the value `v` and the pattern `p`, an expression; `v is not p` reads as one that is negated, whose pattern is what follows the `not` (OP-34).
 
 ```sgl
 let a = cross(n, l)
@@ -728,6 +729,7 @@ pipeline shadow = (shadow_vs, shadow_ps)
 | `name => expression` | a **property** |
 | `fun` and a signature | a **method** |
 | one bare name, or `name = value`, inside an `enum` | a **case** |
+| `case name`, `case name(fields)`, either with a block, inside a `struct` | a **struct case** |
 | any other declaration, with its keyword | a nested declaration |
 
 * **AST-79** A field is one kind of node for struct fields, binding members, parameters and the members of a `struct_type`: a name, a type, an optional default and attributes.
@@ -755,6 +757,14 @@ pipeline shadow = (shadow_vs, shadow_ps)
   The struct's members are those of its first branch of members, and every branch is recorded with its condition.
 * **AST-115** A case may carry a value, which is an expression: `red = 1`.
 * **AST-116** The default of a field may name the fields that stand before it, and the AST checks nothing about it ([why](why/ast.md#ast-116)).
+* **AST-162** A line of a `struct` block led by `case` is a **struct case**: a name, an optional paren list of fields, and an optional block of members.
+  The block holds what a struct's block holds, struct cases among them, so cases nest to any depth.
+  An element of the paren list is a field `name: type`, or a type alone, which a later phase names by its position.
+  The attributes in front of the line, a `@when` among them, stand on the struct case.
+  `case` leading a line of an `enum` or a `binding` block is `expected-member`, as any other statement keyword is.
+* **AST-163** A field whose type is followed by `in`, `x: int in 0..<10`, is a field with a **range** ([why](why/ast.md#ast-163)).
+  The run reads as `(x: int) in (0..<10)` by OP-2, and the member row takes the membership's left side as the field and its right as the range.
+  A parameter and a `let` read the same; in an expression the run keeps meaning an ascription, then a membership test.
 
 ```sgl
 struct particle:

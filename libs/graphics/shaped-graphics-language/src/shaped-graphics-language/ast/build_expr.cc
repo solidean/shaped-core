@@ -357,6 +357,15 @@ expr_id builder::ascription_fold(form_id run,
             result = make_expr(run, membership{.value = result, .container = expression(operands[i + 1])});
         else if (op == "as")
             result = make_expr(run, cast{.value = result, .type = type_expression(operands[i + 1])});
+        else if (op == "is")
+        {
+            // AST-164: `is not` is `is` over a prefix `not`, which is what the form parser makes of the two words
+            auto pattern = operands[i + 1];
+            auto const is_negated = is_kind(pattern, form_kind::prefix_operator) && token_text_of(pattern) == "not";
+            if (is_negated)
+                pattern = at(pattern).first_child;
+            result = make_expr(run, case_test{.value = result, .pattern = expression(pattern), .is_negated = is_negated});
+        }
         else
             result = make_expr(run, ascription{.value = result, .type = type_expression(operands[i + 1])});
     }

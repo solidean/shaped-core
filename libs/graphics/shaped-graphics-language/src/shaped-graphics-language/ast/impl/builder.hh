@@ -348,6 +348,8 @@ struct builder
     decl_id pipeline_declaration(statement_head const& head, keyword_parts const& parts);
     decl_id notation_declaration(statement_head const& head, keyword_parts const& parts);
     decl_id test_declaration(statement_head const& head, keyword_parts const& parts);
+    /// AST-162: `case name`, `case name(fields)` and either with a block, in a struct's block or another case's.
+    decl_id case_declaration(statement_head const& head, keyword_parts const& parts);
     /// True inside the body of a `test`, and not inside a function or a lambda nested in one.
     [[nodiscard]] bool is_in_test_body() const;
 

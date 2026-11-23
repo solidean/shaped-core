@@ -1008,6 +1008,15 @@ The C++ struct a package generates is that layout byte for byte, padding include
   A builtin element's size is rounded up to its alignment too, so `buffer[float3]` strides by 16, and CHK-381 holds every stride to whole 4-byte words.
   Such a buffer states that it means it, `@padding(.natural)`, wherever its stride is not its host type's (CHK-532).
   The host writes such an element as `slib::gpu_padded<tg::vec3f, 16>`.
+* **EMIT-275** A struct with cases is one struct to every target, its **carrier**.
+  Its members are its common fields in field order, its tag where CHK-544 gives it one, and its variant region's words, `_w0` on, each a `uint`.
+  The tag stands in the first four-byte hole its common fields leave by EMIT-110, and after them where none does, so it moves no common field.
+  A variant field is the bits of its words: a 32-bit scalar one word, a 16-bit one the low half of one, a vector by its lanes, a struct by its members and an array by its elements, in order.
+  A field's words are the first every leaf that holds it leaves free, so a field of a case has one place in every leaf below it.
+  The fields `@cases` shares are placed first, and each case's before those of the cases it holds.
+  `describe` reports a memory struct's cases and variant fields.
+  From them slib's generator writes each case's `is_` test, an accessor and a setter per variant field, and a factory per leaf a constructor builds.
+  A variant field of a struct or an array is its leaves packed, which its host type's layout is not, so its accessor copies it leaf by leaf, by the paths `describe` reports.
 * **EMIT-112** Each target is made to follow the rule ([why](why/emitting.md#emit-112)).
   WGSL's storage rule is this one, and its uniform rule too, so WGSL writes every root as it is.
   MSL's is this one but for a 3-vector, which takes 16 bytes there: a 3-vector whose tail holds a value is its `packed_` type in the root's memory form (EMIT-62).

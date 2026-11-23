@@ -369,6 +369,12 @@ field builder::make_field(form_id element, diagnostic_kind on_failure)
     {
         auto const parts = run_parts_of(target);
         result.type = type_after_first_operator(target, parts);
+        // AST-163: `x: int in 0..<10` reads as a field of `int` whose values lie in the range
+        if (auto const* const m = ast.at(result.type).node.try_as<membership>())
+        {
+            result.range = m->container;
+            result.type = m->value;
+        }
         target = parts.operands[0];
     }
     if (is_keyword_led(target))

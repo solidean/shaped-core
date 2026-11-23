@@ -52,6 +52,8 @@ decl_id builder::declaration(statement_head const& head, scope_kind scope, bool 
     auto const keyword = token_text_of(parts.keywords[0]);
     if (keyword == "let")
         return invalid_declaration(head.whole, diagnostic_kind::declaration_not_allowed_here);
+    if (keyword == "case" && scope == scope_kind::struct_body && parts.keywords.size() == 1)
+        return case_declaration(head, parts);
     if (!is_declaration_keyword(keyword))
         return invalid_declaration(head.whole,
                                    keyword == "mut" ? diagnostic_kind::unexpected_keyword : not_a_declaration);
@@ -161,6 +163,52 @@ decl_id builder::test_declaration(statement_head const& head, keyword_parts cons
     else
         report(diagnostic_kind::expected_body, head.keyword_form);
     owners.remove_back();
+    return make_decl(head.whole, attributes, cc::move(result));
+}
+
+decl_id builder::case_declaration(statement_head const& head, keyword_parts const& parts)
+{
+    auto const attributes = attributes_of(head.whole);
+    reject_arrow(head);
+    reject_assignment(head);
+
+    auto result = struct_case_decl{};
+    if (parts.arguments.size() > 1)
+        report(diagnostic_kind::too_many_arguments, parts.arguments[1]);
+    auto const written = parts.arguments.empty() ? form_id::none : parts.arguments[0];
+    if (is_valid(written) && is_kind(written, form_kind::identifier))
+        result.name = at(written).where;
+    else if (is_valid(written) && is_kind(written, form_kind::call))
+    {
+        // the paren form: a name and the payload's fields, positional or named, as a call's arguments are
+        auto const callee = at(written).first_child;
+        auto const list = is_valid(callee) ? at(callee).next_sibling : form_id::none;
+        if (is_valid(list) && is_kind(list, form_kind::round_list) && is_kind(callee, form_kind::identifier))
+        {
+            result.name = at(callee).where;
+            result.has_payload = true;
+            auto collected = cc::vector<field>();
+            for (auto e = at(list).first_child; is_valid(e); e = at(e).next_sibling)
+            {
+                if (is_field_like(e, true))
+                    collected.push_back(make_field(e, diagnostic_kind::expected_parameter));
+                else
+                {
+                    // a positional field is a type alone, named `.0`, `.1` by its place
+                    auto const field_attributes = attributes_of(e);
+                    collected.push_back({.form = e, .type = type_expression(e), .attributes = field_attributes});
+                }
+            }
+            result.payload = append(ast.fields, cc::span<field const>(collected));
+        }
+        else
+            report(diagnostic_kind::expected_name, written);
+    }
+    else
+        report(diagnostic_kind::expected_name, is_valid(written) ? written : head.keyword_form);
+
+    if (is_valid(parts.block))
+        result.members = declarations(parts.block, scope_kind::struct_body);
     return make_decl(head.whole, attributes, cc::move(result));
 }
 

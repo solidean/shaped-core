@@ -772,6 +772,32 @@ def a_mat3_is_gpu_mat3_at_48_bytes_and_tg_mat3f_packed():
     expect_in("tg::mat3f basis;", sgl_host_code.padded_fields("p", {}, "here", packed, ""), "a packed mat3")
 
 
+@test
+def a_struct_with_cases_gets_its_tests_accessors_and_factories():
+    # SGL CHK-540: two cases' `radius` are two fields, so each accessor is named after its case
+    struct = {"name": "shape", "space": "storage", "size": 32,
+              "members": [{"name": "tint", "type": "float3", "offset": 0, "size": 12},
+                          {"name": "_tag", "type": "uint", "offset": 12, "size": 4},
+                          {"name": "_w0", "type": "uint", "offset": 16, "size": 4}],
+              "cases": [{"name": "sphere", "leaf": 0, "condition": "_tag == 0u", "buildable": True,
+                         "writes": {"_tag": "0u"}},
+                        {"name": "disk", "leaf": 1, "condition": "_tag == 1u", "buildable": True,
+                         "writes": {"_tag": "1u"}}],
+              "variant_fields": [{"name": "radius", "type": "float", "offset": 16, "size": 4, "cases": ["sphere"],
+                                  "declared_in": "sphere", "discriminant": False},
+                                 {"name": "radius", "type": "float", "offset": 16, "size": 4, "cases": ["disk"],
+                                  "declared_in": "disk", "discriminant": False}]}
+    header = sgl_host_code.emit_memory_struct("pkg", {}, "ns", FILE, struct)
+    expect_in("[[nodiscard]] bool is_sphere() const;", header, "a case's test")
+    expect_in("[[nodiscard]] float sphere_radius() const;", header, "the sphere's radius, by its case")
+    expect_in("[[nodiscard]] float disk_radius() const;", header, "and the disk's")
+    expect_in("[[nodiscard]] static shape disk(tg::vec3f tint, float radius);", header, "a leaf's factory")
+    source = sgl_host_code.emit_memory_struct_impl("ns", struct, "pkg", {}, FILE)
+    expect_in('CC_ASSERT(is_disk(), "radius is a field of disk alone");', source, "the accessor's case")
+    expect_in("    result._tag = 1u;\n    result.tint = tint;\n    result.set_disk_radius(radius);\n", source,
+              "the factory writes the tag before the fields of its case")
+
+
 def main() -> int:
     failed = 0
     for fn in TESTS:

@@ -670,6 +670,28 @@ struct box[T = float, n: int = 2]:      // defaults bind what nothing else says;
 fun max[V](a: V, b: scalar_of[V]) -> V  // scalar_of[V]: the scalar of a vector or matrix type (CHK-423)
 ```
 
+## The language: structs with cases ([checking](docs/spec/semantics/checking.md#structs-with-cases))
+
+```sgl sketch
+struct shape:                            // a struct with cases: every value is in one LEAF, and a case holds every field above it
+    tint: float3                         // a common field: one offset in every case, read with no branch
+    case sphere(center: float3, radius: float)   // a paren payload, positional; a block's fields after it are named-only
+    case flat:                           // a case that holds cases is the set of its leaves, and its field reads on each of them
+        normal: float3
+        case disk(radius: float)         // a sibling's `radius` is a field of its own: sharing is `@cases(.a, .b)` on a root field
+        case plane
+shape.sphere(tint, c, 1.0)               // a leaf's constructor, of the type scope; no `shape(...)` exists (CHK-545)
+if s is .sphere: s.radius                // `is` / `is not` NARROW a name that is no `mut`: a branch, `and`'s right side, after an early return
+case s: .sphere or .disk => … .plane => …  // arms by case, each narrowing; every leaf named needs no `_` (CHK-551)
+fun f(s: shape.sphere) -> shape.sphere   // a parameter, a result, a `let` and `as` keep cases; the TYPE is still `shape` (CHK-541)
+s as shape.disk                          // states a case known from elsewhere; SC_SHADER_UNDEFINED=REPORT checks it (LEGAL-73)
+@when(kind == 0 and sides == 2) case thin_glass   // the struct's own fields say the case: checked for overlap and cover (CHK-546)
+@unchecked @when(x * x > 1.0) case far   // a condition no check reads: its level is tried in order, and a `case` needs `_`
+@tag(.external) struct payload:          // no value says its case: built and cast, never asked with `is` (CHK-547)
+index: int in 0..<16                     // a field with a RANGE: a plain int to everything but a store into it (CHK-549)
+```
+// the carrier every target and the host see: common fields, `_tag` in the first padding hole, then `_w0..` words (EMIT-275)
+
 ## The language: ray tracing ([docs/spec/raytracing.md](docs/spec/raytracing.md))
 
 ```sgl sketch

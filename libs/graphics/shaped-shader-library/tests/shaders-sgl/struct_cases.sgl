@@ -1,0 +1,58 @@
+// Structs with cases in GPU memory, whose generated host types a test builds and reads (struct_cases-test.cc).
+
+struct shape:
+    tint: float3
+    case sphere(center: float3, radius: float)
+    case box:
+        lo: float3
+        hi: float3
+    case flat:
+        normal: float3
+        case disk(radius: float)
+        case plane
+
+// a material type index, as a host writes one, says the case; SGL places no enum in GPU memory
+struct material:
+    kind: int in 0 ..< 2
+    sides: int in 1 ..= 2
+    roughness: float
+    @when(kind == 0 and sides == 2)
+    case thin_glass:
+        ior: float
+    @when(kind == 0 and sides == 1)
+    case glass:
+        ior: float
+    @when(kind == 1)
+    case metal:
+        f0: float3
+
+// a struct a case holds, which the host reaches through an accessor that copies its leaves one by one
+struct segment:
+    a: float3
+    b: float3
+
+struct curve:
+    width: float
+    case line(span: segment)
+    case dot
+
+binding scene:
+    shapes: buffer[shape]
+    materials: buffer[material]
+    curves: buffer[curve]
+    results: mut buffer[float]
+
+fun radius_of(s: shape) -> float => case s:
+    .sphere => s.radius
+    .disk => s.radius
+    _ => 0.0
+
+fun ior_of(m: material) -> float => case m:
+    .thin_glass => m.ior
+    .glass => m.ior
+    .metal => 0.0
+
+@compute(64) fun measure(@thread_id id: int3){scene}:
+    let c = scene.curves[id.x]
+    let length = if c is .line => distance(c.span.a, c.span.b) else 0.0
+    scene.results[id.x] = radius_of(scene.shapes[id.x]) + ior_of(scene.materials[id.x]) + length

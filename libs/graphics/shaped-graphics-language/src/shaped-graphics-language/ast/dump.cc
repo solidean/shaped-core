@@ -121,6 +121,11 @@ struct dumper
             out += " : ";
             dump_expr(f.type, depth);
         }
+        if (is_valid(f.range))
+        {
+            out += " in ";
+            dump_expr(f.range, depth);
+        }
         if (is_valid(f.default_value))
         {
             out += " = ";
@@ -284,6 +289,14 @@ struct dumper
                 dump_expr(n.value, depth);
                 out += " ";
                 dump_expr(n.container, depth);
+                out += ")";
+            },
+            [&](case_test const& n)
+            {
+                out += n.is_negated ? "(is-not " : "(is ";
+                dump_expr(n.value, depth);
+                out += " ";
+                dump_expr(n.pattern, depth);
                 out += ")";
             },
             [&](ascription const& n) { typed("ascribe", n.value, n.type); },
@@ -767,6 +780,17 @@ struct dumper
                     out += " = ";
                     dump_expr(n.value, depth);
                 }
+            },
+            [&](struct_case_decl const& n)
+            {
+                open("struct-case");
+                name_or_missing(n.name);
+                if (n.has_payload)
+                {
+                    out += " ";
+                    dump_fields("payload", n.payload, depth);
+                }
+                dump_members(n.members, depth);
             });
         if (!d.node.is<field_decl>())
             out += ")";

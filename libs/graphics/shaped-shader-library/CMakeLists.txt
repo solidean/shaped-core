@@ -202,6 +202,7 @@ if(SC_BUILD_TESTS)
         tests/sgl_module_artifacts-test.cc
         tests/sgl_options-test.cc
         tests/sgl_layout-test.cc
+        tests/sgl_struct_cases-test.cc
         tests/sgl_file_namespaces-test.cc
         tests/sgl_modules-test.cc
         tests/metal_compiler-test.cc
@@ -333,6 +334,7 @@ if(SC_BUILD_TESTS)
             twin_a.sgl:*
             twin_b.sgl:*
             slib_test.sgl:*
+            struct_cases.sgl:*
     )
 
     # And one in MSL, which only slib's metal compiler compiles.

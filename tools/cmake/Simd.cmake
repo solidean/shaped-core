@@ -9,9 +9,13 @@
 # v2-avx is v2 plus AVX, without AVX2, FMA or BMI: the level of a consumer built for AVX alone, MSVC's /arch:AVX.
 # Not a psABI level, so it sits beside v2 rather than in the v1-v4 ladder: its floor kernel is v2's, sse42.
 #
+# v3-adx is v3 plus ADX (ADCX, ADOX), which no psABI level holds, not even v4: Broadwell (2014) and Zen 1 (2017) on.
+# Its floor kernel is v3's, avx2; cl.exe has no flag for it and builds it as v3, its intrinsics needing none.
+#
 # The level also reaches clean-core's generated build_config.hh as CC_X64_LEVEL=<n>, because MSVC reports __AVX2__ but
 # none of the SSE levels, so a header cannot recover v2 from the predefined macros alone.
 # v2-avx is CC_X64_LEVEL=2 with CC_X64_AVX=1 beside it, so every `CC_X64_LEVEL >= n` reads it as v2.
+# v3-adx is CC_X64_LEVEL=3 with CC_X64_ADX=1 beside it, the same way.
 #
 # A whole-build switch, never per-target: an inline function compiled at two levels is an ODR violation the linker
 # resolves silently, by keeping whichever copy it saw first.
@@ -31,8 +35,8 @@ if(NOT SC_ARCH_X64)
 endif()
 
 string(TOLOWER "${SC_X64_LEVEL}" _sc_x64_level)
-if(NOT _sc_x64_level MATCHES "^(v[1-4]|v2-avx)$")
-    message(FATAL_ERROR "SC_X64_LEVEL must be one of v1, v2, v2-avx, v3, v4 (got '${SC_X64_LEVEL}').")
+if(NOT _sc_x64_level MATCHES "^(v[1-4]|v2-avx|v3-adx)$")
+    message(FATAL_ERROR "SC_X64_LEVEL must be one of v1, v2, v2-avx, v3, v3-adx, v4 (got '${SC_X64_LEVEL}').")
 endif()
 string(SUBSTRING "${_sc_x64_level}" 1 1 _sc_x64_level_number)
 
@@ -40,6 +44,8 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND MSVC)
     # clang-cl's /arch: spellings imply a different feature set than the x86-64-vN levels, so pass the level itself.
     if(_sc_x64_level STREQUAL "v2-avx")
         sc_build_options(COMPILE "/clang:-march=x86-64-v2" "/clang:-mavx")
+    elseif(_sc_x64_level STREQUAL "v3-adx")
+        sc_build_options(COMPILE "/clang:-march=x86-64-v3" "/clang:-madx")
     elseif(NOT _sc_x64_level STREQUAL "v1")
         sc_build_options(COMPILE "/clang:-march=x86-64-${_sc_x64_level}")
     endif()
@@ -54,12 +60,14 @@ elseif(MSVC)
         sc_build_options(COMPILE /arch:SSE4.2)
     elseif(_sc_x64_level STREQUAL "v2-avx")
         sc_build_options(COMPILE /arch:AVX)
-    elseif(_sc_x64_level STREQUAL "v3" OR _sc_x64_level STREQUAL "v4")
+    elseif(_sc_x64_level MATCHES "^v3" OR _sc_x64_level STREQUAL "v4")
         sc_build_options(COMPILE /arch:AVX2)
     endif()
 elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     if(_sc_x64_level STREQUAL "v2-avx")
         sc_build_options(COMPILE -march=x86-64-v2 -mavx)
+    elseif(_sc_x64_level STREQUAL "v3-adx")
+        sc_build_options(COMPILE -march=x86-64-v3 -madx)
     else()
         sc_build_options(COMPILE -march=x86-64-${_sc_x64_level})
     endif()
@@ -71,6 +79,11 @@ if(_sc_x64_level STREQUAL "v2-avx")
     set(SC_X64_AVX ON)
 else()
     set(SC_X64_AVX OFF)
+endif()
+if(_sc_x64_level STREQUAL "v3-adx")
+    set(SC_X64_ADX ON)
+else()
+    set(SC_X64_ADX OFF)
 endif()
 
 # The kernel the floor compiles everywhere: one per level, except that cl.exe builds v4 as AVX2 (above).

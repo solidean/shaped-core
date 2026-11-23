@@ -71,6 +71,8 @@ struct local_name
     int depth = 0;
     /// A name of the function a test stands in: visible, so it hides what the module has of that name, and unusable.
     bool is_captured = false;
+    /// For a value of a struct with cases, the leaf cases it is known to be in; 0 where nothing narrows it (CHK-542).
+    u32 cases = 0;
 };
 
 /// A loop around the statement being checked.
@@ -506,6 +508,125 @@ struct checker
     /// A file's tagged string at file scope, registered in `out.target_preambles` (CHK-428).
     /// A chain's branches register theirs under `within` and each branch's condition (CHK-529).
     void declare_preamble(i32 file, ast::preamble_decl const& preamble, cc::span<target_condition const> within = {});
+
+    // ---- structs with cases (check_struct_cases.cc) -------------------------------------------------------------------
+
+    /// Whether a struct's block declares a `case` (CHK-540).
+    [[nodiscard]] static bool declares_cases(ast::file_ast const& ast, ast::struct_decl const& s);
+    /// CHK-545: a function of the type scope of `owner` per leaf case, which builds a value of that case.
+    void declare_case_constructors(symbol_id owner, i32 file, ast::range_of<ast::decl_id> members);
+    /// "case" or "field" where `name` is a case of the struct `members` declares, or a field one of its cases does.
+    [[nodiscard]] cc::string_view case_member_kind(i32 file,
+                                                   ast::range_of<ast::decl_id> members,
+                                                   cc::string_view name) const;
+    /// CHK-540 to CHK-548: the cases, the variant fields and the carrier's layout of the struct `id`, whose type is
+    /// already pushed with `commons` as its members; it sets the type's ranges and adds the hidden members.
+    void compile_struct_cases(symbol_id id, type_id type, i32 file, ast::struct_decl const& s);
+    /// CHK-552: the leaves the receiver of method or property `id` takes, where its case's block declares it; 0 for any.
+    [[nodiscard]] u32 receiver_cases_of(symbol_id id);
+    /// CHK-545: the signature of a case constructor.
+    void compile_case_constructor(symbol_id id);
+    /// The leaf cases of the struct with cases `type` a pattern names: `.glass`, `material.glass`, or such names
+    /// joined by `or`; none where it names no case of it, which it reported.
+    [[nodiscard]] cc::optional<u32> cases_named(i32 file, ast::expr_id pattern, type_id type);
+    /// `material.glass` or `material.glass or material.metal` in a type position: true where `expr` names cases of a
+    /// struct with cases, whose type is then `type` and whose leaves `cases`.
+    [[nodiscard]] bool resolve_case_view(i32 file, ast::expr_id expr, type_id& type, u32& cases);
+    /// `x is .glass` and `x is not .glass` (CHK-542).
+    [[nodiscard]] type_id check_case_test(function_scope& scope, ast::expr_id id, ast::case_test const& node);
+    /// CHK-551: a `case` whose scrutinee is a struct with cases; its arms name cases, and each narrows the scrutinee.
+    [[nodiscard]] type_id check_struct_case(function_scope& scope,
+                                            ast::expr_id id,
+                                            ast::case_expr const& node,
+                                            type_id scrutinee,
+                                            bool yields_value,
+                                            flow* ending,
+                                            type_id expected);
+    /// CHK-543: `v.ior`, a variant field of a struct with cases, where every case `v` may be in holds it; none where
+    /// `name` names no variant field, so the caller goes on looking.
+    [[nodiscard]] cc::optional<type_id> check_variant_member(i32 file,
+                                                             ast::expr_id id,
+                                                             ast::member const& member,
+                                                             type_id object);
+    /// CHK-550: `v as material.glass`, which the value may already be.
+    [[nodiscard]] type_id check_case_cast(i32 file,
+                                          ast::expr_id id,
+                                          ast::cast const& node,
+                                          type_id from,
+                                          type_id to,
+                                          u32 cases);
+    /// The leaf cases a value of a struct with cases is known to be in where expression `expr` stands: its whole set
+    /// when nothing narrows it.
+    [[nodiscard]] u32 cases_of(i32 file, ast::expr_id expr, type_id type) const;
+    void set_cases(i32 file, ast::expr_id expr, u32 cases);
+    /// CHK-541: a value of `have` cases stands where only `want` may, or it reports at `where`.
+    void judge_cases(i32 file, source_span where, type_id type, u32 have, u32 want);
+    /// The names of `type`'s leaves in `cases`, `.glass, .metal`, for a diagnostic.
+    [[nodiscard]] cc::string case_names_of(type_id type, u32 cases) const;
+
+    /// What a condition says of one name that is no `mut`, where it is true or where it is false (CHK-542).
+    struct narrowing
+    {
+        /// A name, or the source text of a member path, `p.mat`, which no name spells.
+        cc::string_view name;
+        u32 cases = 0;
+        /// The struct with cases the name or the path holds.
+        type_id type = type_id::none;
+    };
+    /// The key a name or a member path narrows under (CHK-542): a name that is no `mut`, or fields of one, read through
+    /// fields alone; empty for any other expression, which nothing narrows.
+    [[nodiscard]] cc::string_view narrowable_key(function_scope const& scope, ast::expr_id expr) const;
+    /// CHK-542: a member path a test narrowed is known to be in what it narrowed it to, where `id` reads it.
+    void note_path_cases(function_scope const& scope, ast::expr_id id);
+    /// The narrowings `condition` makes where it is `holds`, in `scope` as it stands; empty for a condition that tests no
+    /// case of a name that can be narrowed.
+    [[nodiscard]] cc::vector<narrowing> narrowings_of(function_scope& scope, ast::expr_id condition, bool holds);
+    /// Each narrowing as a local that hides its name until the block ends: the same target, fewer cases.
+    void narrow(function_scope& scope, cc::span<narrowing const> narrowings);
+    /// The narrowings that hold on every path of `paths`: a name each path narrows, to every case one of them allows.
+    [[nodiscard]] static cc::vector<narrowing> join(cc::span<cc::vector<narrowing> const> paths);
+
+    /// CHK-549: `x: int in 0..<10`, the range of field `f` read into `into`, which a type that takes none reports.
+    void read_field_range(i32 file, ast::field const& f, member_info& into);
+    /// The field of the struct `type` that AST field `field` declares, where it has a range (CHK-549); null otherwise.
+    [[nodiscard]] member_info const* ranged_member(type_id type, ast::field_id field) const;
+    /// CHK-549: a constant stored into `field` lies in its range, or it reports at `value`.
+    void judge_range(i32 file, ast::expr_id value, member_info const& field);
+    /// How many `uint` words of the variant region a value of `type` takes; -1 for a type it holds none of yet.
+    [[nodiscard]] i32 words_of(type_id type) const;
+    /// Where a value of a type lands among its neighbours at natural alignment (EMIT-110), as the tag's hole needs.
+    struct natural_layout
+    {
+        i32 size = 0;
+        i32 alignment = 1;
+    };
+    [[nodiscard]] natural_layout natural_layout_of(type_id type) const;
+    /// CHK-546: the fields a `@when` reads where it is in the checked fragment, appended to `names`; false outside it.
+    [[nodiscard]] bool when_names(i32 file, ast::expr_id expr, cc::vector<cc::string_view>& names) const;
+    /// The integer a constant of a `@when` stands for: a literal, a case of an enum, or a `const`.
+    [[nodiscard]] cc::optional<f64> when_constant(i32 file, ast::expr_id expr) const;
+    /// Whether a `@when` holds where each of `fields` holds the value of `values` at its position.
+    [[nodiscard]] cc::optional<bool> when_holds(i32 file,
+                                                ast::expr_id expr,
+                                                cc::span<cc::string_view const> fields,
+                                                cc::span<f64 const> values) const;
+    /// CHK-546: the field and the value each conjunct of a `@when` fixes, where it is a conjunction of equalities.
+    [[nodiscard]] bool equalities_of(i32 file,
+                                     ast::expr_id expr,
+                                     cc::vector<cc::pair<cc::string_view, ast::expr_id>>& writes) const;
+    /// CHK-546: the cases of one level that `@when`s tell apart overlap nowhere; true where they also leave no value
+    /// outside every one of them.
+    template <class Case>
+    [[nodiscard]] bool judge_when_level(i32 file,
+                                        cc::span<Case const> cases,
+                                        isize parent,
+                                        cc::span<member_info const> commons,
+                                        cc::span<member_info const> variants);
+
+    /// The leaf cases of each expression of a struct with cases where fewer than all are known, by file and expression.
+    cc::map<u64, u32> expr_cases;
+    /// Set while a type position may name cases of a struct with cases (CHK-541), which their leaves are written to.
+    u32* accepts_cases = nullptr;
 
     /// How many of `files` are the prelude's; every other file is a module's.
     i32 prelude_count = 0;

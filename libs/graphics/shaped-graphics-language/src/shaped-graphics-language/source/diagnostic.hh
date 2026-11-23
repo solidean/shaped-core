@@ -172,6 +172,8 @@ enum class sgl::diagnostic_kind : sgl::u8
     non_exhaustive_case,
     /// Two arms of one `case` that name one case of the enum.
     duplicate_case_pattern,
+    /// Two cases of one level of a struct with cases whose `@when`s one value satisfies (CHK-546).
+    overlapping_cases,
     /// An arm of a `case` that is a value and that neither produces one nor exits.
     missing_value_in_arm,
     /// A form some backend lacks, used where no `require` grants its feature.

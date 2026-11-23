@@ -227,14 +227,26 @@ type_id checker::check_if_value(function_scope& scope,
     auto is_failed = false;
     auto every_branch_exits = true;
 
+    // CHK-542: a branch sees its condition hold, and every one before it fail
+    auto const visible = scope.locals.size();
     for (auto const& branch : ast.at(node.branches))
     {
+        auto holds = cc::vector<narrowing>();
+        auto fails = cc::vector<narrowing>();
         if (ast::is_valid(branch.condition))
+        {
             check_condition(scope, branch.condition);
+            holds = narrowings_of(scope, branch.condition, true);
+            fails = narrowings_of(scope, branch.condition, false);
+        }
 
         auto branch_type = type_id::none;
         auto branch_exits = false;
+        auto const before = scope.locals.size();
+        narrow(scope, holds);
         check_arm_body(scope, branch.then, yields_value, expected, branch_type, branch_exits, is_failed);
+        scope.locals.resize_down_to(before);
+        narrow(scope, fails);
         every_branch_exits = every_branch_exits && branch_exits;
 
         if (!yields_value || branch_exits)
@@ -259,6 +271,7 @@ type_id checker::check_if_value(function_scope& scope,
                 cc::format("this if is {}, and this branch gives a {}", out.name_of(result), out.name_of(branch_type)));
     }
 
+    scope.locals.resize_down_to(visible);
     if (ending != nullptr && every_branch_exits)
         *ending = flow::exits;
     if (is_failed)
@@ -282,6 +295,9 @@ type_id checker::check_case(function_scope& scope,
     auto const where = span_of(file, id);
 
     auto const scrutinee = check_expr(scope, node.value);
+    // CHK-551: a struct with cases is taken apart by naming its cases, never by `==`
+    if (scrutinee != error_type && out.at(scrutinee).has_cases())
+        return check_struct_case(scope, id, node, scrutinee, yields_value, ending, expected);
 
     // CHK-155: an arm matches by `==`, so a scrutinee whose `==` does not resolve has no arm that could.
     if (scrutinee != error_type && out.at(scrutinee).kind != type_kind::enumeration)

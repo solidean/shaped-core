@@ -1043,7 +1043,8 @@ void checker::judge_attributes(i32 file,
                  && name != "expect" && name != "interpolate" && name != "format" && name != "depth"
                  && name != "sampler" && name != "geometry" && name != "tessellation_control" && name != "mesh"
                  && name != "task" && name != "padding" && name != "swizzle" && name != "forward" && name != "backward"
-                 && name != "gradient" && name != "tangent" && name != "max_iterations" && name != "indexed")
+                 && name != "gradient" && name != "tangent" && name != "max_iterations" && name != "indexed"
+                 && name != "when" && name != "cases" && name != "tag")
             report(diagnostic_kind::invalid_attribute_arguments, file, span_of(file, a.list),
                    cc::format("@{} takes no arguments", name));
     }

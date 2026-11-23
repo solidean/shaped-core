@@ -350,6 +350,28 @@ struct sgl::check::type_info
     /// type this one is, `tangent[S]`, which holds a tangent per differentiable field of `S`; `none` for every other type.
     type_id tangent_of = type_id::none;
 
+    /// A struct with cases (CHK-540): its cases in declaration order, each before the cases it holds, as `member_info`s
+    /// of `checked_module::members`; empty for every other type.
+    ast::range_of<member_info> struct_cases;
+    /// The fields its cases declare and the ones `@cases` shares, each at its words of the variant region (CHK-543).
+    ast::range_of<member_info> variant_fields;
+    /// How many of `struct_cases` are leaves, which a value is always one of.
+    i32 leaf_count = 0;
+    /// The position among `members` of the tag the compiler places, -1 where none is (CHK-544).
+    i32 tag_member = -1;
+    /// The position among `members` of the variant region's first word, and how many words it has.
+    i32 first_word = -1;
+    i32 word_count = 0;
+    /// `@tag(.external)`: no value says its own case, so nothing asks it with `is` (CHK-547).
+    bool is_external_tag = false;
+    /// Every value is in one of the leaves: the compiler's tag says which, or the `@when`s of each level cover every
+    /// value their fields can hold and are checked (CHK-546). A `case` naming every leaf needs no `_` only where it is.
+    bool is_covered = true;
+
+    [[nodiscard]] bool has_cases() const { return struct_cases.count > 0; }
+    /// Every leaf, as a mask of `member_info::leaves`.
+    [[nodiscard]] u32 every_leaf() const { return leaf_count >= 32 ? ~u32(0) : (u32(1) << leaf_count) - 1; }
+
     bool operator==(type_info const&) const = default;
 };
 
@@ -478,6 +500,42 @@ struct sgl::check::member_info
     /// change from, at the read's index; empty without one, where a read changes by nothing going forward.
     cc::string tangent;
 
+    /// A member of a struct with cases that its layout adds and no name reaches: the tag or a word of the variant
+    /// region (CHK-543).
+    bool is_hidden = false;
+    /// `x: int in 0..<10`: the field's values lie from `range_first` to `range_last`, both included (CHK-549).
+    bool has_range = false;
+    i64 range_first = 0;
+    i64 range_last = 0;
+
+    /// For a variant field (CHK-543): its first word in the variant region, and how many it takes; -1 for every other.
+    i32 word = -1;
+    i32 word_count = 0;
+    /// One bit per leaf: for a variant field, the leaf cases that hold it; for a case, the leaves at or below it.
+    u32 leaves = 0;
+    /// For a case of a struct with cases (CHK-540): its declaration, in the struct's file.
+    ast::decl_id case_declaration = ast::decl_id::none;
+    /// For a case, the position of the case it stands in among its struct's cases, -1 at the top; for a variant
+    /// field, the case that declares it, -1 for a field `@cases` shares.
+    i32 parent = -1;
+    /// For a case, its position among the leaves, -1 for a case that holds cases.
+    i32 leaf = -1;
+    /// For a case: its `@when` is outside the checked fragment, as `@unchecked` admits (CHK-546).
+    bool is_unchecked = false;
+    /// For a case: every `@when` on its path is a conjunction of equalities, which a constructor writes (CHK-546).
+    bool is_buildable = true;
+    /// For a field of a struct with cases: a `@when` reads it, so no assignment through the struct reaches it (CHK-546).
+    bool is_discriminant = false;
+    /// For a field of a case's block where the case has a paren payload too: its constructor takes it by name (CHK-545).
+    bool is_named_only_in_case = false;
+    /// For a case: whether a value is in it, as a C expression over the struct's members and its variant fields'
+    /// accessors, `kind == 0 && two_sided != 0`, which a host tests a value by; empty where nothing tells it, as for a
+    /// `@tag(.external)` struct or a `@when` outside the checked fragment.
+    cc::string host_condition;
+    /// For a leaf: the fields its constructor writes rather than takes, each with the C constant it writes (CHK-546),
+    /// as `name=value` joined by `;`.
+    cc::string host_writes;
+
     bool operator==(member_info const&) const = default;
 };
 
@@ -537,6 +595,9 @@ enum class sgl::check::function_role : sgl::u8
     property,
     /// The function of a struct's name that takes its fields (CHK-239); its declaration is the struct's.
     constructor,
+    /// `material.glass(…)`: a function of a struct's type scope that builds a value of one of its leaf cases (CHK-545).
+    /// Its declaration is the case's, in its struct's file.
+    case_constructor,
 };
 
 /// One module-level declaration, named by the file it stands in and its declaration there.
@@ -655,6 +716,8 @@ struct sgl::check::parameter
     stage_input input = stage_input::none;
     /// `p: mut T`: the caller's place, which a call hands over as `mut x` and the body may assign (CHK-315).
     bool is_mut = false;
+    /// `m: material.glass`: the leaf cases of a struct with cases an argument must be in; 0 for any (CHK-541).
+    u32 cases = 0;
 
     bool operator==(parameter const&) const = default;
 };
@@ -665,6 +728,10 @@ struct sgl::check::function_info
     symbol_id symbol = symbol_id::none;
     ast::range_of<parameter> parameters;
     type_id result = type_id::none;
+    /// `-> material.glass`: the leaf cases the result is in; 0 for any (CHK-541).
+    u32 result_cases = 0;
+    /// A case constructor's leaf, as a position among its struct's `struct_cases`; -1 for every other function.
+    i32 case_index = -1;
     /// The bindings of the `{...}` list, in the order written; a range of `checked_module::binding_lists`.
     ast::range_of<symbol_id> bindings;
     /// `@vertex`, `@pixel` or `@compute` makes the function an entry point.
@@ -884,6 +951,11 @@ enum class sgl::check::target_kind : sgl::u8
     /// A value parameter's name in an instance: `index` is the constant it stands for, in `checked_module::types`
     /// (CHK-338).
     generic_value,
+    /// On a `member`: variant field `index` of the struct with cases `symbol` (CHK-543).
+    variant_field,
+    /// On a `case_test`, on a `case` pattern over a struct with cases, and on a cast to one of its cases: the leaf
+    /// cases of the struct `symbol` it names, the mask's bits as `index` holds them (CHK-541).
+    struct_cases,
     /// On a `member` or a call: member `index` of a query or a candidate, a `query_member` (CHK-557 to CHK-559).
     query_member,
 };

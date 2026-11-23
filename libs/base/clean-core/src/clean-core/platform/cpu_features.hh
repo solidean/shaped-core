@@ -39,6 +39,7 @@ struct cc::cpu_features
     bool bmi2 = false;
     bool lzcnt = false;
     bool movbe = false;
+    bool adx = false; ///< ADCX and ADOX, two carry chains at once; in no psABI level, SC_X64_LEVEL=v3-adx assumes it
     bool avx512f = false;
     bool avx512bw = false;
     bool avx512cd = false;
