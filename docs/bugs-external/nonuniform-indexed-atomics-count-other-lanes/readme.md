@@ -121,7 +121,7 @@ Everywhere else, and for a `min`, `max` or bit operation whose value before is r
 A pixel stage keeps the native atomic, since its helper invocations would never leave such a loop.
 Every other vendor keeps the native atomic and pays nothing.
 `sg - an atomic at a nonuniform index into an SGL binding array is right in each form CHK-561 writes` runs each form on every device, the per-lane one on all but Intel.
-[bug-sgl-binding-array-atomics-fail-on-gpu](../../../libs/graphics/shaped-graphics/docs/issues/bug-sgl-binding-array-atomics-fail-on-gpu.md) is the issue it closes.
+[bug-sgl-binding-array-atomics-fail-on-gpu](../../../libs/graphics/shaped-graphics/docs/issues/.closed/2026/11/bug-sgl-binding-array-atomics-fail-on-gpu.md) is the issue it closes.
 
 ## Re-checking after a driver update
 
