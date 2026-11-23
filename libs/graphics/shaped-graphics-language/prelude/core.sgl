@@ -348,6 +348,184 @@ fun add_reduced(slot: mut atomic[float], key: int, v: float):
     else:
         slot.add(v)
 
+// ---- an atomic at a non-uniform index into a binding array -----------------------------------------------------------
+//
+// Intel's and AMD's drivers combine such an atomic's lanes before they split them by the element each picked, so an
+// element takes what other elements were owed (docs/bugs-external/nonuniform-indexed-atomics-count-other-lanes).
+// Where `has(.nonuniform_atomic_workaround)` holds, the flattener writes one of these in the atomic's place (CHK-553):
+// `op` is 0 to 6 for `add`, `subtract`, `min`, `max`, `bit_and`, `bit_or` and `bit_xor`, a constant once inlined.
+// By a leader, each element the subgroup's lanes picked takes one atomic, of what its lanes combine to, by one lane alone.
+// The rounds' subgroup operations see the lanes that reach them, which a vulkan text states as maximal reconvergence.
+// By each lane, a compare-exchange, which AMD's driver does not combine; Intel's still gets one wrong now and then.
+
+/// `seen` updated by `op` with `v`.
+@internal
+fun nonuniform_updated(op: int, seen: uint, v: uint) -> uint:
+    if op == 0 => return seen + v
+    if op == 1 => return seen - v
+    if op == 2 => return min(seen, v)
+    if op == 3 => return max(seen, v)
+    if op == 4 => return seen & v
+    if op == 5 => return seen | v
+    return seen ^ v
+
+/// `a` updated by `op` with `v` in a compare-exchange loop of this lane's own, and the value before.
+/// An update that changes nothing stores nothing, since the value it read was the value at that moment.
+@internal
+fun nonuniform_update_by_lane(a: mut atomic[uint], op: int, v: uint) -> uint:
+    let mut seen = a.compare_exchange_strong(0u, 0u)
+    loop:
+        let desired = nonuniform_updated(op, seen, v)
+        if desired == seen => return seen
+        let before = a.compare_exchange_strong(seen, desired)
+        if before == seen => return before
+        seen = before
+
+/// `seen` updated by `op` with `v`.
+@internal
+fun nonuniform_updated(op: int, seen: int, v: int) -> int:
+    if op == 0 => return seen + v
+    if op == 1 => return seen - v
+    if op == 2 => return min(seen, v)
+    if op == 3 => return max(seen, v)
+    if op == 4 => return seen & v
+    if op == 5 => return seen | v
+    return seen ^ v
+
+/// `a` updated by `op` with `v` in a compare-exchange loop of this lane's own, and the value before.
+/// An update that changes nothing stores nothing, since the value it read was the value at that moment.
+@internal
+fun nonuniform_update_by_lane(a: mut atomic[int], op: int, v: int) -> int:
+    let mut seen = a.compare_exchange_strong(0, 0)
+    loop:
+        let desired = nonuniform_updated(op, seen, v)
+        if desired == seen => return seen
+        let before = a.compare_exchange_strong(seen, desired)
+        if before == seen => return before
+        seen = before
+
+/// `seen` updated by `op` with `v`.
+@internal
+fun nonuniform_updated(op: int, seen: ulong, v: ulong) -> ulong:
+    if op == 0 => return seen + v
+    if op == 1 => return seen - v
+    if op == 2 => return min(seen, v)
+    if op == 3 => return max(seen, v)
+    if op == 4 => return seen & v
+    if op == 5 => return seen | v
+    return seen ^ v
+
+/// `a` updated by `op` with `v` in a compare-exchange loop of this lane's own, and the value before.
+/// An update that changes nothing stores nothing, since the value it read was the value at that moment.
+@internal
+fun nonuniform_update_by_lane(a: mut atomic[ulong], op: int, v: ulong) -> ulong:
+    let mut seen = a.compare_exchange_strong(0u64, 0u64)
+    loop:
+        let desired = nonuniform_updated(op, seen, v)
+        if desired == seen => return seen
+        let before = a.compare_exchange_strong(seen, desired)
+        if before == seen => return before
+        seen = before
+
+/// `seen` updated by `op` with `v`.
+@internal
+fun nonuniform_updated(op: int, seen: long, v: long) -> long:
+    if op == 0 => return seen + v
+    if op == 1 => return seen - v
+    if op == 2 => return min(seen, v)
+    if op == 3 => return max(seen, v)
+    if op == 4 => return seen & v
+    if op == 5 => return seen | v
+    return seen ^ v
+
+/// `a` updated by `op` with `v` in a compare-exchange loop of this lane's own, and the value before.
+/// An update that changes nothing stores nothing, since the value it read was the value at that moment.
+@internal
+fun nonuniform_update_by_lane(a: mut atomic[long], op: int, v: long) -> long:
+    let mut seen = a.compare_exchange_strong(0i64, 0i64)
+    loop:
+        let desired = nonuniform_updated(op, seen, v)
+        if desired == seen => return seen
+        let before = a.compare_exchange_strong(seen, desired)
+        if before == seen => return before
+        seen = before
+
+/// `a` updated by `op` with `v` as the atomic itself, which the flattener leaves as it is inside these functions.
+@internal
+fun nonuniform_native(a: mut atomic[uint], op: int, v: uint) -> uint:
+    if op == 0 => return a.add(v)
+    if op == 1 => return a.subtract(v)
+    if op == 2 => return a.min(v)
+    if op == 3 => return a.max(v)
+    if op == 4 => return a.bit_and(v)
+    if op == 5 => return a.bit_or(v)
+    return a.bit_xor(v)
+
+/// `a` updated by `op` with `v`, one round for each `key` the subgroup's lanes hold, in which the first lane holding it
+/// updates `a` alone, natively, by what the round's lanes combine to.
+/// The value before is each lane's own for `add` and `subtract`, and the round's for the rest, which the flattener
+/// writes so only where nothing reads it.
+@internal
+fun nonuniform_update_by_leader(a: mut atomic[uint], key: uint, op: int, v: uint) -> uint:
+    const if has(.subgroups):
+        loop:
+            if subgroup_broadcast_first(key) == key:
+                let mut total = v
+                let mut prefix = 0u
+                if op <= 1:
+                    total = subgroup_add(v)
+                    prefix = subgroup_exclusive_add(v)
+                else if op == 2 => total = subgroup_min(v)
+                else if op == 3 => total = subgroup_max(v)
+                else if op == 4 => total = subgroup_bit_and(v)
+                else if op == 5 => total = subgroup_bit_or(v)
+                else => total = subgroup_bit_xor(v)
+                let mut before = 0u
+                if subgroup_elect() => before = nonuniform_native(mut a, op, total)
+                before = subgroup_broadcast_first(before)
+                if op == 1 => return before - prefix
+                return before + prefix
+    else:
+        return nonuniform_update_by_lane(mut a, op, v)
+
+/// `a` updated by `op` with `v` as the atomic itself, which the flattener leaves as it is inside these functions.
+@internal
+fun nonuniform_native(a: mut atomic[int], op: int, v: int) -> int:
+    if op == 0 => return a.add(v)
+    if op == 1 => return a.subtract(v)
+    if op == 2 => return a.min(v)
+    if op == 3 => return a.max(v)
+    if op == 4 => return a.bit_and(v)
+    if op == 5 => return a.bit_or(v)
+    return a.bit_xor(v)
+
+/// `a` updated by `op` with `v`, one round for each `key` the subgroup's lanes hold, in which the first lane holding it
+/// updates `a` alone, natively, by what the round's lanes combine to.
+/// The value before is each lane's own for `add` and `subtract`, and the round's for the rest, which the flattener
+/// writes so only where nothing reads it.
+@internal
+fun nonuniform_update_by_leader(a: mut atomic[int], key: uint, op: int, v: int) -> int:
+    const if has(.subgroups):
+        loop:
+            if subgroup_broadcast_first(key) == key:
+                let mut total = v
+                let mut prefix = 0
+                if op <= 1:
+                    total = subgroup_add(v)
+                    prefix = subgroup_exclusive_add(v)
+                else if op == 2 => total = subgroup_min(v)
+                else if op == 3 => total = subgroup_max(v)
+                else if op == 4 => total = subgroup_bit_and(v)
+                else if op == 5 => total = subgroup_bit_or(v)
+                else => total = subgroup_bit_xor(v)
+                let mut before = 0
+                if subgroup_elect() => before = nonuniform_native(mut a, op, total)
+                before = subgroup_broadcast_first(before)
+                if op == 1 => return before - prefix
+                return before + prefix
+    else:
+        return nonuniform_update_by_lane(mut a, op, v)
+
 // ---- derivatives ----------------------------------------------------------------------------------------------------
 //
 // PROTOTYPE (docs/spec/incubator/autodiff.md): the flattener writes these calls' derivatives, and never their bodies.

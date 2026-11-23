@@ -910,6 +910,12 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
   SGL's own DXIL states no subgroup size under either.
   No other text states it: the preference reaches the host beside the text, as a kernel's shape does in MSL (EMIT-59).
   sg's vulkan backend asks the pipeline for subgroups of `n` where the device runs that size in a compute stage, and WGSL and MSL have no way to ask.
+* **EMIT-276** A subgroup operation that sees the invocations reaching it, as CHK-553's rounds do, is written so that no target moves it out of its loop.
+  A vulkan text then states `MaximallyReconvergesKHR`: SGL's own SPIR-V as an execution mode, and its HLSL by opening the entry point with `vk::ext_execution_mode(6023)`.
+  SGL's own DXIL writes a break out of a loop whose blocks hold a subgroup operation as DXC does, as a branch on `@dx.break.cond`.
+  That branch leaves, or else goes back into the loop, which it never does, so the blocks the break runs stay the loop's.
+  A driver runs what follows a loop once every invocation has left it, and would otherwise run them over the whole subgroup.
+  Such a program keeps its structure through DXIL's passes, which every other gives up for shorter code.
 * **EMIT-149** `workgroup_uniform_load(m)` is `workgroupUniformLoad(&m)` in WGSL.
   HLSL and MSL write the workgroup barrier of EMIT-131, read `m` into a local, and write the barrier again ([why](why/emitting.md#emit-149)).
 * **EMIT-150** A `@coherent` member is `globallycoherent` in HLSL, which DXC writes as SPIR-V's `Coherent` for vulkan.

@@ -134,8 +134,22 @@ int main(int argc, char** argv)
         if (families[i].queueFlags & VK_QUEUE_COMPUTE_BIT)
             family = i;
 
+    // maximal reconvergence is enabled where the device has it, for a shader that asks for it by its execution mode
+    auto extension_count = uint32_t(0);
+    vkEnumerateDeviceExtensionProperties(physical, nullptr, &extension_count, nullptr);
+    auto extensions = std::vector<VkExtensionProperties>(extension_count);
+    vkEnumerateDeviceExtensionProperties(physical, nullptr, &extension_count, extensions.data());
+    auto has_maximal = false;
+    for (auto const& e : extensions)
+        has_maximal = has_maximal || std::strcmp(e.extensionName, VK_KHR_SHADER_MAXIMAL_RECONVERGENCE_EXTENSION_NAME) == 0;
+    std::printf("maximal reconvergence: %s\n", has_maximal ? "yes" : "no");
+    auto maximal = VkPhysicalDeviceShaderMaximalReconvergenceFeaturesKHR{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_MAXIMAL_RECONVERGENCE_FEATURES_KHR,
+        .shaderMaximalReconvergence = VK_TRUE};
     auto vk12 = VkPhysicalDeviceVulkan12Features{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
+                                                 .pNext = has_maximal ? &maximal : nullptr,
                                                  .shaderStorageBufferArrayNonUniformIndexing = VK_TRUE};
+    char const* const enabled[] = {VK_KHR_SHADER_MAXIMAL_RECONVERGENCE_EXTENSION_NAME};
     auto const priority = 1.0f;
     auto const queue_info = VkDeviceQueueCreateInfo{.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
                                                     .queueFamilyIndex = family,
@@ -144,7 +158,9 @@ int main(int argc, char** argv)
     auto const device_info = VkDeviceCreateInfo{.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
                                                 .pNext = &vk12,
                                                 .queueCreateInfoCount = 1,
-                                                .pQueueCreateInfos = &queue_info};
+                                                .pQueueCreateInfos = &queue_info,
+                                                .enabledExtensionCount = has_maximal ? 1u : 0u,
+                                                .ppEnabledExtensionNames = enabled};
     check(vkCreateDevice(physical, &device_info, nullptr, &device), "vkCreateDevice");
     auto queue = VkQueue(VK_NULL_HANDLE);
     vkGetDeviceQueue(device, family, 0, &queue);

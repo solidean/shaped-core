@@ -541,6 +541,24 @@ struct flattener
     /// The prelude's internal atomic `name` of a texel of `image`, by the image's shape and texel.
     [[nodiscard]] symbol_id texel_atomic(cc::string_view name, check::type_info const& image) const;
 
+    /// CHK-553: an integer atomic's reducible update at a `nonuniform` index into a binding array, written as the
+    /// prelude's compare-exchanges where the device's driver combines such an atomic across the elements.
+    /// None, with nothing written, for every other call, or where the device's driver needs nothing: the caller then
+    /// goes on with `values` as they are.
+    flat_expr_id flatten_nonuniform_atomic(ast::expr_id id,
+                                           type_id type,
+                                           call_record const& record,
+                                           cc::span<flat_expr_id const> values);
+
+    /// The element of a binding array at a `nonuniform` index that the place `place` lies in; none for any other place.
+    [[nodiscard]] flat_expr_id nonuniform_element_of(flat_expr_id place) const;
+
+    /// The call of the expression statement being flattened, whose value nothing reads; none inside any other.
+    ast::expr_id discarded_call = ast::expr_id::none;
+    /// How many of CHK-553's rounds are being inlined, whose subgroup operations see the invocations that reach them
+    /// (`flat_call::is_active_lanes`).
+    i32 active_lanes_depth = 0;
+
     /// A builtin or a construction over `values`, written in the order the call wrote them.
     /// Where the parameters take them in that order and no two have an effect, they stand in the call itself.
     /// Otherwise each is bound by a `let` in the order written, since a target may evaluate a call's arguments in any

@@ -2041,7 +2041,8 @@ void sgl::emit::impl::write_helpers(cc::string& out, plan const& p, dialect cons
         auto text = element != nullptr
                       ? d.buffer_length_at_helper(
                             p.resources[found].name, is_nonuniform, is_bytes, p.resources[found].count,
-                            p.e.entry_stage == check::stage::compute || p.e.entry_stage == check::stage::pixel)
+                            p.e.entry_stage == check::stage::compute || p.e.entry_stage == check::stage::pixel,
+                            p.compiled_for.device_features.has(check::feature::nonuniform_length_workaround))
                       : d.buffer_length_helper(p.resources[found].name, is_bytes);
         auto is_known = text.empty();
         for (auto const& w : written)

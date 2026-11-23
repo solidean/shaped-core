@@ -1032,7 +1032,11 @@ void sgl::check::impl::flattener::flatten_expr_stmt(origin from, ast::expr_id va
         return add_stmt(from, flat_eval{.value = inlined});
     }
     // Any other call has a value, which is evaluated where it stands and dropped.
-    add_stmt(from, flat_eval{.value = flatten_expr(value)});
+    auto const outer_discarded = discarded_call;
+    discarded_call = value;
+    auto const dropped = flatten_expr(value);
+    discarded_call = outer_discarded;
+    add_stmt(from, flat_eval{.value = dropped});
 }
 
 void sgl::check::impl::flattener::flatten_target_text(origin from, ast::stmt_id stmt)

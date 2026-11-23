@@ -87,6 +87,12 @@ enum class sgl::check::feature : sgl::u8
     quad_control,
     /// A `@viewport_index` member (CHK-534): the vertex stage picks the viewport, which WebGPU has on no device.
     multi_viewport,
+    /// No program names it: the device's driver combines an atomic at a `nonuniform` index into a binding array across
+    /// lanes that picked other elements, so the flattener writes one as compare-exchanges (CHK-553).
+    nonuniform_atomic_workaround,
+    /// No program names it: the device's vulkan driver answers the length of a `nonuniform` element of a binding array
+    /// with another lane's, so a vulkan text asks each length at uniform indices.
+    nonuniform_length_workaround,
 };
 
 CC_FLAG_ENUM_INDEXED(sgl::check, feature, u64);
@@ -132,6 +138,8 @@ inline constexpr cc::string_view k_feature_names[] = {
     "clustered_geometry",           //
     "quad_control",                 //
     "multi_viewport",               //
+    "nonuniform_atomic_workaround", //
+    "nonuniform_length_workaround", //
 };
 inline constexpr isize k_feature_count = isize(sizeof(k_feature_names) / sizeof(k_feature_names[0]));
 

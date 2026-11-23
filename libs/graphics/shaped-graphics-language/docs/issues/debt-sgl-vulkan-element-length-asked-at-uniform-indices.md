@@ -16,6 +16,7 @@ DXC's SPIR-V and SGL's own fail alike, and so did every guard of an index into s
 Measured: a view of 2 and a view of 8, read at `nonuniform (id.x % 2)`, gave `2 2 2 2` where `2 8 2 8` is right.
 
 **The workaround, on vulkan only:** SGL asks each length at a uniform index, in the IR lowering (`uniform_element_length`) and in the HLSL-for-vulkan length helper alike.
+It does so only where sg reports `feature::nonuniform_length_workaround`, which its vulkan backend does on AMD hardware alone, so every other device asks the length as it is.
 - A fixed array of up to 16 elements asks every element and selects the lane's, which needs no subgroup operation and runs in every stage.
 - An unbounded array, or a larger one, takes a waterfall over `broadcast_first` / `WaveReadLaneFirst`, in the compute and pixel stages alone, where sg requires subgroup operations.
   In every other stage it is still asked as it is, and still wrong on AMD.
@@ -23,4 +24,4 @@ Measured: a view of 2 and a view of 8, read at `nonuniform (id.x % 2)`, gave `2 
 It reproduces standalone, with descriptor sets as well as descriptor buffers:
 [amd-vulkan-nonuniform-array-length-reads-first-lane](../../../../../docs/bugs-external/amd-vulkan-nonuniform-array-length-reads-first-lane/readme.md).
 
-**Remove it** once that entry's `run.py --vendor 1002` exits 0 on a newer AMD driver.
+**Remove it** once that entry's `run.py --vendor 1002` exits 0 on a newer AMD driver, the feature with it.

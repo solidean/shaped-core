@@ -16,3 +16,12 @@ binding tallies:
 @compute(64) fun tally(@thread_id id: int3){tallies}:
     tallies.slots[nonuniform (id.x % 2)][0].add(1u)
     tallies.slots[nonuniform (id.x % 2)][1].min(uint(id.x))
+
+// The same updates, each thread keeping the value before its own, which a driver workaround must hand each lane alike.
+binding counted:
+    slots: mut buffer[atomic[uint]][2]
+    before: mut buffer[uint]
+
+@compute(64) fun count_off(@thread_id id: int3){counted}:
+    counted.before[id.x] = counted.slots[nonuniform (id.x % 2)][0].add(1u)
+    counted.before[64 + id.x] = counted.slots[nonuniform (id.x % 2)][1].min(uint(id.x))

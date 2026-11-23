@@ -900,3 +900,14 @@ A case that holds cases has none: a value is always in a leaf, so naming an inne
 A range is a fact attached to the field, not a type of its own: overloading, generics and arithmetic would otherwise each need a rule for it.
 No `as` can name it for the same reason, so the store is where a value meets it: a constant is judged there, and any other value is checked where `SC_SHADER_UNDEFINED` asks for checks.
 
+
+## CHK-553
+
+The workaround is a feature of the device rather than of the target, because the bug is a driver's.
+NVIDIA's driver and WARP get such an atomic right, so a text for them keeps the native atomic and costs nothing.
+It is written in the flattener, as prelude SGL, so every target and the interpreter take one form rather than an emitter each.
+A loop over the distinct indices of the subgroup is no workaround while each round's invocations update together: Intel's driver gets a round wrong even with its index unmarked.
+One update per round by one invocation is right on both drivers, and costs what a correct driver's combining does, one update per element and subgroup.
+A compare-exchange per invocation is the form for the rest, right on AMD's driver and on Intel's in most runs.
+[The reproduction](../../../../../../../docs/bugs-external/nonuniform-indexed-atomics-count-other-lanes/readme.md) measures each form on both.
+The value before is each invocation's own in both forms, so the workaround changes no program's meaning, only its cost.

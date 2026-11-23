@@ -641,7 +641,9 @@ value_ref lowering::uniform_element_length(flat_expr_id id)
 {
     // TEMPORARY(debt-sgl-vulkan-element-length-asked-at-uniform-indices): AMD's vulkan driver answers
     // OpArrayLength of a non-uniform element with the first lane's element, so each length is asked at a uniform index.
-    if (_plan.which != emit::target::hlsl_vulkan)
+    // Only where sg reports `nonuniform_length_workaround`, which only that driver's devices do.
+    if (_plan.which != emit::target::hlsl_vulkan
+        || !_plan.compiled_for.device_features.has(check::feature::nonuniform_length_workaround))
         return value_ref::none;
     auto const* const element = _e.at(id).node.try_as<flat_element>();
     if (element == nullptr || !is_nonuniform(element->index))

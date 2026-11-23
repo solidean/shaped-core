@@ -163,6 +163,8 @@ bool metal_context::supports(sg::feature f) const
         // vertex amplification, which SGL's `@view_index` reads as `[[amplification_id]]`
         return _device != nullptr && _device->supportsVertexAmplificationCount(2);
     case sg::feature::pixel_view_read_workaround:
+    case sg::feature::nonuniform_atomic_workaround:
+    case sg::feature::nonuniform_length_workaround:
         return false;
     case sg::feature::ray_tracing_motion_blur:
         // motion acceleration structures, which a pipeline's trace takes natively

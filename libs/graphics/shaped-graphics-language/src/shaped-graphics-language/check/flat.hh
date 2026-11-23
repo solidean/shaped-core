@@ -909,6 +909,9 @@ struct sgl::check::flat_entry_point
     i32 written_words = 0;
     /// LEGAL-69 under `define`: LEGAL-71 zeroes workgroup memory before the body, as WGSL's starts.
     bool zeroes_workgroup = false;
+    /// CHK-553: a vulkan text states `MaximallyReconvergesKHR`, since a subgroup operation of the body sees the
+    /// invocations that reach it; the flattener sets it only where the device has `quad_control`, whose extensions grant it.
+    bool maximally_reconverges = false;
     /// LEGAL-69: the bytes of workgroup memory a profile left unshadowed, since its shadow would not fit beside them in
     /// CHK-294's budget; 0 where every read is tested or nothing asked for it.
     i32 unshadowed_bytes = 0;
@@ -970,8 +973,8 @@ struct sgl::check::flat_entry_point
             && names == rhs.names && is_equal(traced_rays, rhs.traced_rays) && is_equal(text_types, rhs.text_types)
             && attributes == rhs.attributes && is_equal(options, rhs.options) && float_guarantee == rhs.float_guarantee
             && float_raised_by == rhs.float_raised_by && written_words == rhs.written_words
-            && zeroes_workgroup == rhs.zeroes_workgroup && unshadowed_bytes == rhs.unshadowed_bytes
-            && workgroup_index == rhs.workgroup_index && is_equal(reserved, rhs.reserved)
-            && is_equal(debug_sites, rhs.debug_sites);
+            && zeroes_workgroup == rhs.zeroes_workgroup && maximally_reconverges == rhs.maximally_reconverges
+            && unshadowed_bytes == rhs.unshadowed_bytes && workgroup_index == rhs.workgroup_index
+            && is_equal(reserved, rhs.reserved) && is_equal(debug_sites, rhs.debug_sites);
     }
 };

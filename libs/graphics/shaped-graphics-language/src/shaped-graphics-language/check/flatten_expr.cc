@@ -95,7 +95,13 @@ auto sgl::check::impl::flattener::flatten_expr(ast::expr_id id) -> flat_expr_id
                                                 .member = where.index,
                                                 .is_workgroup = c.is_workgroup_binding(where.symbol)});
         if (where.kind == target_kind::buffer_length)
-            return add_expr(type, id, flat_buffer_length{.buffer = flatten_expr(m->object)});
+        {
+            auto const buffer = flatten_expr(m->object);
+            // EMIT-266: a vulkan text asks such a length at uniform indices where the device's driver needs it
+            if (is_valid(buffer) && is_valid(nonuniform_element_of(buffer)))
+                entry.consulted.set(feature::nonuniform_length_workaround);
+            return add_expr(type, id, flat_buffer_length{.buffer = buffer});
+        }
         // CHK-288: a constant, and an object with an effect still runs for it
         if (where.kind == target_kind::array_length)
         {
@@ -954,6 +960,8 @@ auto sgl::check::impl::flattener::flatten_bound_call(ast::expr_id id, type_id ty
     if (auto const texel = atomic_texel_of(record); ast::is_valid(texel))
         return flatten_texel_atomic(id, type, record, texel);
     auto const values = flatten_written(c.out.at(record.written));
+    if (auto const written_around = flatten_nonuniform_atomic(id, type, record, values); is_valid(written_around))
+        return written_around;
     auto const handed = written_closures;
     auto const slots = c.out.at(record.slots);
     if (is_inlined(record.callee))
@@ -1276,7 +1284,11 @@ auto sgl::check::impl::flattener::builtin_call(ast::expr_id id, symbol_id callee
     }
     return add_expr(
         info.result, id,
-        flat_call{.callee = callee, .intrinsic = s.intrinsic, .is_pure = info.is_pure, .arguments = add_list(arguments)});
+        flat_call{.callee = callee,
+                  .intrinsic = s.intrinsic,
+                  .is_pure = info.is_pure,
+                  .arguments = add_list(arguments),
+                  .is_active_lanes = active_lanes_depth > 0 && record != nullptr && record->is_subgroup_operation});
 }
 
 auto sgl::check::impl::flattener::default_sampled_call(ast::expr_id id,

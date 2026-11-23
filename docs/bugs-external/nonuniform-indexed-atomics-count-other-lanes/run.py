@@ -33,8 +33,11 @@ RUN_TIMEOUT_SECONDS = 30
 ADAPTERS = ["intel", "amd", "nvidia", "warp"]
 
 # (name, dxc arguments, expected `even add min, odd add min`);
-# the first is the shader SGL writes, the rest each change one thing about it
+# the first is the shader SGL writes, and the bug rows after it each change one thing about it;
+# the workaround rows are shapes that might avoid the bug, so their being wrong is no verdict on the bug
 NONE = 0xFFFFFFFF
+# SPIR-V's MaximallyReconvergesKHR execution mode; DXIL has no such flag, so its rows are the plain ones there
+MAXIMAL = "-fspv-enable-maximal-reconvergence"
 CONFIGURATIONS = [
     ("add and min, results unread", [], (32, 0, 32, 1)),
     ("add alone", ["-DNO_MIN"], (32, NONE, 32, NONE)),
@@ -44,7 +47,30 @@ CONFIGURATIONS = [
     ("add and min, at shader model 6.8", ["-T", "cs_6_8"], (32, 0, 32, 1)),
     ("add and min, unoptimized", ["-Od"], (32, 0, 32, 1)),
     ("the buffer picked by a branch, literal indices", ["-DBRANCH"], (32, 0, 32, 1)),
+    ("workaround: a loop over indices, leaving by break", ["-DBREAK_LOOP"], (32, 0, 32, 1)),
+    ("  as above, unoptimized", ["-DBREAK_LOOP", "-Od"], (32, 0, 32, 1)),
+    ("  as above, maximally reconverging", ["-DBREAK_LOOP", MAXIMAL], (32, 0, 32, 1)),
+    ("workaround: a loop over indices, leaving by a flag", ["-DFLAG_LOOP"], (32, 0, 32, 1)),
+    ("  as above, maximally reconverging", ["-DFLAG_LOOP", MAXIMAL], (32, 0, 32, 1)),
+    ("  as above, the round's index unmarked", ["-DFLAG_LOOP_UNMARKED"], (32, 0, 32, 1)),
+    ("  as above, every round on the even buffer", ["-DFLAG_LOOP_ONE_BUFFER", "-DNO_MIN"], (64, NONE, 0, NONE)),
+    ("workaround: one atomic per index, by a leader", ["-DLEADER"], (32, 0, 32, 1)),
+    ("  as above, maximally reconverging", ["-DLEADER", MAXIMAL], (32, 0, 32, 1)),
+    ("workaround: a compare-exchange by a leader", ["-DLEADER_CAS"], (32, 0, 32, 1)),
+    ("  as above, unoptimized", ["-DLEADER_CAS", "-Od"], (32, 0, 32, 1)),
+    ("  as above, maximally reconverging", ["-DLEADER_CAS", MAXIMAL], (32, 0, 32, 1)),
+    ("workaround: the add by a leader, results read, in the round", ["-DROUND_CAS"], (32, 0, 32, 0)),
+    ("  as above, maximally reconverging", ["-DROUND_CAS", MAXIMAL], (32, 0, 32, 0)),
+    ("workaround: the add by a leader, natively, results read", ["-DROUND_NATIVE"], (32, 0, 32, 0)),
+    ("  as above, maximally reconverging", ["-DROUND_NATIVE", MAXIMAL], (32, 0, 32, 0)),
+    ("workaround: the add by a leader, results read, shuffled", ["-DSHUFFLE_CAS"], (32, 0, 32, 0)),
+    ("  as above, maximally reconverging", ["-DSHUFFLE_CAS", MAXIMAL], (32, 0, 32, 0)),
+    ("workaround: one lane at a time, natively", ["-DTURN_NATIVE"], (32, 0, 32, 1)),
+    ("workaround: one lane at a time within a round, natively", ["-DROUND_TURN_NATIVE"], (32, 0, 32, 1)),
+    ("workaround: a compare-exchange per lane", ["-DLANE_CAS"], (32, 0, 32, 1)),
+    ("  as above, maximally reconverging", ["-DLANE_CAS", MAXIMAL], (32, 0, 32, 1)),
 ]
+BUG_ROWS = 8
 
 
 def find_windows_dxc() -> Path | None:
@@ -77,6 +103,8 @@ def build(source: str, exe: Path, extra: list[str], link: list[str]) -> bool:
 def compile_shader(dxc: Path, arguments: list[str], output: Path, spirv: bool) -> bool:
     profile = [] if "-T" in arguments else ["-T", "cs_6_0"]
     target = ["-spirv", "-fspv-target-env=vulkan1.2"] if spirv else []
+    if not spirv:
+        arguments = [a for a in arguments if a != MAXIMAL]
     result = subprocess.run([str(dxc), "-nologo", "-E", "main", *target, *profile, *arguments, "-Fo", str(output),
                              str(HERE / "shader.hlsl")], capture_output=True, text=True)
     if result.returncode != 0:
@@ -150,17 +178,17 @@ def main() -> int:
                     continue
                 rows = []
                 header = ""
-                for (name, _, expected), shader in zip(CONFIGURATIONS, shaders):
+                for row, ((name, _, expected), shader) in enumerate(zip(CONFIGURATIONS, shaders)):
                     got, header = dispatch(exe, shader, adapter)
                     if got is None:
                         break
                     if isinstance(got, str):
                         inconclusive = True
-                        rows.append(f"  {name:<50} {got}")
+                        rows.append(f"  {name:<60} {got}")
                         continue
                     wrong = got != expected
-                    reproduced = reproduced or wrong
-                    rows.append(f"  {name:<50} {show(got):<26} {'WRONG, expected ' + show(expected) if wrong else 'right'}")
+                    reproduced = reproduced or (wrong and row < BUG_ROWS)
+                    rows.append(f"  {name:<60} {show(got):<26} {'WRONG, expected ' + show(expected) if wrong else 'right'}")
                 if rows:
                     print(f"{api}, {header}")
                     print("\n".join(rows), flush=True)

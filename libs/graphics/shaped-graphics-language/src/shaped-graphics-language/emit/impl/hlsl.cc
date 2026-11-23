@@ -99,16 +99,18 @@ public:
                                        bool is_nonuniform,
                                        bool is_bytes,
                                        i32 count,
-                                       bool may_waterfall) const override
+                                       bool may_waterfall,
+                                       bool writes_around) const override
     {
         // TEMPORARY(debt-sgl-vulkan-element-length-asked-at-uniform-indices): AMD's vulkan driver answers
         // OpArrayLength of a non-uniform element with the first lane's element, so each length is asked at a uniform index.
+        // `writes_around` is sg's `nonuniform_length_workaround`, which only that driver's devices report.
         auto const dimensions = [&](cc::string_view element, cc::string_view into)
         {
             return is_bytes ? cc::format("{}.GetDimensions({});", element, into)
                             : cc::format("{}.GetDimensions({}, stride);", element, into);
         };
-        if (_is_vulkan && is_nonuniform && count > 0 && count <= 16)
+        if (_is_vulkan && writes_around && is_nonuniform && count > 0 && count <= 16)
         {
             auto text = cc::format("uint sgl_length_nonuniform_{}(uint i)\n{{\n    uint n, k, stride;\n    {}\n", name,
                                    dimensions(cc::format("{}[0]", name), "n"));
@@ -117,7 +119,7 @@ public:
             text += "    return n;\n}\n";
             return text;
         }
-        if (_is_vulkan && is_nonuniform && count == 0 && may_waterfall)
+        if (_is_vulkan && writes_around && is_nonuniform && count == 0 && may_waterfall)
             return cc::format("uint sgl_length_nonuniform_{}(uint i)\n{{\n    uint n = 0u, stride;\n    for (;;)\n    "
                               "{{\n        const uint first = WaveReadLaneFirst(i);\n        {}\n        if (first == "
                               "i)\n"
@@ -723,6 +725,9 @@ public:
         // EMIT-184: DXC lowers a query's micromap flags to SPIR-V without declaring the capability they need
         if (_is_vulkan && p.e.features.has(check::feature::opacity_micromap) && flags_some_query_for_micromaps(p))
             out += "[[vk::ext_extension(\"SPV_EXT_opacity_micromap\")]]\n[[vk::ext_capability(5381)]]\n";
+        // CHK-553: DXC writes `MaximallyReconvergesKHR` for the statement that opens the body, and this its extension
+        if (_is_vulkan && p.e.maximally_reconverges)
+            out += "[[vk::ext_extension(\"SPV_KHR_maximal_reconvergence\")]]\n";
         if (p.e.entry_stage == stage::geometry || p.e.entry_stage == stage::tessellation_control
             || p.e.entry_stage == stage::tessellation_evaluation || p.e.entry_stage == stage::mesh)
             return write_primitive_head(out, p);
@@ -816,6 +821,8 @@ public:
             if (p.states_wave_size_range)
                 out.appendf("[WaveSize(4, 128, {})]\n", p.e.preferred_subgroup_size);
             out.appendf("void {}({})\n{{\n", p.entry_name, list);
+            if (_is_vulkan && p.e.maximally_reconverges)
+                out += "    vk::ext_execution_mode(6023);\n";
         }
         else
             out.appendf("{} {}({})\n{{\n", type_text(p, *this, p.e.result), p.entry_name, list);

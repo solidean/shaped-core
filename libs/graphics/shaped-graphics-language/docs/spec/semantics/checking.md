@@ -1354,6 +1354,17 @@ A `require` in a test's body that nothing in it uses is `unused-require`, and a 
   The warning names a mark of the program's own file alone: a mark of a module or the prelude serves callers this program is not.
   A mark stands only as the whole index into a binding array, `textures[nonuniform i]`; anywhere else, a `let` or an index into a value array included, it is `wrong-kind-of-name`.
   Neither is a keyword: each is a function of the prelude, written as a call without parentheses, which a program's own name of that spelling shadows.
+* **CHK-553** An integer atomic's update at a `nonuniform` index into a binding array is written around the driver ([why](why/checking.md#chk-553)).
+  It is so where `has(.nonuniform_atomic_workaround)` holds, which only a device whose driver needs it has.
+  The updates are `add`, `subtract`, `min`, `max`, `bit_and`, `bit_or` and `bit_xor`.
+  Intel's and AMD's drivers combine such an atomic's invocations before they part them by element.
+  So the flattener writes it as functions of the prelude's, and the entry point consults the feature wherever it holds one, granted or not.
+  In a compute stage with `subgroups`, one invocation updates each element its subgroup picked, alone, by what that element's invocations combine to.
+  Elsewhere each invocation retries its own compare-exchange until no other update came between its read and its write, which AMD's driver gets right and Intel's now and then does not.
+  On vulkan the first needs `quad_control` too, whose extensions let the text state maximal reconvergence (EMIT-276).
+  Each invocation gets the value before its own update, as the atomic gives it: so the first form stands for `add` and `subtract`, and for the rest only where nothing reads that value.
+  A pixel stage keeps its atomic, since its helper invocations would never leave such a loop.
+  An entry point that holds none of these atomics is the same text whatever the feature says.
 * **CHK-399** An index the pass does not prove uniform is **proven varying** where it comes from what the stage is handed (CHK-283), or from what a trace or a callable writes back.
   It may come so through values, or through a `let mut` assigned under control flow that tests such a value.
   A `let` is its value where it stands, so control flow it stands in leaves it as uniform as its value: an early `return` before `maps[draw.slot]` needs no mark.

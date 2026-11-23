@@ -125,6 +125,10 @@ ctx.supports(sg::feature::ray_query)               // bool — THE capability qu
                                                    //     layer output, vulkan's multiViewport; false on metal until verified, and on webgpu)
                                                    //   | view_instancing (one draw renders view_count views, view i into layer i;
                                                    //   | pixel_view_read_workaround (no capability: Intel dx12 needs a pixel stage to read the view; SGL's keep_view asks for it)
+                                                   //   | nonuniform_atomic_workaround (no capability: Intel and AMD on dx12 and vulkan combine an atomic
+                                                   //     at a nonuniform binding-array index wrongly, so SGL writes it around them; CHK-553)
+                                                   //   | nonuniform_length_workaround (no capability: AMD's vulkan driver reads a nonuniform
+                                                   //     element's length from another lane, so SGL asks it at uniform indices)
                                                    //     SGL's @view_index; dx12's ViewInstancingTier, vulkan's multiview,
                                                    //     false on metal (amplification not wired yet) and webgpu)
                                                    //   | vertex_pipeline_stores (a vertex, geometry or tessellation stage writes

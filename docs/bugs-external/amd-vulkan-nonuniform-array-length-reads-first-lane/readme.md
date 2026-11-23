@@ -62,6 +62,7 @@ With `--vendor 8086` the Arc B580 (driver 0.406.958) prints the right lengths in
 ## What we do about it
 
 On vulkan, SGL asks such a length at uniform indices only, in its own SPIR-V and in the HLSL it hands DXC alike.
+It does so where sg reports `feature::nonuniform_length_workaround`, which its vulkan backend does on AMD hardware alone.
 A fixed array of up to 16 elements asks each element and selects the lane's.
 A larger or unbounded one takes a waterfall over the subgroup's first lane, in the compute and pixel stages.
 [The debt issue](../../../libs/graphics/shaped-graphics-language/docs/issues/debt-sgl-vulkan-element-length-asked-at-uniform-indices.md) says what is still uncovered and when to remove it.

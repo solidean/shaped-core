@@ -191,6 +191,8 @@ public:
             // WebGPU has no multiview; WebXR hands out a texture per view instead
             return false;
         case sg::feature::pixel_view_read_workaround:
+        case sg::feature::nonuniform_atomic_workaround:
+        case sg::feature::nonuniform_length_workaround:
             return false;
         case sg::feature::ray_tracing_motion_blur:
             // the polyfill's walk places a moving instance at the ray's time
