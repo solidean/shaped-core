@@ -261,3 +261,26 @@ TEST("sgl check - a mixed query that skips triangles is a query of its boxes")
                  "    let _ = c.commit(c.t_min)\n"
                  "scene.hits[id.x] = float4(q.hit.t)\n");
 }
+
+TEST("sgl check - a discarded query evaluates its arguments, and a reported query rule is reported once")
+{
+    // CHK-55: `let _ = world.query(r)` is a query nobody steps through, whatever its arguments
+    accepted("fun lane(id: int3) -> int => id.x & 0xff\n",
+             "let _ = scene.world.query(probe(), mask = lane(id))\nlet _ = scene.mixed.query(probe())\n"
+             "scene.hits[id.x] = float4(1.0)\n");
+    // CHK-541: a query a call hands on is reported where it is used, and the scan finds it no second time
+    auto const report
+        = reports_of_body("fun same(q: trace_query[.triangles]) -> trace_query[.triangles]:\n    return q\n",
+                          "let q = scene.world.query(probe())\nfor c in q.candidates:\n    c.commit()\n"
+                          "scene.hits[id.x] = float4(same(q).hit.t)\n");
+    auto escapes = 0;
+    for (auto at = report.find("query-escapes"); at >= 0; at = report.find("query-escapes", at + 1))
+        ++escapes;
+    CHECK(escapes == 1).dump("report", report);
+    // CHK-542: a second loop is misplaced, and no escape besides
+    auto const twice
+        = reports_of_body("", "let q = scene.world.query(probe())\nfor c in q.candidates:\n    c.commit()\n"
+                              "for c in q.candidates:\n    c.commit()\n");
+    CHECK(twice.contains("query-traversal-misplaced")).dump("report", twice);
+    CHECK(!twice.contains("query-escapes")).dump("report", twice);
+}

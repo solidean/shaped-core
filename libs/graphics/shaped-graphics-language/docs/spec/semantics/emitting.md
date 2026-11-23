@@ -814,7 +814,7 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
 * **EMIT-277** Every exit that leaves a candidate loop before the traversal is done writes the target's abort ([why](why/emitting.md#emit-277)).
   Those are a `break`, a `return`, a `yield` out of a value block around the loop, and a commit that ends the search.
   The abort comes after the value the exit hands on, which may read the candidate, and before the exit itself.
-  A `discard` ends the invocation, and its traversal with it.
+  A `discard` writes no abort: the invocation goes on as a helper (EMIT-238), which writes nothing, and its traversal with it.
   A commit that ends the search marks it, and the abort follows once the candidate's body is done, so the body still reads its candidate.
   So a query is ended wherever it is left, and no target keeps a traversal live past the loop.
 * **EMIT-185** A text keeps its entry point's float guarantee (CHK-435), or the compile refuses with `float-guarantee-not-kept`, naming the function that asked.

@@ -323,3 +323,130 @@ binding scene:
     REQUIRE(commit >= 0);
     CHECK(test < commit).dump("text", text);
 }
+
+TEST("sgl emit - a commit that ends the search marks it only where it commits, in an or, an if or a statement")
+{
+    // EMIT-277: the mark is as conditional as the commit, so neither comes before the test that guards it
+    struct shape
+    {
+        cc::string_view body;
+        cc::string_view test;
+    };
+    shape const shapes[] = {
+        {"        if c.t < 10.0 or c.commit() => n += 1\n", "q.CandidateTriangleRayT() < 10.0"},
+        {"        let x = if c.t < 5.0 => c.commit() else false\n        if x => n += 1\n", "q.CandidateTriangleRayT() "
+                                                                                            "< 5.0"},
+        {"        if c.primitive_index == 2:\n            c.commit()\n", "int(q.CandidatePrimitiveIndex()) == 2"},
+    };
+    for (auto const& s : shapes)
+    {
+        auto const source = cc::format(R"(require ray_query
+
+binding scene:
+    world: acceleration_structure[.triangles]
+    hits: mut buffer[float4]
+
+@compute(64) fun main(@thread_id id: int3){{scene}}:
+    let r = ray(origin = pos3(id.x as float, 0.5, -1.0), direction = vec3(0.0, 0.0, 1.0))
+    let q = scene.world.query(r, flags = ray_flags.accept_first_hit_and_end_search)
+    let mut n = 0
+    for c in q.candidates:
+{}    scene.hits[id.x] = float4(q.hit.t, n as float, 0.0, 0.0)
+)",
+                                       s.body);
+        auto const text = text_of_entry(source, "main", target::hlsl_dx12);
+        auto const view = cc::string_view(text);
+        auto const test = view.find(s.test);
+        auto const commit = view.find("q.CommitNonOpaqueTriangleHit();");
+        auto const mark = view.find("ended = true;");
+        REQUIRE(test >= 0);
+        REQUIRE(commit >= 0);
+        REQUIRE(mark >= 0);
+        CHECK(test < commit).dump("text", text);
+        CHECK(commit < mark).dump("text", text);
+    }
+}
+
+TEST("sgl emit - a pixel stage's color, a value block and a loop's value read the candidate before the abort")
+{
+    // EMIT-277: the minted struct of a pixel stage's return, an `if` returned and a sum over a `loop:`'s value are
+    // each evaluated before the abort the return hands on past
+    auto const source = cc::string_view(R"(require ray_query
+
+binding scene:
+    world: acceleration_structure[.triangles]
+
+struct varyings:
+    @position position: hpos4
+
+fun via_block(r: ray){scene} -> float:
+    let q = scene.world.query(r)
+    for c in q.candidates:
+        if c.primitive_index > 2 => return if c.t > 3.0 => c.t else c.t_min
+    return -1.0
+
+fun via_loop(r: ray){scene} -> float:
+    let q = scene.world.query(r)
+    for c in q.candidates:
+        let v = loop:
+            if c.t > 2.0 => break c.t
+            break 0.0
+        if v > 0.0 => return v + c.t
+    return -1.0
+
+@pixel fun ps(p: varyings){scene} -> float4:
+    let r = ray(origin = pos3(p.position.x, 0.5, -1.0), direction = vec3(0.0, 0.0, 1.0))
+    let q = scene.world.query(r)
+    for c in q.candidates:
+        if c.t > 1.0 => return float4(c.t, via_block(r), via_loop(r), 1.0)
+    return float4(0.0)
+)");
+    for (auto const t : {target::hlsl_dx12, target::msl})
+    {
+        auto const text = text_of_entry(source, "ps", t);
+        auto const view = cc::string_view(text);
+        auto const abort = t == target::msl ? cc::string_view(".abort();") : cc::string_view(".Abort();");
+        auto const read = t == target::msl ? cc::string_view("get_candidate") : cc::string_view("Candidate");
+        auto aborts = 0;
+        for (auto at = view.find(abort); at >= 0; at = view.find(abort, at + 1))
+        {
+            ++aborts;
+            // what follows the abort is the exit: a `break` of an inlined return, or the stage's own `return`
+            auto end = view.find("break;", at);
+            auto const returned = view.find("return ", at);
+            if (end < 0 || (returned >= 0 && returned < end))
+                end = returned;
+            REQUIRE(end > at);
+            auto const next = view.find(read, at);
+            CHECK((next < 0 || next > end)).dump("text", text);
+        }
+        CHECK(aborts == 3).dump("text", text);
+    }
+}
+
+TEST("sgl emit - a return that leaves no candidate loop keeps its value where it was")
+{
+    // EMIT-277: only a leave that aborts a traversal reads its value into a local of its own first
+    auto const source = cc::string_view(R"(require ray_query
+
+binding scene:
+    world: acceleration_structure[.triangles]
+    hits: mut buffer[float4]
+
+fun nearest(r: ray, k: float){scene} -> float:
+    let q = scene.world.query(r)
+    for c in q.candidates:
+        let w = loop:
+            break c.t * k
+        if w > 100.0 => continue
+        c.commit()
+    return q.hit.t * k
+
+@compute(64) fun main(@thread_id id: int3){scene}:
+    let r = ray(origin = pos3(id.x as float, 0.5, -1.0), direction = vec3(0.0, 0.0, 1.0))
+    scene.hits[id.x] = float4(nearest(r, 2.0))
+)");
+    auto const text = text_of_entry(source, "main", target::hlsl_dx12);
+    CHECK(!text.contains("Abort()")).dump("text", text);
+    CHECK(!text.contains(" left")).dump("text", text);
+}
