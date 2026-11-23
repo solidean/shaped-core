@@ -281,7 +281,7 @@ TEST("sgl query - a query in a candidate loop's body is a trace of its own")
 
 TEST("sgl query - the decal lookup collects every decal a point lies in, by the instance's mask")
 {
-    // the example of raytracing.md's "The decal lookup", on the interpreter
+    // the example of libs/graphics/shaped-graphics-language/docs/spec/raytracing.md's "The decal lookup", on the interpreter
     CHECK(failures_of("fun gathered(p: float3){scenes} -> int4:\n"
                       "    let r = ray(origin = pos3(p.x, p.y, p.z), direction = vec3(0.0, 0.0, 1.0), t_max = 1.0e-4)\n"
                       "    @indexed(.memory) let mut ids = int[8].filled(-1)\n"

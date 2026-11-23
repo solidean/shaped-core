@@ -707,7 +707,7 @@ ASYNC_INVOCABLE_TEST("sg - an inline trace of a mixed structure without decision
     co_await trace_mixed_grid(ctx, pipeline, false);
 }
 
-// raytracing.md's decal lookup, a candidate loop that commits nothing (CHK-553 to CHK-559).
+// libs/graphics/shaped-graphics-language/docs/spec/raytracing.md's decal lookup, a candidate loop that commits nothing (CHK-553 to CHK-559).
 // One BLAS of the unit box around the origin, opaque, and instances of it along x: ids 100 to 103 of mask 2 at x = 1,
 // 1.6, 3 and 5, and id 104 of mask 1 at x = 5 again, which the lookup's mask leaves out.
 // Each of 64 threads looks up the point (k / 8, 0.1, -0.2), and finds every decal of mask 2 whose box holds it.
