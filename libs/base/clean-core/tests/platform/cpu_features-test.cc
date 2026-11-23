@@ -35,6 +35,14 @@ TEST("cc cpu_features - the CPU has every extension the build was compiled for")
     CHECK(f.avx);
     CHECK(f.x86_64_v2);
 #endif
+#if defined(__ADX__)
+    CHECK(f.adx);
+#endif
+#if defined(CC_X64_ADX)
+    // SC_X64_LEVEL=v3-adx: v3 and ADX.
+    CHECK(f.adx);
+    CHECK(f.x86_64_v3);
+#endif
 #if defined(__FMA__)
     CHECK(f.fma);
 #endif

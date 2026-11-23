@@ -38,6 +38,7 @@ cpu_features detect()
     f.lzcnt = bit(ext1.ecx, 5);
     f.bmi1 = bit(l7.ebx, 3);
     f.bmi2 = bit(l7.ebx, 8);
+    f.adx = bit(l7.ebx, 19);
 
     f.avx = os_saves_ymm && bit(l1.ecx, 28);
     f.fma = f.avx && bit(l1.ecx, 12);
