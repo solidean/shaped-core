@@ -3,6 +3,8 @@ created: 2026-11-19
 refs:
   - test: "sg - an anisotropic sampler is half way between two mips at the half level, its bias included"
   - file: libs/graphics/shaped-graphics/backends/webgpu/src/shaped-graphics/backends/webgpu/webgpu_format.cc
+claimed-by: Claude (for Julius Nehring-Wirxel)
+claimed-at: 2026-11-23T10:23Z
 ---
 
 # webgpu drops a sampler's mip_lod_bias without a word
