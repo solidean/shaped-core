@@ -206,6 +206,16 @@ void write_memory_struct(babel::json::object_writer& o, sgl::described_memory_st
         if (!v.declared_in.empty())
             vo.write("declared_in", cc::string_view(v.declared_in));
         vo.write("discriminant", v.is_discriminant);
+        if (!v.leaves.empty())
+        {
+            auto leaves = vo.write_array("leaves");
+            for (auto const& [path, size] : v.leaves)
+            {
+                auto lo = leaves.write_object(babel::json::layout::compact);
+                lo.write("path", cc::string_view(path));
+                lo.write("size", size);
+            }
+        }
     }
 }
 

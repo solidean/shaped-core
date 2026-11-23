@@ -973,6 +973,20 @@ struct flattener
     flat_case flatten_struct_case_parts(ast::case_expr const& node, label_id value_block);
     /// CHK-549: `value` stored into `field`, behind a guard where its range may not hold it.
     flat_expr_id guard_range(flat_expr_id value, member_info const& field, ast::expr_id from);
+    /// While a part of a variant field is assigned: that field's expression, read as the local it was decoded into.
+    struct substitution
+    {
+        i32 file = -1;
+        ast::expr_id expr = ast::expr_id::none;
+        local_id local = local_id::none;
+    };
+    substitution substituted;
+    /// The variant field nearest the root of assignment target `target` that a part of it is assigned, none otherwise.
+    [[nodiscard]] ast::expr_id variant_part_of(ast::expr_id target) const;
+    /// CHK-543: `x.f0.y = v`, the field decoded into a local, the part assigned there, and the field encoded again.
+    bool flatten_variant_part_assign(origin from, ast::assign_stmt const& assign, ast::expr_id field);
+    /// The words of variant field `index` of the carrier `object` written with the substitutable `value`.
+    bool store_variant(origin from, ast::member const& member, i32 index, flat_expr_id value, ast::expr_id target);
     /// `x.ior = v` and `x.ior op= v` of a variant field, as an assignment to each of its words; false where it failed.
     bool flatten_variant_assign(origin from, ast::assign_stmt const& assign);
 

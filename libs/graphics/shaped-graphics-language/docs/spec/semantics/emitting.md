@@ -971,6 +971,7 @@ The C++ struct a package generates is that layout byte for byte, padding include
   The fields `@cases` shares are placed first, and each case's before those of the cases it holds.
   `describe` reports a memory struct's cases and variant fields.
   From them slib's generator writes each case's `is_` test, an accessor and a setter per variant field, and a factory per leaf a constructor builds.
+  A variant field of a struct or an array is its leaves packed, which its host type's layout is not, so its accessor copies it leaf by leaf, by the paths `describe` reports.
 * **EMIT-112** Each target is made to follow the rule ([why](why/emitting.md#emit-112)).
   WGSL's storage rule is this one, and its uniform rule too, so WGSL writes every root as it is.
   MSL's is this one but for a 3-vector, which takes 16 bytes there: a 3-vector whose tail holds a value is its `packed_` type in the root's memory form (EMIT-62).

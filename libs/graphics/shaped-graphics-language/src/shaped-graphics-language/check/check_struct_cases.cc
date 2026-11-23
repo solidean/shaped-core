@@ -62,6 +62,8 @@ void checker::declare_case_constructors(symbol_id owner, i32 file, ast::range_of
             auto const* const c = ast.at(member).node.try_as<ast::struct_case_decl>();
             if (c == nullptr || c->name.empty())
                 continue;
+            // CHK-552: a case's methods and properties are its struct's, whose receiver is that case's
+            declare_members(owner, file, c->members);
             if (holds_cases(ast, c->members))
             {
                 self(self, c->members);
@@ -281,8 +283,12 @@ void checker::compile_struct_cases(symbol_id id, type_id type, i32 file, ast::st
                 if (c.has_payload)
                     variants.back().is_named_only_in_case = true;
             }
-            else if (!md.node.is<ast::struct_case_decl>() && !md.node.is<ast::invalid_decl>())
-                unsupported(file, span_of(file, member), "a member of a case other than a field or a case");
+            // a method and a property are symbols of the type scope, compiled as the struct's own are (CHK-552)
+            else if (!md.node.is<ast::struct_case_decl>() && !md.node.is<ast::invalid_decl>()
+                     && !md.node.is<ast::fun_decl>() && !md.node.is<ast::property_decl>())
+                unsupported(file, span_of(file, member),
+                            "a member of a case other than a field, a case, a method or a "
+                            "property");
         }
     }
 
@@ -1362,19 +1368,14 @@ cc::vector<checker::narrowing> checker::narrowings_of(function_scope& scope, ast
     if (auto const* const test = node.try_as<ast::case_test>())
     {
         auto const& where = tables_of(file).target_at(condition);
-        auto const* const name = ast.at(test->value).node.try_as<ast::name>();
-        if (where.kind != target_kind::struct_cases || name == nullptr)
+        auto const key = narrowable_key(scope, test->value);
+        auto const type = tables_of(file).type_at(test->value);
+        if (where.kind != target_kind::struct_cases || key.empty() || type == error_type || !out.at(type).has_cases())
             return {};
-        auto const text = text_of(file, name->where);
-        auto const* const local = scope.find_local(text);
-        // CHK-542: a `mut` name may be assigned between the test and a read, so nothing narrows it
-        if (local == nullptr || local->is_mut || local->is_captured || local->type == error_type
-            || !out.at(local->type).has_cases())
-            return {};
-        auto const every = out.at(local->type).every_leaf();
-        auto const known = local->cases != 0 ? local->cases : every;
+        auto const every = out.at(type).every_leaf();
+        auto const known = cases_of(file, test->value, type);
         auto const tested = u32(where.index);
-        return {{.name = text, .cases = holds ? known & tested : known & ~tested & every}};
+        return {{.name = key, .cases = holds ? known & tested : known & ~tested & every, .type = type}};
     }
     auto const* const call = node.try_as<ast::call>();
     if (call == nullptr || !sgl::is_valid(call->op))
@@ -1458,13 +1459,53 @@ cc::vector<checker::narrowing> checker::join(cc::span<cc::vector<narrowing> cons
 void checker::narrow(function_scope& scope, cc::span<narrowing const> narrowings)
 {
     for (auto const& n : narrowings)
+    {
+        // a path is no name, so it stands among the locals under a key nothing but `note_path_cases` looks up
+        auto shadow = local_name{.name = n.name, .type = n.type};
         if (auto const* const local = scope.find_local(n.name))
-        {
-            auto shadow = *local;
-            shadow.cases = n.cases;
-            shadow.depth = scope.depth;
-            scope.locals.push_back(shadow);
-        }
+            shadow = *local;
+        shadow.cases = n.cases;
+        shadow.depth = scope.depth;
+        scope.locals.push_back(shadow);
+    }
+}
+
+cc::string_view checker::narrowable_key(function_scope const& scope, ast::expr_id expr) const
+{
+    auto const file = scope.file;
+    auto const& ast = ast_of(file);
+    if (!ast::is_valid(expr))
+        return {};
+    auto const& node = ast.at(expr).node;
+    // the receiver of a method or a property is a value no body assigns
+    if (node.is<ast::self_ref>())
+        return scope.find_local("self") != nullptr ? cc::string_view("self") : cc::string_view();
+    if (auto const* const n = node.try_as<ast::name>())
+    {
+        // CHK-542: a `mut` name may be assigned between the test and a read, so nothing narrows it
+        auto const* const local = scope.find_local(text_of(file, n->where));
+        auto const is_value = local != nullptr && !local->is_mut && !local->is_captured
+                           && (local->where.kind == target_kind::local || local->where.kind == target_kind::parameter);
+        return is_value ? text_of(file, n->where) : cc::string_view();
+    }
+    // a field of such a name holds what it held, so a path of fields narrows as the name does
+    auto const* const m = node.try_as<ast::member>();
+    auto const kind = tables_of(file).target_at(expr).kind;
+    if (m == nullptr || (kind != target_kind::field && kind != target_kind::variant_field)
+        || narrowable_key(scope, m->object).empty())
+        return {};
+    return text_of(file, span_of(file, expr));
+}
+
+void checker::note_path_cases(function_scope const& scope, ast::expr_id id)
+{
+    if (!ast_of(scope.file).at(id).node.is<ast::member>())
+        return;
+    auto const key = narrowable_key(scope, id);
+    if (key.empty())
+        return;
+    if (auto const* const narrowed = scope.find_local(key))
+        set_cases(scope.file, id, narrowed->cases);
 }
 
 type_id checker::check_struct_case(function_scope& scope,
@@ -1487,9 +1528,8 @@ type_id checker::check_struct_case(function_scope& scope,
         return error_type;
     }
     // the arms narrow a name that is no `mut`, as `is` does
-    auto const* const name = ast.at(node.value).node.try_as<ast::name>();
-    auto const* const local = name != nullptr ? scope.find_local(text_of(file, name->where)) : nullptr;
-    auto const is_narrowed = local != nullptr && !local->is_mut && !local->is_captured;
+    auto const key = narrowable_key(scope, node.value);
+    auto const is_narrowed = !key.empty();
     auto remaining = cases_of(file, node.value, scrutinee);
 
     auto result = yields_value ? expected : checked_module::void_type;
@@ -1529,7 +1569,7 @@ type_id checker::check_struct_case(function_scope& scope,
         auto const visible = scope.locals.size();
         if (is_narrowed && selected != 0)
         {
-            narrowing const one[] = {{.name = text_of(file, name->where), .cases = selected}};
+            narrowing const one[] = {{.name = key, .cases = selected, .type = scrutinee}};
             narrow(scope, one);
         }
         auto arm_type = type_id::none;
@@ -1653,4 +1693,40 @@ void checker::judge_range(i32 file, ast::expr_id value, member_info const& field
         report(diagnostic_kind::literal_not_representable, file, span_of(file, value),
                cc::format("{} holds {} to {}, and not {}", field.name, field.range_first, field.range_last,
                           number.integer));
+}
+
+// ---- a case's own methods and properties --------------------------------------------------------------------------
+
+u32 checker::receiver_cases_of(symbol_id id)
+{
+    auto const owner = out.at(id).owner;
+    if (!is_valid(owner) || out.at(owner).kind != symbol_kind::structure)
+        return 0;
+    auto const file = out.at(owner).file;
+    auto const& ast = ast_of(file);
+    auto const* const s = ast.at(out.at(owner).declaration).node.try_as<ast::struct_decl>();
+    if (s == nullptr || !declares_cases(ast, *s))
+        return 0;
+    // the case whose block holds the declaration, at any depth
+    auto const declaration = out.at(id).declaration;
+    auto const find = [&](auto const& self, ast::range_of<ast::decl_id> members) -> ast::decl_id
+    {
+        for (auto const member : ast.at(members))
+            if (auto const* const c = ast.at(member).node.try_as<ast::struct_case_decl>())
+            {
+                for (auto const inner : ast.at(c->members))
+                    if (inner == declaration)
+                        return member;
+                if (auto const deeper = self(self, c->members); ast::is_valid(deeper))
+                    return deeper;
+            }
+        return ast::decl_id::none;
+    };
+    auto const in_case = find(find, s->members);
+    if (!ast::is_valid(in_case) || demand(owner, file, s->name) != symbol_state::checked)
+        return 0;
+    for (auto const& c : out.at(out.at(out.at(owner).type).struct_cases))
+        if (c.case_declaration == in_case)
+            return c.leaves;
+    return 0;
 }

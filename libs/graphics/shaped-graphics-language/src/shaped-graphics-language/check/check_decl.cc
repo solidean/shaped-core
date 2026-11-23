@@ -2355,7 +2355,11 @@ void checker::compile_function(symbol_id id)
             accepts_cases = nullptr;
         }
         else if (is_receiver)
+        {
             type = receiver;
+            // CHK-552: a method a case's block declares takes a value of that case
+            cases = receiver_cases_of(id);
+        }
         else
             report(diagnostic_kind::missing_type, file, span_of(file, p.form), name);
         allows_function_type = false;
@@ -2579,7 +2583,8 @@ void checker::compile_property(symbol_id id)
         is_failed = true;
     }
 
-    auto const parameters = cc::vector<parameter>{{.name = "self", .type = self}};
+    // CHK-552: a property a case's block declares reads a value of that case
+    auto const parameters = cc::vector<parameter>{{.name = "self", .type = self, .cases = receiver_cases_of(id)}};
     out.symbols.own(index_of(id)).info = i32(out.functions.size());
     out.functions.push_back({
         .symbol = id,

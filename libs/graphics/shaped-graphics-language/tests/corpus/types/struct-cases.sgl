@@ -78,6 +78,54 @@ test:
     b.hi = float3(5.0)
     b.lo.x == 0.0 and b.hi.y == 5.0
 
+// a method or a property in a case's block takes a value of that case, and its `self` reads the case's fields
+struct light:
+    intensity: float
+    case point(range: float):
+        falloff => self.intensity / (self.range * self.range)
+        fun scaled(self, by: float) -> light.point => light.point(self.intensity * by, self.range)
+    case sun:
+        direction: float3
+        fun is_overhead(self) => self.direction.y > 0.99
+
+test light.point(8.0, 2.0).falloff == 2.0
+test light.sun(1.0, float3(0.0, 1.0, 0.0)).is_overhead()
+
+fun dimmed(l: light) -> float:
+    if l is .point:
+        return l.scaled(0.5).falloff
+    return l.intensity
+
+test dimmed(light.point(8.0, 2.0)) == 1.0
+
+// a value that may be in another case is no receiver of it
+@expect(error = "type-mismatch")
+test:
+    let l: light = light.sun(1.0, float3(0.0, 1.0, 0.0))
+    l.falloff > 0.0
+
+// a path of fields of a name that is no `mut` narrows as the name does
+struct scene_object:
+    id: int
+    body: shape
+
+fun radius_of(o: scene_object) -> float:
+    if o.body is .sphere:
+        return o.body.radius
+    return case o.body:
+        .disk => o.body.radius
+        _ => 0.0
+
+test radius_of(scene_object(1, shape.sphere(float3(0.0), float3(0.0), 4.0))) == 4.0
+test radius_of(scene_object(2, shape.disk(float3(0.0), float3(1.0), 3.0))) == 3.0
+
+// a part of a field of a case is a place where the value is known to be in that case
+test:
+    let mut b: shape.box = shape.box(float3(0.0), float3(0.0), float3(1.0))
+    b.hi.y = 7.0
+    b.lo.x += 2.0
+    b.hi.y == 7.0 and b.hi.x == 1.0 and b.lo.x == 2.0
+
 // `as` states a case the program knows from elsewhere, which a test checks
 test:
     let s: shape = shape.disk(float3(0.0), float3(1.0), 2.0)
@@ -167,3 +215,8 @@ binding scene:
     scene.areas[id.x] = area_of(s)
     if s is .sphere:
         scene.shapes[id.x] = grown(s, 1.0)
+    // a part of a field of a case, and a case's own method
+    let mut b: shape.box = shape.box(float3(0.0), float3(0.0), float3(1.0))
+    b.hi.y = scene.areas[id.x]
+    let l = light.point(b.hi.y, 2.0)
+    scene.areas[id.x] = l.scaled(2.0).falloff

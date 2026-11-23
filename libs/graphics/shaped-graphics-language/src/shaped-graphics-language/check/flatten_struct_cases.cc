@@ -726,19 +726,77 @@ bool flattener::flatten_variant_assign(origin from, ast::assign_stmt const& assi
         add_stmt(from, flat_let{.local = local, .value = value});
         value = local_ref(local, assign.value);
     }
+    return store_variant(from, member, where.index, value, assign.target);
+}
+
+bool flattener::store_variant(origin from, ast::member const& member, i32 index, flat_expr_id value, ast::expr_id target)
+{
+    auto const carrier = tables().type_at(member.object);
+    auto const& t = c.out.at(carrier);
+    auto const& v = c.out.at(t.variant_fields)[index];
     auto words = cc::vector<flat_expr_id>();
-    if (!encode_words(value, v.type, assign.value, words))
+    if (!encode_words(value, v.type, target, words))
         return false;
     auto const uint_type = c.prelude_type(builtins::k_uint);
     for (auto w = isize(0); w < words.size(); ++w)
     {
-        auto const object = w == 0 ? place : flatten_expr(member.object);
-        auto const word = add_expr(uint_type, assign.target,
-                                   flat_member{.object = object, .member = t.first_word + v.word + i32(w)});
-        judge_decision_store(word, assign.target);
+        auto const object = flatten_expr(member.object);
+        auto const word
+            = add_expr(uint_type, target, flat_member{.object = object, .member = t.first_word + v.word + i32(w)});
+        judge_decision_store(word, target);
         add_stmt(from, flat_assign{.place = word, .value = words[w]});
     }
     return true;
+}
+
+ast::expr_id flattener::variant_part_of(ast::expr_id target) const
+{
+    auto found = ast::expr_id::none;
+    for (auto e = target; ast::is_valid(e);)
+    {
+        // a field already decoded is the root of what is left
+        if (e == substituted.expr && file() == substituted.file)
+            break;
+        auto const& node = ast().at(e).node;
+        if (auto const* const m = node.try_as<ast::member>())
+        {
+            if (e != target && tables().target_at(e).kind == target_kind::variant_field)
+                found = e;
+            e = m->object;
+        }
+        else if (auto const* const i = node.try_as<ast::index>())
+            e = i->object;
+        else
+            break;
+    }
+    return found;
+}
+
+bool flattener::flatten_variant_part_assign(origin from, ast::assign_stmt const& assign, ast::expr_id field)
+{
+    auto const& member = ast().at(field).node.as<ast::member>();
+    auto const& where = tables().target_at(field);
+    auto const carrier = tables().type_at(member.object);
+    auto const& v = c.out.at(c.out.at(carrier).variant_fields)[where.index];
+    auto const object = flatten_expr(member.object);
+    if (!is_valid(object))
+        return false;
+    if (has_array_index(object))
+    {
+        failure_detail = "a field of a case of an array's element as a place, which is not supported yet";
+        mark_failed();
+        return true;
+    }
+    // the field as a local, the part assigned there by the assignment's own path, and the field written back whole
+    auto const local = add_local(local_kind::var, v.name, v.type);
+    add_stmt(from, flat_var{.local = local,
+                            .value = over_value(object, v.type, field, false, [&](flat_expr_id o)
+                                                { return read_variant(o, carrier, where.index, field); })});
+    auto const outer = substituted;
+    substituted = {.file = file(), .expr = field, .local = local};
+    flatten_assign(from, assign);
+    substituted = outer;
+    return store_variant(from, member, where.index, local_ref(local, field), assign.target);
 }
 
 // ---- fields with a range ----------------------------------------------------------------------------------------------

@@ -9,6 +9,9 @@ auto sgl::check::impl::flattener::flatten_expr(ast::expr_id id) -> flat_expr_id
     if (!ast::is_valid(id))
         return fail();
     auto const at = cursor_scope(*this, origin{.file = file(), .expr = id});
+    // CHK-543: the variant field a part of which is being assigned is the local it was decoded into
+    if (id == substituted.expr && file() == substituted.file)
+        return local_ref(substituted.local, id);
     auto const& e = ast().at(id);
     auto const type = tables().type_at(id);
     auto const& where = tables().target_at(id);

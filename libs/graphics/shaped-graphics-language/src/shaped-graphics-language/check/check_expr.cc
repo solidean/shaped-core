@@ -79,7 +79,8 @@ void checker::check_body_of(symbol_id id, i32 instance)
         if (has_receiver && i == 0)
         {
             scope.receiver = type;
-            scope.locals.push_back({.name = "self", .where = {.kind = target_kind::receiver}, .type = type});
+            scope.locals.push_back(
+                {.name = "self", .where = {.kind = target_kind::receiver}, .type = type, .cases = p.cases});
             continue;
         }
         // CHK-54: a parameter may have the name of a module-level symbol, which it hides in the body.
@@ -642,6 +643,8 @@ type_id checker::check_expr(function_scope& scope, ast::expr_id expr)
                 report_capture(scope, where, *local);
                 return error_type;
             }
+            // CHK-552: a case's own method knows its receiver is in that case
+            set_cases(file, expr, local->cases);
             return local->type;
         },
         [&](ast::void_ref const&) { return void_type; },
@@ -1114,7 +1117,10 @@ type_id checker::check_member(function_scope& scope, ast::expr_id id, ast::membe
         index = -1;
     if (index < 0 && type.has_cases())
         if (auto const variant = check_variant_member(file, id, member, object); variant.has_value())
+        {
+            note_path_cases(scope, id);
             return variant.value();
+        }
     // CHK-409: one letter of the second alphabet is its field, as a field's own letter is
     if (index < 0 && name.size() == 1 && type.has_swizzles)
         for (auto i = isize(0); i < type.swizzle_alias.size(); ++i)
@@ -1123,6 +1129,8 @@ type_id checker::check_member(function_scope& scope, ast::expr_id id, ast::membe
     if (index >= 0)
     {
         set_target(file, id, {.kind = target_kind::field, .symbol = type.symbol, .index = i32(index)});
+        // CHK-542: a path a test narrowed is known to be what it narrowed it to
+        note_path_cases(scope, id);
         return out.at(type.members)[index].type;
     }
     // CHK-386: a swizzle is found where a field is, so no function in scope ever stands for `v.xy`

@@ -390,6 +390,7 @@ enum light_kind:
   A pattern is a leading dot `.c`, a case written out `S.c`, or patterns joined by `or`.
   A value of a struct without cases is `type-mismatch`, and a pattern that names no case of it `unknown-member`.
   **`is` narrows**: where `v` names a local or a parameter that is no `mut`, what a test says of it holds of the name wherever control reaches only through that test.
+  A path of fields of such a name, `o.body`, narrows as the name does, and so does `self`, which no body assigns.
   So a branch of an `if` sees its condition hold and each condition before it fail.
   The second operand of `and` sees the first hold, that of `or` the first fail, and `not` swaps the two.
   A `while` body sees its condition hold, and the statements after an `assert` see its condition hold.
@@ -401,7 +402,8 @@ enum light_kind:
   A field of the paren list without a name is named by its position, `.0`, as a tuple's element is.
   Two fields one leaf holds differ in name, or the later one is `duplicate-declaration`.
   Two sibling cases' fields of one name are two fields whatever their types, and neither is read where the value may be in either case.
-  A variant field is a place where its object is one, and only as a whole: a part of one as a place, `v.f.x = 1.0`, is `unsupported-yet`.
+  A variant field is a place where its object is one, and so is a part of it, `v.f.x = 1.0`: the field is read, the part assigned, and the field written back whole.
+  A part of one as a `mut` argument is `unsupported-yet`, since a body would write through no place of its own.
   A variant field holds a scalar of 32 or 16 bits, a plain enum, a vector of those, or a struct or an array of what it holds; a 64-bit value or a matrix there is `unsupported-yet`.
   The tag and the words of the carrier (EMIT-275) are no member a name reaches, and a common field of their names, `_tag` or `_w0`, is `duplicate-declaration`.
 * **CHK-544** A struct with cases that has a level its `@when`s do not tell apart holds a **tag**, a `uint`.
@@ -435,6 +437,9 @@ enum light_kind:
 * **CHK-550** `v as S.c` of a value of `S` states that it is in the leaves `S.c` names, which the check pass then knows of its result.
   Where `v` is known to be in them already it is `v` itself; otherwise it is guarded by LEGAL-73, unless `S` is `@tag(.external)`.
   `v as S.c` of a value of another type is `no-matching-overload`.
+* **CHK-552** A method or a property a case's block declares is one of its struct's type scope, whose receiver takes a value of that case's leaves alone.
+  So `self` is narrowed to the case in its body, and a call whose receiver may be in another case is `type-mismatch` by CHK-541.
+  Two cases' methods of one name and one signature are `duplicate-declaration` by CHK-241, since a call resolves by its arguments and never by a case.
 * **CHK-551** `case v:` over a struct with cases takes its arms apart by the leaves their patterns name (CHK-542), never by `==`.
   An arm runs for the leaves its patterns name that no arm before it took, and narrows the scrutinee to them where CHK-542 narrows it.
   An arm left no leaf is `unreachable-code`.
@@ -2099,7 +2104,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 |---|---|
 | `unsupported-yet` | CHK-540, CHK-541, CHK-543, CHK-549, CHK-8, CHK-61, CHK-134, CHK-213, CHK-237, CHK-291, CHK-299, CHK-307, CHK-314, CHK-321, CHK-329, CHK-333, CHK-338, CHK-339, CHK-344, CHK-346, CHK-347, CHK-350, CHK-352, CHK-353, CHK-357, CHK-366, CHK-374, CHK-381, CHK-383, CHK-387, CHK-389, CHK-397, CHK-431, CHK-432, CHK-434, CHK-516, CHK-522, CHK-523, CHK-526, CHK-524, CHK-525, CHK-450, CHK-453, CHK-454, CHK-538 |
 | `member-not-allowed-here` | CHK-490 |
-| `duplicate-declaration` | CHK-540, CHK-543, CHK-12, CHK-28, CHK-241, CHK-347, CHK-351, CHK-530 |
+| `duplicate-declaration` | CHK-552, CHK-540, CHK-543, CHK-12, CHK-28, CHK-241, CHK-347, CHK-351, CHK-530 |
 | `dependency-cycle` | CHK-18, CHK-136 |
 | `unknown-module`, `use-of-own-module` | CHK-347 |
 | `module-cycle` | CHK-349 |
@@ -2116,7 +2121,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `invalid-attribute-arguments` | CHK-546, CHK-547, CHK-548, CHK-36, CHK-39, CHK-204, CHK-208, CHK-211, CHK-212, CHK-220, CHK-231, CHK-267, CHK-403, CHK-292, CHK-293, CHK-301, CHK-304, CHK-384, CHK-369, CHK-370, CHK-371, CHK-431, CHK-435, CHK-480, CHK-522, CHK-526, CHK-538 |
 | `binding-not-listed` | CHK-45, CHK-131, CHK-228 |
 | `as-precedence` | CHK-411 |
-| `type-mismatch` | CHK-541, CHK-542, CHK-52, CHK-56, CHK-77, CHK-112 to CHK-118, CHK-121, CHK-167, CHK-210, CHK-214, CHK-219, CHK-236, CHK-243, CHK-275, CHK-276, CHK-279, CHK-281, CHK-287, CHK-329, CHK-344, CHK-362, CHK-375, CHK-392, CHK-429, CHK-433, CHK-434 |
+| `type-mismatch` | CHK-552, CHK-541, CHK-542, CHK-52, CHK-56, CHK-77, CHK-112 to CHK-118, CHK-121, CHK-167, CHK-210, CHK-214, CHK-219, CHK-236, CHK-243, CHK-275, CHK-276, CHK-279, CHK-281, CHK-287, CHK-329, CHK-344, CHK-362, CHK-375, CHK-392, CHK-429, CHK-433, CHK-434 |
 | `not-assignable` | CHK-546, CHK-112, CHK-236, CHK-316, CHK-352, CHK-367, CHK-514, CHK-536, CHK-539 |
 | `read-before-assignment` | CHK-55 |
 | `missing-return` | CHK-125, CHK-236 |

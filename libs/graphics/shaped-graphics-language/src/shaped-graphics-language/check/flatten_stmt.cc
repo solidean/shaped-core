@@ -116,6 +116,13 @@ void sgl::check::impl::flattener::flatten_assign(origin from, ast::assign_stmt c
             return flatten_texel_store(from, assign, t);
     if (is_swizzled(assign.target) && sgl::is_valid(assign.op))
         return flatten_swizzle_assign(from, assign, c.text_of(file(), c.file_of(file()).at(assign.op).where));
+    // CHK-543: a part of a field of a case is assigned through the field decoded
+    if (auto const field = variant_part_of(assign.target); ast::is_valid(field) && sgl::is_valid(assign.op))
+    {
+        if (!flatten_variant_part_assign(from, assign, field))
+            mark_failed();
+        return;
+    }
     // CHK-543: a field of a case is assigned word by word
     if (tables().target_at(assign.target).kind == target_kind::variant_field && sgl::is_valid(assign.op))
     {

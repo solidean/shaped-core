@@ -50,3 +50,15 @@ TEST("slib sgl struct cases - a struct's @whens are its host's tests, and its fa
     CHECK(m.is_metal());
     CHECK(m.f0()[0] == 0.9f);
 }
+
+TEST("slib sgl struct cases - a struct a case holds is read and written through its accessor, leaf by leaf")
+{
+    // the words hold the segment's six floats packed, which the host segment's padded layout is not
+    auto const span = shaders::segment{.a = tg::vec3f(1, 2, 3), .b = tg::vec3f(4, 5, 6)};
+    auto c = shaders::curve::line(0.5f, span);
+    CHECK(c.is_line());
+    CHECK(c.span().a[2] == 3.0f);
+    CHECK(c.span().b[0] == 4.0f);
+    c.set_span(shaders::segment{.a = tg::vec3f(7), .b = tg::vec3f(8)});
+    CHECK(c.span().b[1] == 8.0f);
+}

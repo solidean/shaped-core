@@ -614,13 +614,14 @@ bool checker::judge_place(function_scope& scope, ast::expr_id expr, cc::string_v
         auto const kind = tables_of(file).target_at(root).kind;
         if ((kind == target_kind::overload || kind == target_kind::array_length) && !ast::is_valid(property))
             property = root;
-        // CHK-543: a field of a case is assigned whole, since it is the bits of its words rather than a place of its own
-        if (kind == target_kind::variant_field && root != expr)
+        // CHK-543: a part of a field of a case is assigned through its field, decoded and encoded again, which no
+        // body handed it as a place could do
+        if (kind == target_kind::variant_field && root != expr && !what.empty())
         {
             if (quiet_why != nullptr)
-                *quiet_why = "a part of a field of a case as a place is not supported yet";
+                *quiet_why = cc::format("a part of a field of a case as {} is not supported yet", what);
             else
-                unsupported(file, span_of(file, expr), "a part of a field of a case as a place; assign the whole field");
+                unsupported(file, span_of(file, expr), cc::format("a part of a field of a case as {}", what));
             return false;
         }
         // CHK-546: a field a `@when` reads says which case the value is, which an assignment would change under it

@@ -888,7 +888,7 @@ The 32 leaves are a mask of one word, which is what a case set is held as wherev
 ## CHK-543
 
 Two sibling cases that name a field alike share nothing by accident: sharing is declared, by `@cases`, so a field's offset never depends on what its siblings happen to call theirs.
-A part of a variant field as a place would need its words read, changed and written back, which nothing does yet.
+A part of a variant field as a place is its words read, changed and written back, which only an assignment does: a `mut` argument hands a place over, and the words are none.
 
 ## CHK-545
 

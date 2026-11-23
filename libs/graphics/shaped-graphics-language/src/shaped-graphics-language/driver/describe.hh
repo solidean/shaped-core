@@ -232,6 +232,10 @@ struct sgl::described_variant_field
     cc::string declared_in;
     /// Whether a `@when` reads it, so nothing but a constructor writes it.
     bool is_discriminant = false;
+    /// For a field of a struct or an array, which its words hold packed: each scalar's path within the host value,
+    /// `.center[1]`, and its bytes, in word order; empty for a scalar or a vector, whose host value is its words, and for
+    /// a value no host type holds leaf by leaf.
+    cc::vector<cc::pair<cc::string, i32>> leaves;
 };
 
 /// A struct that stands in GPU memory, placed by the rule of the one address space it is in (the spec's layout rules).

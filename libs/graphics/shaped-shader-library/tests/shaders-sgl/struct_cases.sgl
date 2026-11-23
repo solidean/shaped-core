@@ -26,9 +26,20 @@ struct material:
     case metal:
         f0: float3
 
+// a struct a case holds, which the host reaches through an accessor that copies its leaves one by one
+struct segment:
+    a: float3
+    b: float3
+
+struct curve:
+    width: float
+    case line(span: segment)
+    case dot
+
 binding scene:
     shapes: buffer[shape]
     materials: buffer[material]
+    curves: buffer[curve]
     results: mut buffer[float]
 
 fun radius_of(s: shape) -> float => case s:
@@ -42,4 +53,6 @@ fun ior_of(m: material) -> float => case m:
     .metal => 0.0
 
 @compute(64) fun measure(@thread_id id: int3){scene}:
-    scene.results[id.x] = radius_of(scene.shapes[id.x]) + ior_of(scene.materials[id.x])
+    let c = scene.curves[id.x]
+    let length = if c is .line => distance(c.span.a, c.span.b) else 0.0
+    scene.results[id.x] = radius_of(scene.shapes[id.x]) + ior_of(scene.materials[id.x]) + length

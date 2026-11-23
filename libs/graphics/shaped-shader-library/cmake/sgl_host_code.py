@@ -949,7 +949,7 @@ def is_layout_member(member_name: str) -> bool:
     return member_name == "_tag" or re.fullmatch(r"_w[0-9]+", member_name) is not None
 
 
-def case_accessors(struct: dict) -> list[dict]:
+def case_accessors(struct: dict, memory: dict | None = None) -> list[dict]:
     """Each variant field the host reaches, by the accessor it is reached through.
 
     Fields of one name in several cases are fields of their own, as SGL has them: each accessor is named after its case.
@@ -965,12 +965,20 @@ def case_accessors(struct: dict) -> list[dict]:
         for group in groups:
             first = group[0]
             known = HOST_TYPES.get(first["type"])
-            if known is None or known[1] != first["size"]:
+            leaves = first.get("leaves", [])
+            # a struct's words are its leaves packed, which its host type's layout is not: copied leaf by leaf
+            is_memory = known is None and bool(leaves) and memory is not None and first["type"] in memory
+            if is_memory:
+                known = (memory[first["type"]][0], first["size"])
+            elif known is None or known[1] != first["size"]:
                 continue
+            else:
+                leaves = []
             accessor = name if is_one else f"{first.get('declared_in') or 'shared'}_{name}"
             out.append({"accessor": accessor, "name": name, "type": known[0], "offset": first["offset"],
                         "size": first["size"], "cases": sorted({c for f in group for c in f["cases"]}),
-                        "discriminant": any(f["discriminant"] for f in group), "fields": group})
+                        "discriminant": any(f["discriminant"] for f in group), "fields": group, "leaves": leaves,
+                        "is_memory": is_memory})
     return out
 
 
@@ -996,7 +1004,7 @@ def factory_parameters(package: str, memory: dict, file: SglFile | None, struct:
             continue
         out.append((sized_host_type(package, memory, f"{where} member '{m['name']}'", m["type"], m["size"]), m["name"],
                     "member"))
-    accessors = case_accessors(struct)
+    accessors = case_accessors(struct, memory)
     for v in struct.get("variant_fields", []):
         if leaf["name"] not in v["cases"] or v["name"] in writes:
             continue
@@ -1012,7 +1020,7 @@ def struct_case_declarations(package: str, memory: dict, file: SglFile, struct: 
     for c in struct["cases"]:
         if c["condition"]:
             out.append(f"    [[nodiscard]] bool is_{c['name']}() const;\n")
-    for a in case_accessors(struct):
+    for a in case_accessors(struct, memory):
         cases = ", ".join(a["cases"])
         out.append(f"    [[nodiscard]] {a['type']} {a['accessor']}() const; ///< a field of {cases}\n")
         if not a["discriminant"]:
@@ -1028,7 +1036,7 @@ def struct_case_declarations(package: str, memory: dict, file: SglFile, struct: 
 
 def struct_case_definitions(package: str, memory: dict, namespace: str, file: SglFile | None, struct: dict) -> str:
     qualified = f"{namespace}::{struct['name']}"
-    accessors = case_accessors(struct)
+    accessors = case_accessors(struct, memory)
     out = ["\n"]
     for c in struct["cases"]:
         if c["condition"]:
@@ -1036,18 +1044,34 @@ def struct_case_definitions(package: str, memory: dict, namespace: str, file: Sg
     for a in accessors:
         holds = case_holds(struct, a)
         message = f"{a['name']} is a field of {', '.join(a['cases'])} alone"
-        out.append(f"{a['type']} {qualified}::{a['accessor']}() const\n{{\n")
+        # a struct of the file is named within its namespace, where the definition's result type does not stand
+        result_type = f"{namespace}::{a['type']}" if a["is_memory"] and not a["type"].startswith("::") else a["type"]
+        out.append(f"{result_type} {qualified}::{a['accessor']}() const\n{{\n")
         if holds:
             out.append(f"    CC_ASSERT({holds}, \"{message}\");\n")
         out.append(f"    auto value = {a['type']}();\n")
-        out.append(f"    static_assert(sizeof(value) == {a['size']});\n")
-        out.append(f"    cc::memcpy(&value, reinterpret_cast<cc::byte const*>(this) + {a['offset']}, sizeof(value));\n")
+        if a["leaves"]:
+            at = a["offset"]
+            for leaf in a["leaves"]:
+                out.append(f"    cc::memcpy(&value{leaf['path']}, reinterpret_cast<cc::byte const*>(this) + {at}, "
+                           f"{leaf['size']});\n")
+                at += 4
+        else:
+            out.append(f"    static_assert(sizeof(value) == {a['size']});\n")
+            out.append(f"    cc::memcpy(&value, reinterpret_cast<cc::byte const*>(this) + {a['offset']}, sizeof(value));\n")
         out.append("    return value;\n}\n\n")
         if not a["discriminant"]:
             out.append(f"void {qualified}::set_{a['accessor']}({a['type']} value)\n{{\n")
             if holds:
                 out.append(f"    CC_ASSERT({holds}, \"{message}\");\n")
-            out.append(f"    cc::memcpy(reinterpret_cast<cc::byte*>(this) + {a['offset']}, &value, sizeof(value));\n")
+            if a["leaves"]:
+                at = a["offset"]
+                for leaf in a["leaves"]:
+                    out.append(f"    cc::memcpy(reinterpret_cast<cc::byte*>(this) + {at}, &value{leaf['path']}, "
+                               f"{leaf['size']});\n")
+                    at += 4
+            else:
+                out.append(f"    cc::memcpy(reinterpret_cast<cc::byte*>(this) + {a['offset']}, &value, sizeof(value));\n")
             out.append("}\n\n")
     for c in struct["cases"]:
         parameters = factory_parameters(package, memory, file, struct, c) if c["buildable"] else None

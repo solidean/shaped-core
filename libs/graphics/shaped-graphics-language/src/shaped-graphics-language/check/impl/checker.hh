@@ -506,6 +506,8 @@ struct checker
     /// CHK-540 to CHK-548: the cases, the variant fields and the carrier's layout of the struct `id`, whose type is
     /// already pushed with `commons` as its members; it sets the type's ranges and adds the hidden members.
     void compile_struct_cases(symbol_id id, type_id type, i32 file, ast::struct_decl const& s);
+    /// CHK-552: the leaves the receiver of method or property `id` takes, where its case's block declares it; 0 for any.
+    [[nodiscard]] u32 receiver_cases_of(symbol_id id);
     /// CHK-545: the signature of a case constructor.
     void compile_case_constructor(symbol_id id);
     /// The leaf cases of the struct with cases `type` a pattern names: `.glass`, `material.glass`, or such names
@@ -549,9 +551,17 @@ struct checker
     /// What a condition says of one name that is no `mut`, where it is true or where it is false (CHK-542).
     struct narrowing
     {
+        /// A name, or the source text of a member path, `p.mat`, which no name spells.
         cc::string_view name;
         u32 cases = 0;
+        /// The struct with cases the name or the path holds.
+        type_id type = type_id::none;
     };
+    /// The key a name or a member path narrows under (CHK-542): a name that is no `mut`, or fields of one, read through
+    /// fields alone; empty for any other expression, which nothing narrows.
+    [[nodiscard]] cc::string_view narrowable_key(function_scope const& scope, ast::expr_id expr) const;
+    /// CHK-542: a member path a test narrowed is known to be in what it narrowed it to, where `id` reads it.
+    void note_path_cases(function_scope const& scope, ast::expr_id id);
     /// The narrowings `condition` makes where it is `holds`, in `scope` as it stands; empty for a condition that tests no
     /// case of a name that can be narrowed.
     [[nodiscard]] cc::vector<narrowing> narrowings_of(function_scope& scope, ast::expr_id condition, bool holds);

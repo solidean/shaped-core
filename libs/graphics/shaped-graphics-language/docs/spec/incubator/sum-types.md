@@ -1,7 +1,7 @@
 # Sum types: what is left
 
-Structs with cases are specified, [checking.md](../semantics/checking.md#structs-with-cases) CHK-540 to CHK-551, and their carrier is EMIT-275.
-What follows is what the first version left out, each part waiting for a use.
+Structs with cases are specified, [checking.md](../semantics/checking.md#structs-with-cases) CHK-540 to CHK-552, and their carrier is EMIT-275.
+What follows is what is left out, each part waiting for a use.
 
 ## The idea
 
@@ -12,7 +12,7 @@ Two more niches stand next in line:
 1. Values an enum field of a payload never takes, as Rust holds `Option<bool>` in one byte.
 2. Spare bits of an integer field with a range, `index: uint in 0..<(1 << 24)` leaving 8 bits free.
 
-A common field is no niche for the tag, since it holds its own value in every case; the niche is a field of the payload the other cases do not hold.
+A common field's spare values are no niche, since it holds its own value in every case; its spare bits are, beside that value.
 A tag in an integer's spare bits costs every read of that field a mask, which is why it waits for a use that wants the word back.
 A float is never a niche: WGSL may treat a NaN or infinity result as an indeterminate value, so its bits carry no tag.
 
@@ -23,25 +23,13 @@ A float is never a niche: WGSL may treat a NaN or infinity result as an indeterm
 **A variant field of a 64-bit value or a matrix** is two words per lane, and a matrix's columns.
 `reinterpret_as_uint` of a `double` gives a `uint2` already, so the double is a small step and the 64-bit integers want a split of their own.
 
-**A part of a variant field as a place**, `m.f0.x = 1.0`, reads the field's words, changes the part and writes them back.
-Today a field is assigned whole, and a part of one is `unsupported-yet` (CHK-543).
-
 **`.glass(…)` where a struct with cases is expected**, as a leading dot names an enum's case where one is expected.
-
-**A method or a property in a case's block**, valid for the values of that case, `self` narrowed to it.
-Today such a member is `unsupported-yet`.
-
-**Narrowing a member path**, `p.material is .glass`, where `p` is a name that is no `mut`.
-Today only a name narrows (CHK-542).
-
-**The host's reach of a struct-typed variant field**: its words are its leaves packed, which its host struct's layout is not, so it has no accessor yet.
 
 ## What it touches
 
-* The check pass: niche placement in `compile_struct_cases`, the decode of a niched tag, and narrowing keyed by a path.
-* The AST: `T?` as a type, and members of a case's block that are no field.
-* The flattener: the read-modify-write of a part of a variant field.
-* slib's generator: accessors over a struct-typed variant field.
+* The check pass: niche placement in `compile_struct_cases`, and a mask in each read of a field the tag shares a word with.
+* The AST: `T?` as a type.
+* slib's generator: an accessor of the field a niche shares, which hides the tag's bits from the host.
 
 ## Already fixed by the syntax
 
