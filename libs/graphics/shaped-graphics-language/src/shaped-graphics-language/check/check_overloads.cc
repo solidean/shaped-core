@@ -1034,6 +1034,33 @@ void checker::record_call(i32 file,
                                 .slots = slot_range,
                                 .type_arguments = {.first = u32(out.type_lists.size()), .count = u32(bindings.size())}});
     out.type_lists.push_back_range(bindings);
+
+    if (!is_valid(callee) || out.at(callee).kind != symbol_kind::function || out.at(callee).info < 0)
+        return;
+    auto const& info = out.functions[out.at(callee).info];
+    // CHK-541: an argument stands for a parameter of some cases only where it is known to be in them
+    auto const parameters = out.at(info.parameters);
+    for (auto p = isize(0); p < slots.size() && p < parameters.size(); ++p)
+        if (auto const i = slots[p]; i >= 0 && parameters[p].cases != 0 && i < arguments.written.size())
+        {
+            auto const argument = arguments.written[i].expr;
+            judge_cases(file, span_of(file, argument), parameters[p].type, cases_of(file, argument, parameters[p].type),
+                        parameters[p].cases);
+        }
+    // CHK-549: a constructor's argument for a field with a range is stored into it
+    if (out.at(callee).role == function_role::constructor || out.at(callee).role == function_role::case_constructor)
+        for (auto p = isize(0); p < slots.size() && p < parameters.size(); ++p)
+            if (auto const i = slots[p]; i >= 0 && i < arguments.written.size())
+                if (auto const* const ranged = ranged_member(info.result, parameters[p].field))
+                    judge_range(file, arguments.written[i].expr, *ranged);
+    // CHK-546: a case whose `@when` is no conjunction of equalities is read, and nothing builds one
+    if (out.at(callee).role == function_role::case_constructor && info.case_index >= 0
+        && !out.at(out.at(info.result).struct_cases)[info.case_index].is_buildable)
+        report(diagnostic_kind::wrong_kind_of_name, file, span_of(file, id),
+               cc::format("{}.{}'s @when is no conjunction of equalities, so no value of it is built: `as` states a "
+                          "value is one",
+                          out.name_of(info.result), out.at(callee).name));
+    set_cases(file, id, info.result_cases);
 }
 
 void checker::note_program_call(function_scope const& scope, symbol_id callee, source_span where)
@@ -1074,11 +1101,31 @@ type_id checker::check_logical(function_scope& scope, ast::expr_id id, ast::call
     auto const file = scope.file;
     auto const where = span_of(file, id);
     auto const spelling = text_of(file, file_of(file).at(call.op).where);
+    auto const bool_type = type_of_builtin(builtins::k_bool, file, where);
+    // CHK-542: the second operand runs only where the first held for `and`, and failed for `or`
+    if (auto const operands = ast_of(file).at(call.arguments);
+        (spelling == "and" || spelling == "or") && operands.size() == 2 && operands[0].name.empty()
+        && operands[1].name.empty() && !operands[0].is_splat && !operands[1].is_splat)
+    {
+        type_id const types[] = {check_expr(scope, operands[0].value), type_id::none};
+        auto const visible = scope.locals.size();
+        narrow(scope, narrowings_of(scope, operands[0].value, spelling == "and"));
+        auto const second = check_expr(scope, operands[1].value);
+        scope.locals.resize_down_to(visible);
+        if (types[0] == error_type || second == error_type)
+            return error_type;
+        if ((types[0] != bool_type || second != bool_type) && bool_type != error_type)
+        {
+            type_id const both[] = {types[0], second};
+            report(diagnostic_kind::no_matching_overload, file, where,
+                   signature_text(cc::format("operator {}", spelling), both));
+        }
+        return bool_type;
+    }
     auto const arguments = check_arguments(scope, call.arguments, false);
     if (arguments.is_poisoned)
         return error_type;
 
-    auto const bool_type = type_of_builtin(builtins::k_bool, file, where);
     auto is_match = arguments.types.size() == (spelling == "not" ? 1 : 2);
     for (auto const type : arguments.types)
         is_match = is_match && type == bool_type;

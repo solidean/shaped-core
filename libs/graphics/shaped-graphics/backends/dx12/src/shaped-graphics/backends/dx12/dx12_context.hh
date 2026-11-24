@@ -343,6 +343,13 @@ public:
         case sg::feature::clustered_geometry:
             // the preview runtime's, reported with the partitioned tlas under one cap
             return _clusters_and_ptlas;
+        case sg::feature::nonuniform_atomic_workaround:
+            // docs/bugs-external/nonuniform-indexed-atomics-count-other-lanes
+            return !_withhold_binding_arrays && !metrics.adapter().is_software
+                && (metrics.adapter().vendor_id == 0x8086 || metrics.adapter().vendor_id == 0x1002);
+        case sg::feature::nonuniform_length_workaround:
+            // a vulkan driver's alone
+            return false;
         }
         return false;
     }

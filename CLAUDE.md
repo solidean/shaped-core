@@ -184,6 +184,8 @@ One-liner per library:
   SGL has generics and ray tracing: inline traces on all four backends (emulated on webgpu), and ray-tracing pipelines on the other three.
   **SGL has modules**: `use view` reaches what the `.sgl` files declaring `module view` in a module directory declare, always as `view.name`.
   A shader package exports one with `module:view`, whose bindings the host reaches as `sgl_modules::view::frame`, one group serving every pipeline that lists it.
+  **SGL has sum types**: `case` inside a `struct` declares a variant, told apart by a tag the compiler places or by `@when` over the struct's own fields, and `is` narrows.
+  Every target and the host see one carrier struct; [checking.md](libs/graphics/shaped-graphics-language/docs/spec/semantics/checking.md#structs-with-cases) is the language.
   **To write SGL**: [docs/spec/](libs/graphics/shaped-graphics-language/docs/spec/_index.md) is the language.
   `uv run dev.py run sgl -- emit <file> --entry <name> --target <t>` shows what a shader becomes.
   **A rule of the language is tested as a `test` in a corpus file** under `tests/corpus/`, run by `uv run dev.py run sgl -- test <file>`; a C++ `TEST` is for what SGL cannot say yet.
@@ -337,6 +339,7 @@ The loop is **run `dev.py`, then diagnose with `repo_tools`** — `build_diag` a
 * `SC_X64_LEVEL` (default `v3`; `v2` on Android) is the x86-64 feature level **every** function may assume → `-march=x86-64-vN` / `/arch:` and `CC_X64_LEVEL`.
   A floor, not a ceiling: anything above it is clean-simd's dispatched kernels, never this switch.
   `v2-avx` is `v2` plus AVX without AVX2, matching a consumer built for AVX alone → `CC_X64_LEVEL` 2 and `CC_X64_AVX`; the `v2-avx-msvc` preset builds it.
+  `v3-adx` is `v3` plus ADX (`adcx`, `adox`), in no psABI level → `CC_X64_LEVEL` 3 and `CC_X64_ADX`, and `__ADX__` from `-madx`.
 * The build-wide ABI settings (`CC_DEBUG`, `CC_SINGLE_THREADED`, `CC_X64_LEVEL`, …) are no compile definitions.
   They are clean-core's generated `clean-core/build_config.hh`, which `macros.hh` includes first.
 * `SC_LIBRARIES` (default empty, every library) builds a subset: the named libraries, their shaped-core dependencies, and nexus only where tests, tools or examples are built.

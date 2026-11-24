@@ -258,6 +258,30 @@ private:
     void terminator(instruction const& i);
     void fill_phis();
 
+    /// A break out of a loop whose blocks hold a subgroup operation, which DXIL writes as DXC does: a branch on
+    /// `@dx.break.cond`, which leaves, or else goes back into the loop, which it never does.
+    /// A driver runs what follows a loop once every invocation has left it, so a break's blocks would otherwise see the
+    /// whole subgroup, rather than the invocations that left in that iteration.
+    struct loop_break
+    {
+        /// The breaking block, where it leaves to, and the block of the loop it otherwise goes to: the loop's continue
+        /// target, or its header where simplifying dropped that.
+        u32 from = 0;
+        u32 merge = 0;
+        u32 back = 0;
+        /// A conditional branch's block on its edge to `merge`, which holds the branch on the condition.
+        ll_block split = ll_block::none;
+    };
+    /// Every such break, found once the reachable blocks are known.
+    void find_loop_breaks();
+    /// The break from block `from` to block `to`; null where that edge is none.
+    [[nodiscard]] loop_break const* loop_break_of(u32 from, u32 to) const;
+    cc::vector<loop_break> _loop_breaks;
+    /// `@dx.break.cond`'s word, compared to 0: true wherever it is read, which no compile can tell.
+    ll_value _break_condition = ll_value::none;
+    /// The block `lower_block` is writing.
+    u32 _lowering = 0;
+
     // ---- writer_lines.cc (EMIT-257)
     /// What the instructions written for `i` carry as their location: its statement, where the line table names one.
     void locate(instruction const& i);
@@ -519,8 +543,9 @@ private:
     payload_root const* _reached = nullptr;
     ll_value _payload = ll_value::none;
     ll_type _payload_type = ll_type::none;
-    /// The positions of the phis, filled once every value exists.
+    /// The positions of the phis, filled once every value exists, and the block of each.
     cc::vector<u32> _phis;
+    cc::vector<u32> _phi_blocks;
     /// Parallel to `_p.instructions`: where its leaves start, and how many.
     cc::vector<u32> _value_first;
     cc::vector<u32> _value_count;

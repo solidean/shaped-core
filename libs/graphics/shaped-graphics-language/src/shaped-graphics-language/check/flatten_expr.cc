@@ -9,6 +9,9 @@ auto sgl::check::impl::flattener::flatten_expr(ast::expr_id id) -> flat_expr_id
     if (!ast::is_valid(id))
         return fail();
     auto const at = cursor_scope(*this, origin{.file = file(), .expr = id});
+    // CHK-543: the variant field a part of which is being assigned is the local it was decoded into
+    if (id == substituted.expr && file() == substituted.file)
+        return local_ref(substituted.local, id);
     auto const& e = ast().at(id);
     auto const type = tables().type_at(id);
     auto const& where = tables().target_at(id);
@@ -81,6 +84,9 @@ auto sgl::check::impl::flattener::flatten_expr(ast::expr_id id) -> flat_expr_id
         // CHK-348: `m.name`, a module-level name of module `m`
         if (where.kind == target_kind::symbol)
             return module_level();
+        // CHK-557, CHK-559: a member of a candidate or a query
+        if (where.kind == target_kind::query_member)
+            return flatten_query_member(id, where);
         // `a.foo` that is no field is a call of `foo` with `a` (CHK-249)
         if (tables().call_at(id) >= 0)
             return flatten_bound_call(id, type, c.out.call_records[tables().call_at(id)]);
@@ -92,7 +98,13 @@ auto sgl::check::impl::flattener::flatten_expr(ast::expr_id id) -> flat_expr_id
                                                 .member = where.index,
                                                 .is_workgroup = c.is_workgroup_binding(where.symbol)});
         if (where.kind == target_kind::buffer_length)
-            return add_expr(type, id, flat_buffer_length{.buffer = flatten_expr(m->object)});
+        {
+            auto const buffer = flatten_expr(m->object);
+            // EMIT-266: a vulkan text asks such a length at uniform indices where the device's driver needs it
+            if (is_valid(buffer) && is_valid(nonuniform_element_of(buffer)))
+                entry.consulted.set(feature::nonuniform_length_workaround);
+            return add_expr(type, id, flat_buffer_length{.buffer = buffer});
+        }
         // CHK-288: a constant, and an object with an effect still runs for it
         if (where.kind == target_kind::array_length)
         {
@@ -103,6 +115,9 @@ auto sgl::check::impl::flattener::flatten_expr(ast::expr_id id) -> flat_expr_id
         }
         if (is_swizzled(id))
             return read_swizzle(swizzled_at(id), type, id);
+        // CHK-543: a field of a case is the words of the variant region it holds
+        if (where.kind == target_kind::variant_field)
+            return flatten_variant_read(id, *m);
         if (where.kind != target_kind::field)
             return fail();
         auto const object = flatten_expr(m->object);
@@ -148,8 +163,13 @@ auto sgl::check::impl::flattener::flatten_expr(ast::expr_id id) -> flat_expr_id
         return flatten_array_literal(id, type, *literal);
     if (auto const* const call = e.node.try_as<ast::call>())
         return flatten_call(id, type, where, *call);
+    if (auto const* const test = e.node.try_as<ast::case_test>())
+        return flatten_case_test(id, *test);
     if (auto const* const cast = e.node.try_as<ast::cast>())
     {
+        // CHK-550: a cast to cases the value may not be in is the value behind a guard
+        if (where.kind == target_kind::struct_cases)
+            return flatten_case_cast(id, *cast);
         auto const value = flatten_expr(cast->value);
         if (where.kind == target_kind::texel_conversion)
             return texel_conversion(value, type, id);
@@ -520,6 +540,9 @@ auto sgl::check::impl::flattener::flatten_call(ast::expr_id id, type_id type, ta
 {
     if (where.kind == target_kind::array_filled)
         return flatten_filled(id, type, call);
+    // CHK-558: a candidate's commit, `triangle()` or `box()`
+    if (where.kind == target_kind::query_member)
+        return flatten_query_member(id, where);
     // PROTOTYPE (autodiff): `tangent[T]()`, a zero in every leaf
     if (where.kind == target_kind::zero_value)
     {
@@ -927,7 +950,7 @@ auto sgl::check::impl::flattener::with_bound_index(flat_expr_id place, ast::expr
 auto sgl::check::impl::flattener::is_inlined(symbol_id callee) const -> bool
 {
     auto const& s = c.out.at(callee);
-    return s.role != function_role::constructor && !is_valid(s.intrinsic);
+    return s.role != function_role::constructor && s.role != function_role::case_constructor && !is_valid(s.intrinsic);
 }
 
 auto sgl::check::impl::flattener::flatten_bound_call(ast::expr_id id, type_id type, call_record const& record)
@@ -943,6 +966,8 @@ auto sgl::check::impl::flattener::flatten_bound_call(ast::expr_id id, type_id ty
     if (auto const texel = atomic_texel_of(record); ast::is_valid(texel))
         return flatten_texel_atomic(id, type, record, texel);
     auto const values = flatten_written(c.out.at(record.written));
+    if (auto const written_around = flatten_nonuniform_atomic(id, type, record, values); is_valid(written_around))
+        return written_around;
     auto const handed = written_closures;
     auto const slots = c.out.at(record.slots);
     if (is_inlined(record.callee))
@@ -1032,13 +1057,26 @@ auto sgl::check::impl::flattener::target_call(ast::expr_id id,
     for (auto const v : values)
         with_effect += calls_impure(v, 0) ? 1 : 0;
 
-    auto const call_of = [&](cc::span<flat_expr_id const> arguments)
+    auto const call_of = [&](cc::span<flat_expr_id const> written)
     {
+        // CHK-549: a constructor stores each argument into its field, and a field with a range holds a value of it
+        auto guarded = cc::vector<flat_expr_id>::create_copy_of(written);
+        if (s.role == function_role::constructor || s.role == function_role::case_constructor)
+        {
+            auto const parameters = c.out.at(c.out.functions[s.info].parameters);
+            for (auto p = isize(0); p < parameters.size() && p < guarded.size(); ++p)
+                if (auto const* const ranged = c.ranged_member(type, parameters[p].field))
+                    guarded[p] = guard_range(guarded[p], *ranged, id);
+        }
+        auto const arguments = cc::span<flat_expr_id const>(guarded);
         if (s.role == function_role::constructor)
             return add_expr(type, id, flat_construct{.arguments = add_list(arguments)});
+        // CHK-545: a leaf's construction reads a value once per word it takes, so each is bound first
+        if (s.role == function_role::case_constructor)
+            return construct_case(id, type, callee, arguments);
         return builtin_call(id, callee, arguments);
     };
-    if (in_order && with_effect < 2)
+    if (in_order && with_effect < 2 && s.role != function_role::case_constructor)
         return call_of(values);
 
     auto const parameters = c.out.at(c.out.functions[s.info].parameters);
@@ -1252,7 +1290,11 @@ auto sgl::check::impl::flattener::builtin_call(ast::expr_id id, symbol_id callee
     }
     return add_expr(
         info.result, id,
-        flat_call{.callee = callee, .intrinsic = s.intrinsic, .is_pure = info.is_pure, .arguments = add_list(arguments)});
+        flat_call{.callee = callee,
+                  .intrinsic = s.intrinsic,
+                  .is_pure = info.is_pure,
+                  .arguments = add_list(arguments),
+                  .is_active_lanes = active_lanes_depth > 0 && record != nullptr && record->is_subgroup_operation});
 }
 
 auto sgl::check::impl::flattener::default_sampled_call(ast::expr_id id,
@@ -1529,6 +1571,9 @@ auto sgl::check::impl::flattener::call_closure(ast::expr_id id,
 {
     // by value: flattening below may push closures, and the vector moves
     auto const f = closures[handed];
+    // EMIT-276, EMIT-277: a candidate loop's body, which the prelude's loop hands each candidate to
+    if (f.candidate_loop >= 0)
+        return call_candidate_body(id, f.candidate_loop, values);
     // CHK-404: a function handed a candidate or a box is a decision the traversal calls in its loop
     auto const outer_decision = inlined_decision;
     auto decision = outer_decision;
@@ -1655,6 +1700,9 @@ auto sgl::check::impl::flattener::flatten_value_loop(ast::expr_id id, type_id ty
 
 auto sgl::check::impl::flattener::flatten_case_parts(ast::case_expr const& node, label_id value_block) -> flat_case
 {
+    // CHK-551: a struct with cases is taken apart by its cases
+    if (auto const t = tables().type_at(node.value); is_valid(t) && c.out.at(t).has_cases())
+        return flatten_struct_case_parts(node, value_block);
     auto const scrutinee = flatten_expr(node.value);
     auto result = flat_case{.scrutinee = scrutinee, .equality = equality_for(scrutinee)};
     if (is_valid(result.equality))

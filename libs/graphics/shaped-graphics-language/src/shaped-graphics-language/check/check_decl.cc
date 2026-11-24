@@ -441,6 +441,26 @@ type_id checker::resolve_type(i32 file, ast::expr_id expr, function_scope const*
     if (!e.attributes.empty() && !allows_attributes)
         unsupported(file, where, "an attribute on a type");
 
+    // CHK-541: `material.glass` names cases of a struct, which only a position that keeps them may stand for
+    if (e.node.is<ast::member>() || e.node.is<ast::call>())
+    {
+        auto* const keeps = accepts_cases;
+        accepts_cases = nullptr;
+        auto view_type = type_id::none;
+        auto view = u32(0);
+        if (resolve_case_view(file, expr, view_type, view))
+        {
+            if (keeps != nullptr)
+                *keeps = view;
+            else if (view_type != checked_module::error_type)
+                unsupported(file, where,
+                            "a case of a struct as this type; a parameter, a result, a `let` and `as` take one");
+            set_type(file, expr, view_type);
+            return view_type;
+        }
+    }
+    accepts_cases = nullptr;
+
     auto const* const n = e.node.try_as<ast::name>();
     auto const resource = n != nullptr ? resolve_resource_name(file, expr, text_of(file, n->where)) : type_id::none;
     // CHK-338: a type parameter in scope hides every type of its name
@@ -776,8 +796,10 @@ ast::range_of<member_info> checker::compile_members(i32 file,
         if (is_function && !is_struct)
             unsupported(file, where, d.node.is<ast::property_decl>() ? "a property of a binding" : "a method");
         // a `require` of a binding is read by compile_binding, and one in a struct was reported by the AST pass
+        // a struct's cases are compiled with it, by `compile_struct_cases`
         else if (!is_function && !d.node.is<ast::field_decl>() && !d.node.is<ast::invalid_decl>()
-                 && !d.node.is<ast::test_decl>() && !d.node.is<ast::require_decl>())
+                 && !d.node.is<ast::test_decl>() && !d.node.is<ast::require_decl>()
+                 && !(is_struct && d.node.is<ast::struct_case_decl>()))
             unsupported(file, where, "this member");
 
         auto const* const line = d.node.try_as<ast::field_decl>();
@@ -788,6 +810,9 @@ ast::range_of<member_info> checker::compile_members(i32 file,
         if (f.name.empty())
             continue;
         auto const name = text_of(file, f.name);
+        // CHK-548: a field `@cases` shares is a variant field, which `compile_struct_cases` places
+        if (is_struct && find_attribute(file, f.attributes, "cases") != nullptr)
+            continue;
 
         cc::string_view const known_on_field[]
             = {"position", "layer",        "viewport_index", "per_instance", "stream", "interpolate",
@@ -1110,6 +1135,10 @@ ast::range_of<member_info> checker::compile_members(i32 file,
             .is_constants_buffer = is_constants_buffer && type != checked_module::error_type,
             .padding = member_padding,
         });
+        if (is_struct)
+            read_field_range(file, f, collected.back());
+        else if (ast::is_valid(f.range))
+            unsupported(file, span_of(file, f.range), "a range on a binding member");
         // CHK-526: where a field stands in one target's record, which a struct with a target layout alone says
         if (auto const* const bits = is_struct ? find_attribute(file, f.attributes, "bits") : nullptr)
         {
@@ -1234,8 +1263,8 @@ void checker::compile_struct(symbol_id id)
     auto const is_pixel = find_attribute(file, d.attributes, "pixel") != nullptr;
 
     // An edge struct's attributes may be pipeline settings, which every pipeline it is an edge of starts from.
-    cc::string_view const known[]
-        = {"builtin", "vertex", "pixel", "shadowable", "no_padding", "internal", "swizzle", "target_layout", "tangent"};
+    cc::string_view const known[] = {"builtin",  "vertex",  "pixel",         "shadowable", "no_padding",
+                                     "internal", "swizzle", "target_layout", "tangent",    "tag"};
     judge_attributes(file, d.attributes, known, "a struct",
                      is_vertex || is_pixel ? setting_scope::description : setting_scope::none);
 
@@ -1361,6 +1390,22 @@ void checker::compile_struct(symbol_id id)
     });
     out.type_lists.push_back_range(parameters);
     out.symbols.own(index_of(id)).type = type;
+
+    // CHK-540: a struct whose block declares cases is one carrier whatever its case
+    if (declares_cases(ast_of(file), s))
+        compile_struct_cases(id, type, file, s);
+    else
+    {
+        if (auto const* const tag = find_attribute(file, d.attributes, "tag"))
+            report(diagnostic_kind::invalid_attribute_arguments, file, tag->name,
+                   "@tag says where a struct with cases holds its case, and this struct has none");
+        for (auto const member : ast_of(file).at(s.members))
+            if (auto const* const fd = ast_of(file).at(member).node.try_as<ast::field_decl>();
+                fd != nullptr && ast::is_valid(fd->field))
+                if (auto const* const shared = find_attribute(file, ast_of(file).at(fd->field).attributes, "cases"))
+                    report(diagnostic_kind::invalid_attribute_arguments, file, shared->name,
+                           "@cases shares a field among cases of a struct, and this struct has none");
+    }
 
     // DIFF-37: a struct may say which struct its change is, whose fields name the fields they change
     if (auto const* const declared = find_attribute(file, d.attributes, "tangent"))
@@ -2252,6 +2297,7 @@ void checker::compile_function(symbol_id id)
 
         // CHK-206: a builtin alone may take a resource, and its parameter is then a pattern of one (CHK-207).
         auto type = checked_module::error_type;
+        auto cases = u32(0);
         auto const is_receiver = f.receiver != ast::receiver_kind::none && &p == &ast.at(f.parameters).front();
         // CHK-315: `p: mut T` over a value type is the caller's place; over a resource or a stream `mut` is its access
         auto is_mut_parameter = false;
@@ -2298,13 +2344,22 @@ void checker::compile_function(symbol_id id)
         }
         // CHK-302: a geometry stage's stream is a parameter of its entry point, and of no other function
         else if (ast::is_valid(p.type))
+        {
+            // CHK-541: `m: material.glass` takes a value of those cases alone
+            accepts_cases = is_builtin ? nullptr : &cases;
             // CHK-324: a function of the prelude may take a resource, which inlining substitutes as its argument
             type = is_builtin ? resolve_pattern_type(file, p.type)
                  : geometry != nullptr || mesh != nullptr || is_prelude_file(file)
                      ? resolve_type(file, p.type)
                      : resolve_value_type(file, p.type, nullptr, takes_resources);
+            accepts_cases = nullptr;
+        }
         else if (is_receiver)
+        {
             type = receiver;
+            // CHK-552: a method a case's block declares takes a value of that case
+            cases = receiver_cases_of(id);
+        }
         else
             report(diagnostic_kind::missing_type, file, span_of(file, p.form), name);
         allows_function_type = false;
@@ -2317,19 +2372,23 @@ void checker::compile_function(symbol_id id)
                               .has_default = ast::is_valid(p.default_value),
                               .is_named_only = p.is_named_only,
                               .input = input,
-                              .is_mut = is_mut_parameter});
+                              .is_mut = is_mut_parameter,
+                              .cases = cases});
     }
 
     auto bindings = binding_list_of(file, f.bindings, is_failed);
 
     // Without `-> T` a block body returns `void`, and an arrow body returns what its expression is.
     auto result = checked_module::void_type;
+    auto result_cases = u32(0);
     auto const infers_result = !ast::is_valid(f.return_type) && f.body.kind == ast::body_kind::arrow;
     if (ast::is_valid(f.return_type))
     {
         // CHK-418: a pixel stage's one color value carries its target's settings, as a member of a @pixel struct does
         allows_type_attributes = find_attribute(file, d.attributes, "pixel") != nullptr;
+        accepts_cases = &result_cases;
         result = resolve_value_type(file, f.return_type);
+        accepts_cases = nullptr;
         allows_type_attributes = false;
     }
     else if (infers_result)
@@ -2400,6 +2459,7 @@ void checker::compile_function(symbol_id id)
         .symbol = id,
         .parameters = {.first = u32(out.parameters.size()), .count = u32(parameters.size())},
         .result = result,
+        .result_cases = result_cases,
         .bindings = {.first = u32(out.binding_lists.size()), .count = u32(bindings.size())},
         .entry_stage = ray_stage != stage::none
                          ? ray_stage
@@ -2523,7 +2583,8 @@ void checker::compile_property(symbol_id id)
         is_failed = true;
     }
 
-    auto const parameters = cc::vector<parameter>{{.name = "self", .type = self}};
+    // CHK-552: a property a case's block declares reads a value of that case
+    auto const parameters = cc::vector<parameter>{{.name = "self", .type = self, .cases = receiver_cases_of(id)}};
     out.symbols.own(index_of(id)).info = i32(out.functions.size());
     out.functions.push_back({
         .symbol = id,

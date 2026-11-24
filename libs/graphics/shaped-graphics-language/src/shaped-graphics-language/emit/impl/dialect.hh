@@ -72,7 +72,8 @@ public:
     /// binding arrays and MSL no lengths.
     [[nodiscard]] virtual cc::string buffer_length_at(cc::string_view, cc::string_view, bool) const { return "0u"; }
     /// Its helper, for an array of `count` elements, 0 where unbounded; `may_waterfall` where the stage has subgroup operations.
-    [[nodiscard]] virtual cc::string buffer_length_at_helper(cc::string_view, bool, bool, i32, bool) const
+    /// `writes_around` where the device's driver needs a non-uniform element's length asked at uniform indices.
+    [[nodiscard]] virtual cc::string buffer_length_at_helper(cc::string_view, bool, bool, i32, bool, bool) const
     {
         return {};
     }

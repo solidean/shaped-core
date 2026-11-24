@@ -147,7 +147,8 @@ TEST("sgl legalize - the same seed gives the same program")
 TEST("sgl legalize - a random program never nests deeper than the check pass admits")
 {
     auto const checked = flat_test_module();
-    // each one's first draw nested past `k_max_depth`, which the interpreter and the legalizer stop descending at
+    // each one's first draw nested past the 44 levels `k_max_depth` was before it rose to 132, where the interpreter and
+    // the legalizer stop descending
     for (auto const seed : {u64(1047), u64(2367), u64(3015), u64(16095)})
     {
         auto const program = random_program(checked.module, seed, shape_of(seed));

@@ -279,6 +279,18 @@ enum class sg::feature
     /// Metal grants it on every device, with `setViewports:count:` and `[[viewport_array_index]]`.
     /// WebGPU has one viewport alone.
     multi_viewport,
+
+    /// Not a capability: this device's driver combines an atomic at a non-uniform index into a binding array across
+    /// lanes that picked other elements, so SGL writes such an atomic as compare-exchanges no driver combines.
+    /// dx12 and vulkan set it on Intel and AMD hardware; every other device keeps the native atomic, which is free.
+    /// See docs/bugs-external/nonuniform-indexed-atomics-count-other-lanes.
+    nonuniform_atomic_workaround,
+
+    /// Not a capability: this device's vulkan driver answers the length of a buffer at a non-uniform index into a binding
+    /// array with another invocation's, so SGL asks each such length at uniform indices.
+    /// vulkan sets it on AMD hardware; every other device asks the length as it is.
+    /// See docs/bugs-external/amd-vulkan-nonuniform-array-length-reads-first-lane.
+    nonuniform_length_workaround,
 };
 
 CC_FLAG_ENUM_INDEXED(sg, feature, cc::u64);
@@ -336,8 +348,11 @@ inline constexpr feature k_all_features[] = {
     feature::clustered_geometry,
     feature::quad_control,
     feature::multi_viewport,
+    feature::nonuniform_atomic_workaround,
+    feature::nonuniform_length_workaround,
 };
-static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize(feature::multi_viewport) + 1,
+static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0]))
+                  == isize(feature::nonuniform_length_workaround) + 1,
               "k_all_features lists every feature");
 
 /// The enumerator's name, `ray_query`, which is also what SGL's `require` spells it as.
@@ -437,6 +452,10 @@ static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize
         return "quad_control";
     case feature::multi_viewport:
         return "multi_viewport";
+    case feature::nonuniform_atomic_workaround:
+        return "nonuniform_atomic_workaround";
+    case feature::nonuniform_length_workaround:
+        return "nonuniform_length_workaround";
     }
     return "";
 }

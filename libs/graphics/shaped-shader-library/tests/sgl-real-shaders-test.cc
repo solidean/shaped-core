@@ -378,6 +378,45 @@ TEST("slib - a query on a device with opacity micromaps says so on both routes, 
     spirv_modules.validate();
 }
 
+// EMIT-276, EMIT-278: the candidate loop's native form on both writers, each past its validator, from the corpus's
+// queries: a procedural one that breaks, a triangle one that ends its search at a commit and returns out of its loop
+// through a helper, and a mixed one with a query in its body.
+TEST("slib - a candidate loop lowers on both writers, each past its validator")
+{
+    if constexpr (!k_has_validator)
+        SKIP("DXC's validator is dxil.dll, which only Windows has");
+    auto compiler = ssc::dxc::compiler::create();
+    if (compiler.has_error())
+        SKIP("no DXC");
+    auto const source
+        = read_file(nx::source_path("libs/graphics/shaped-graphics-language/tests/corpus/types/queries.sgl"));
+    auto const has_spirv_val = std::system("spirv-val --version > NUL 2>&1") == 0;
+    auto spirv_modules = spirv_batch();
+    for (auto const entry : {"gather_decals", "trace_cells", "trace_mixed"})
+    {
+        auto const on_dx12 = sgl::compile_to_text({.source = source,
+                                                   .entry_point = entry,
+                                                   .target = sgl::emit::target::hlsl_dx12,
+                                                   .native = sgl::emit::native_route::require});
+        REQUIRE(on_dx12.has_value()).dump("entry", entry);
+        auto const refused = compiler.value().validate(on_dx12.value().dxil);
+        CHECK(!refused.has_value()).dump("entry", entry).dump("validator", refused.value_or(cc::string()));
+        auto const text = compiler.value().disassemble(on_dx12.value().dxil);
+        REQUIRE(text.has_value());
+        CHECK(text.value().contains("@dx.op.rayQuery_Proceed")).dump("entry", entry);
+        CHECK(text.value().contains("@dx.op.rayQuery_Abort")).dump("entry", entry);
+
+        auto const on_vulkan = sgl::compile_to_text({.source = source,
+                                                     .entry_point = entry,
+                                                     .target = sgl::emit::target::hlsl_vulkan,
+                                                     .native = sgl::emit::native_route::require});
+        REQUIRE(on_vulkan.has_value()).dump("entry", entry);
+        spirv_modules.add(on_vulkan.value().spirv, "tests/corpus/types/queries.sgl", entry);
+    }
+    if (has_spirv_val)
+        spirv_modules.validate();
+}
+
 // A required-native package hard-errors on a gap, and a feature the test machine lacks hides one.
 // So every fixture is compiled as a device with these would, and what falls to a gap is named here to be seen.
 // A task per entry point: every one compiles twice, and the viewer's hybrid pass alone holds seconds of them.

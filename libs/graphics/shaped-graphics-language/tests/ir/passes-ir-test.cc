@@ -320,6 +320,31 @@ TEST("sgl ir simplify - a branch on what a dominating branch decided goes that b
     CHECK(!dump(b.p).contains("store @ 0x40000000"));
 }
 
+TEST("sgl ir simplify - a branch on a comparison of another guarantee is no condition a dominating branch decided")
+{
+    // as share_common_values: a guarantee stands on each operation, so a precise `<` is not the fast one above it
+    auto b = program_builder();
+    b.blocks(5);
+    b.open(0);
+    auto const read = b.add(op::load, b.float_type, {u32(b.out)});
+    b.branch_if(b.add(op::flt, b.bool_type, {u32(read), u32(b.two)}), 1, 2);
+    b.open(1);
+    b.keep(b.one);
+    b.branch(4);
+    b.open(2);
+    auto const precise = b.add(op::flt, b.bool_type, {u32(read), u32(b.two)});
+    b.p.instructions[index_of(precise)].guarantee = sgl::check::float_level::precise;
+    b.branch_if(precise, 3, 4);
+    b.open(3);
+    b.keep(b.two);
+    b.branch(4);
+    b.open(4);
+    b.finish();
+    simplify(b.p);
+    CHECK(refusal_of(b.p, control_flow::unstructured) == "");
+    CHECK(count_of(b.p, op::branch_conditional) == 2);
+}
+
 TEST("sgl ir simplify - any of a vector comparison known in every lane is a constant, and so is a select of two zeros")
 {
     auto b = program_builder();

@@ -33,7 +33,12 @@ using stmt_list = cc::vector<flat_stmt_id>;
 [[nodiscard]] stmt_list lower_exits(flat_builder& out, stmt_list const& body, legalize_options const& options);
 
 /// Rule V0, first: no check and no `assert` is left, since no target writes one, and neither is what computed its condition.
-[[nodiscard]] stmt_list erase_checks(flat_builder& out, stmt_list const& body, bool erases_prints, bool lowers_asserts);
+/// LEGAL-73: a guard of what has no value (CHK-550) is lowered as an assert under `report` and `abort`, and dropped else.
+[[nodiscard]] stmt_list erase_checks(flat_builder& out,
+                                     stmt_list const& body,
+                                     bool erases_prints,
+                                     bool lowers_asserts,
+                                     undefined_guard guards = undefined_guard::none);
 
 /// LEGAL-70: every print of a finished core tree as statements, so what folding removed gets no site.
 [[nodiscard]] stmt_list expand_prints(flat_builder& out, stmt_list const& body, legalize_options const& options);

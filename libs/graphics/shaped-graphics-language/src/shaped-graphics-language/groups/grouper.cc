@@ -376,7 +376,7 @@ struct grouper
         case token_kind::symbol:
         {
             auto const word = file.text_of(tok.where);
-            return word == "and" || word == "or" || word == "as" || word == "in";
+            return word == "and" || word == "or" || word == "as" || word == "in" || word == "is";
         }
         case token_kind::op:
         {

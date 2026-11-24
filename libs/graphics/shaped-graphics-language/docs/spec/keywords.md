@@ -49,6 +49,7 @@ These never start a keyword form; they are operators of the [precedence ladder](
 
 * `in` - membership in a range, `x in 0..<1`; the full loop syntax is `for <var> in <a>..<b>:` where `..` is either `..<` or `..=` but never plain `..`
 * `as` - names an import (`use our_materials as mat`) and converts a value (`i as float`)
+* `is` / `is not` - whether a value of a struct with cases is in some of its cases, `m is .glass` ([checking](semantics/checking.md#structs-with-cases))
 * `and` / `or` / `not` - logical connectives, one precedence level
 
 Special support:

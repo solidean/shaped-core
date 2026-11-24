@@ -8,6 +8,8 @@
 #include <shaped-graphics/command_list/command_list.hh>
 #include <shaped-graphics/compute/compute_pipeline.hh>
 #include <shaped-graphics/context/context.hh>
+#include <shaped-shader-library/compiler/shader_compiler.hh>
+#include <shaped-shader-library/shader_asset.hh>
 
 using namespace cc::primitive_defines;
 
@@ -216,6 +218,108 @@ ASYNC_INVOCABLE_TEST("sg - an atomic update reaches the element of an SGL bindin
     CHECK(got_even[1] == 0u);
     CHECK(got_odd[0] == count / 2);
     CHECK(got_odd[1] == 1u);
+}
+
+// CHK-561: Intel's and AMD's drivers combine such an atomic across the elements its lanes picked, so there SGL writes it
+// around them: by one lane a round where the stage has subgroups, and as a compare-exchange by each lane otherwise.
+// Asking for the workaround runs both forms on every device, WARP included, rather than on those two vendors alone.
+ASYNC_INVOCABLE_TEST("sg - an atomic at a nonuniform index into an SGL binding array is right in each form CHK-561 "
+                     "writes",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::binding_arrays))
+        SKIP("this context has no binding arrays");
+
+    // the device's own features, the workaround added for both forms and subgroups taken away for the second
+    auto const features = [&](bool is_forced, bool has_subgroups)
+    {
+        auto names = cc::string();
+        for (auto const f : sg::k_all_features)
+            if ((ctx->supports(f) && (has_subgroups || f != sg::feature::subgroups))
+                || (is_forced && f == sg::feature::nonuniform_atomic_workaround))
+                names.appendf("{}{}", names.empty() ? "" : ",", sg::to_string(f));
+        return cc::vector<slib::shader_option>{{.name = cc::string(slib::k_device_features_option), .value = names}};
+    };
+    struct form
+    {
+        cc::string_view name;
+        cc::vector<slib::shader_option> options;
+        bool is_by_lane = false;
+    };
+    form const forms[] = {
+        {.name = "as this device's driver needs", .options = {}},
+        {.name = "by a leader", .options = features(true, true)},
+        {.name = "by each lane", .options = features(true, false), .is_by_lane = true},
+    };
+    // Intel's driver still gets an add wrong now and then by each lane: docs/bugs-external/nonuniform-indexed-atomics-count-other-lanes
+    auto const is_intel = ctx->metrics.adapter().vendor_id == 0x8086 && !ctx->metrics.adapter().is_software;
+    constexpr auto count = 64;
+    auto const usage = sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src;
+    auto const& entry = shaders::binding_arrays::count_off;
+    auto const group_layout = ctx->cached.acquire_binding_group_layout<shaders::binding_arrays::counted>();
+    for (auto const& f : forms)
+        if (!f.is_by_lane || !is_intel)
+            SECTION("the atomics written {}", f.name)
+            {
+                auto const pipeline = co_await slib::acquire_compute_pipeline(ctx.get(), entry.asset,
+                                                                              entry.acquire_layout(*ctx), f.options);
+                auto const even = ctx->persistent.create_buffer_from_data(cc::vector<u32>{0u, 0xFFFFFFFFu}, usage);
+                auto const odd = ctx->persistent.create_buffer_from_data(cc::vector<u32>{0u, 0xFFFFFFFFu}, usage);
+                auto const before
+                    = ctx->persistent.create_buffer_from_data(cc::vector<u32>::create_filled(2 * count, 0xDEADu), usage);
+
+                auto cmd = ctx->create_command_list();
+                auto const group = ctx->transient.create_binding_group(
+                    *cmd, group_layout,
+                    shaders::binding_arrays::counted{.slots = {even.as_readwrite_buffer(), odd.as_readwrite_buffer()},
+                                                     .before = before.as_readwrite_buffer()});
+                cmd->compute.bind_pipeline(*pipeline);
+                cmd->compute.bind_group(0, *group);
+                auto const updates
+                    = cc::vector<sg::array_buffer_access>{{.index = 0, .access = sg::access_flag::shader_write},
+                                                          {.index = 1, .access = sg::access_flag::shader_write}};
+                auto const declared
+                    = cmd->compute.declare_array_buffer_access(shaders::binding_arrays::counted::arrays::slots, updates);
+                cmd->compute.dispatch_threads(count);
+                auto const even_back = cmd->download.data_from_buffer(even);
+                auto const odd_back = cmd->download.data_from_buffer(odd);
+                auto const before_back = cmd->download.data_from_buffer(before);
+                ctx->submit_command_list(cc::move(cmd));
+
+                auto const got_even = co_await even_back.data();
+                auto const got_odd = co_await odd_back.data();
+                auto const got_before = co_await before_back.data();
+                REQUIRE(got_even.size() == 2);
+                REQUIRE(got_odd.size() == 2);
+                REQUIRE(got_before.size() == 2 * count);
+                CHECK(got_even[0] == count / 2);
+                CHECK(got_even[1] == 0u);
+                CHECK(got_odd[0] == count / 2);
+                CHECK(got_odd[1] == 1u);
+                for (auto parity = 0; parity < 2; ++parity)
+                {
+                    // each add's value before is its own place among its element's adds: 0 to 31, each once
+                    auto seen = cc::vector<i32>::create_filled(count / 2, 0);
+                    // each min's is what the element held: all ones before the first, or an id of its parity stored earlier
+                    auto untouched = 0;
+                    for (auto i = parity; i < count; i += 2)
+                    {
+                        auto const added = got_before[i];
+                        CHECK(added < u32(count / 2));
+                        if (added < u32(count / 2))
+                            ++seen[added];
+                        auto const least = got_before[count + i];
+                        untouched += least == 0xFFFFFFFFu ? 1 : 0;
+                        CHECK((least == 0xFFFFFFFFu || (least % 2 == u32(parity) && least < u32(count))));
+                    }
+                    for (auto const s : seen)
+                        CHECK(s == 1);
+                    CHECK(untouched >= 1);
+                }
+            }
 }
 
 ASYNC_INVOCABLE_TEST("sg - an SGL unbounded binding array takes as many views as the group is given (CHK-490)",

@@ -386,6 +386,54 @@ TEST("sgl ir hoist_common_values - a test of a constant both arms make alike is 
     CHECK(count_of(b.p, op::select) == 2);
 }
 
+TEST("sgl ir hoist_common_values - a uniform sin and cos of one value stay two, and so do two guarantees")
+{
+    // `sub` names a math function, so a sin and a cos of one dispatch-uniform value are two values (a lens flare's
+    // star step took cos for sin); a guarantee stands on each operation, so a precise one stays apart from a fast one
+    auto b = program_builder();
+    auto const constants_pointer
+        = b.add_type({.kind = type_kind::pointer, .space = storage::push_constant, .element = b.float_type});
+    b.p.globals.push_back({.type = constants_pointer, .kind = global_kind::inline_constants});
+    auto const constants = global_at(u32(b.p.globals.size() - 1));
+    b.blocks(4);
+    b.open(0);
+    b.select_merge(0, 3);
+    auto const x = unknown(b);
+    b.branch_if(b.add(op::flt, b.bool_type, {u32(x), u32(b.two)}), 1, 2);
+    auto const angle = [&] { return b.add(op::load, b.float_type, {u32(constants)}); };
+    b.open(1);
+    auto const sine = b.add(op::math, b.float_type, {u32(angle())}, u8(math::sin));
+    auto const fast_sum = b.add(op::fadd, b.float_type, {u32(angle()), u32(b.one)});
+    auto const first = b.add(op::fadd, b.float_type, {u32(sine), u32(fast_sum)});
+    b.branch(3);
+    b.open(2);
+    auto const cosine = b.add(op::math, b.float_type, {u32(angle())}, u8(math::cos));
+    auto const precise_sum = b.add(op::fadd, b.float_type, {u32(angle()), u32(b.one)});
+    mark(b, precise_sum, 7, check::float_level::precise);
+    auto const second = b.add(op::fadd, b.float_type, {u32(cosine), u32(precise_sum)});
+    b.branch(3);
+    b.open(3);
+    b.keep(b.add(op::phi, b.float_type, {u32(first), 1, u32(second), 2}));
+    b.finish();
+    hoist_common_values(b.p);
+    remove_unused(b.p);
+    require_whole(b.p, control_flow::structured);
+    auto sines = 0;
+    auto cosines = 0;
+    auto precise_adds = 0;
+    for (auto const& i : b.p.instructions)
+    {
+        sines += i.code == op::math && i.sub == u8(math::sin) ? 1 : 0;
+        cosines += i.code == op::math && i.sub == u8(math::cos) ? 1 : 0;
+        precise_adds += i.code == op::fadd && i.guarantee == check::float_level::precise ? 1 : 0;
+    }
+    CHECK(sines == 1);
+    CHECK(cosines == 1);
+    CHECK(precise_adds == 1);
+    // the fast sum and the precise one of the same operands: two, not one
+    CHECK(count_of(b.p, op::fadd) == 4);
+}
+
 TEST("sgl ir hoist_common_values - a value a thread's own read feeds stays in each arm that makes it")
 {
     // moving it would lengthen a varying value's life across both arms for one computation an arm saves

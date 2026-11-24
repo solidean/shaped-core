@@ -981,7 +981,8 @@ void sgl::builtins::register_raytracing(registry& r)
         .hlsl_flagged = hlsl_ray_query_type,
     });
 
-    auto const add = [&](cc::string signature, evaluator evaluate, query_op op, cc::string_view doc)
+    auto const add
+        = [&](cc::string signature, evaluator evaluate, query_op op, cc::string_view doc, bool differs = false)
     {
         // what a query finds depends on the ray it traced, and on what the shader committed and in which control flow
         auto const advances = op == query_op::trace || op == query_op::proceed || op == query_op::commit_triangle
@@ -992,6 +993,7 @@ void sgl::builtins::register_raytracing(registry& r)
             .evaluate = evaluate,
             .write = query_spelling(op),
             .is_ray_query = true,
+            .differs_between_invocations = differs,
             .writes_through = advances ? written_argument::first : written_argument::none,
             .features = check::feature_set(check::feature::ray_query),
             .declares_only = op == query_op::begin,
@@ -1007,6 +1009,12 @@ void sgl::builtins::register_raytracing(registry& r)
             nothing, query_op::trace, "/// Starts the trace of a ray.");
     add("fun ray_query_proceed(q: ray_query) -> bool", no_bool, query_op::proceed,
         "/// Traverses to the next candidate the shader decides, and false once there is none.");
+    // CHK-555: a candidate loop's body is non-uniform control flow whatever its ray, where a trace's decisions are
+    // judged by what they decided
+    add("fun ray_query_step(q: ray_query) -> bool", no_bool, query_op::proceed,
+        "/// Traverses to the next candidate as `ray_query_proceed` does, for a candidate loop, whose body is each "
+        "invocation's own.",
+        true);
     add("fun ray_query_candidate_is_triangle(q: ray_query) -> bool", no_bool, query_op::candidate_is_triangle,
         "/// Whether the candidate is a non-opaque triangle rather than a procedural primitive's box.");
     add("fun ray_query_commit_triangle(q: ray_query)", nothing, query_op::commit_triangle,

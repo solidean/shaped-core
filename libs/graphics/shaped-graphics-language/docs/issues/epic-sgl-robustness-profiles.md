@@ -51,6 +51,7 @@ An access through an element is a block that pins that index once, tests the buf
 A task and a mesh stage shadow their workgroup memory as a compute stage does, which a mesh pipeline's GPU test reports on dx12 and vulkan (LEGAL-69).
 A shadow that would not fit beside its memory in 16 KiB is left out with the warning `workgroup-unshadowed`, rather than in silence.
 The later passes walk 44 levels against a program's 40 (CHK-268), so a guard's 4 levels always fit: a site at a program's deepest was left unguarded before, two of shaped-viewer's among them.
+Since 2026-11-23 they walk 132 against a program's 128, the same 4 apart.
 
 ## Left
 

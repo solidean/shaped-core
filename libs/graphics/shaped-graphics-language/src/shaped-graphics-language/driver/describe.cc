@@ -202,6 +202,50 @@ cc::string foreign_module_of_type(check::checked_module const& m, check::type_id
     return check::is_valid(symbol) ? cc::string(m.foreign_module_of(symbol)) : cc::string();
 }
 
+/// The scalars of a value of `type` as its words hold them, each its path within the host value and its bytes; false
+/// for a type some leaf of which no host holds so: a bool, a matrix, or a 3-vector an array pads.
+bool variant_leaves(check::checked_module const& m,
+                    check::type_id type,
+                    cc::string const& path,
+                    cc::vector<cc::pair<cc::string, i32>>& out)
+{
+    auto const& t = m.at(type);
+    if (auto const* const record = m.builtin_type_of(type))
+    {
+        auto const bytes = check::scalar_bytes_of(record->leaf_kind);
+        auto const size = bytes <= 2 ? 2 : 4;
+        if (t.kind == check::type_kind::enumeration || bytes == 0 || bytes > 4
+            || (record->leaf_count > 1 && !t.has_swizzles))
+            return false;
+        if (record->leaf_count == 1)
+            out.push_back({path, size});
+        else
+            for (auto i = 0; i < record->leaf_count; ++i)
+                out.push_back({cc::format("{}[{}]", path, i), size});
+        return true;
+    }
+    if (m.is_plain_enum(type))
+    {
+        out.push_back({path, 4});
+        return true;
+    }
+    if (t.kind == check::type_kind::array)
+    {
+        if (auto const* const element = m.builtin_type_of(t.element); element != nullptr && element->leaf_count == 3)
+            return false;
+        for (auto i = 0; i < t.count; ++i)
+            if (!variant_leaves(m, t.element, cc::format("{}[{}]", path, i), out))
+                return false;
+        return t.count > 0;
+    }
+    if (t.kind != check::type_kind::structure || t.is_opaque || t.has_cases())
+        return false;
+    for (auto const& member : m.at(t.members))
+        if (!variant_leaves(m, member.type, cc::format("{}.{}", path, member.name), out))
+            return false;
+    return true;
+}
+
 described_memory_struct describe_memory_struct(check::checked_module const& m,
                                                check::type_id type,
                                                emit_impl::address_space space)
@@ -214,10 +258,54 @@ described_memory_struct describe_memory_struct(check::checked_module const& m,
     auto const members = m.at(m.at(type).members);
     for (auto i = isize(0); i < members.size(); ++i)
         if (members[i].type != check::checked_module::void_type)
-            result.members.push_back({.name = members[i].name,
-                                      .type = host_type_name_of(m, members[i].type),
-                                      .offset = placed.offsets[i],
-                                      .size = placed.sizes[i]});
+            result.members.push_back(
+                {.name = members[i].name,
+                 // an enum is held as the int its case is, which is what the host writes
+                 .type = m.is_plain_enum(members[i].type) ? cc::string("int") : host_type_name_of(m, members[i].type),
+                 .offset = placed.offsets[i],
+                 .size = placed.sizes[i]});
+    // CHK-540: a struct with cases, as a host tests and builds a value of it
+    auto const& t = m.at(type);
+    auto const cases = m.at(t.struct_cases);
+    for (auto const& c : cases)
+    {
+        auto writes = cc::vector<cc::pair<cc::string, cc::string>>();
+        for (auto rest = cc::string_view(c.host_writes); !rest.empty();)
+        {
+            auto const end = rest.find(';');
+            auto const one = end < 0 ? rest : rest.subview({.offset = 0, .size = end});
+            rest = end < 0 ? cc::string_view() : rest.subview(end + 1);
+            auto const equals = one.find('=');
+            if (equals > 0)
+                writes.push_back(
+                    {cc::string(one.subview({.offset = 0, .size = equals})), cc::string(one.subview(equals + 1))});
+        }
+        result.cases.push_back({.name = c.name,
+                                .parent = c.parent >= 0 ? cases[c.parent].name : cc::string(),
+                                .leaf = c.leaf,
+                                .condition = c.host_condition,
+                                .is_buildable = c.leaf >= 0 && c.is_buildable,
+                                .writes = cc::move(writes)});
+    }
+    for (auto const& v : m.at(t.variant_fields))
+    {
+        auto holders = cc::vector<cc::string>();
+        for (auto const& c : cases)
+            if (c.leaf >= 0 && (v.leaves & (u32(1) << c.leaf)) != 0)
+                holders.push_back(c.name);
+        auto leaves = cc::vector<cc::pair<cc::string, i32>>();
+        if (m.builtin_type_of(v.type) == nullptr && !m.is_plain_enum(v.type) && !variant_leaves(m, v.type, {}, leaves))
+            leaves.clear();
+        result.variant_fields.push_back(
+            {.name = v.name,
+             .type = m.is_plain_enum(v.type) ? cc::string("int") : host_type_name_of(m, v.type),
+             .offset = placed.offsets[t.first_word + v.word],
+             .size = 4 * v.word_count,
+             .cases = cc::move(holders),
+             .declared_in = v.parent >= 0 ? cases[v.parent].name : cc::string(),
+             .is_discriminant = v.is_discriminant,
+             .leaves = cc::move(leaves)});
+    }
     return result;
 }
 
@@ -1016,11 +1104,28 @@ cc::result<sgl::module_description, cc::string> sgl::describe(describe_request c
                 auto is_known = false;
                 for (auto const known : placed)
                     is_known = is_known || known == type;
-                if (!is_known)
+                if (is_known)
+                    continue;
+                // EMIT-275: a struct a variant field holds has a host type too, which its accessor fills leaf by leaf
+                auto const add_held = [&](auto const& self, check::type_id held) -> void
                 {
-                    placed.push_back(type);
-                    result.memory_structs.push_back(describe_memory_struct(m, type, space));
-                }
+                    while (m.at(held).kind == check::type_kind::array)
+                        held = m.at(held).element;
+                    if (m.at(held).kind != check::type_kind::structure || m.builtin_type_of(held) != nullptr
+                        || m.at(held).has_cases() || !emit_impl::is_placeable(m, held))
+                        return;
+                    for (auto const known : placed)
+                        if (known == held)
+                            return;
+                    for (auto const& member : m.at(m.at(held).members))
+                        self(self, member.type);
+                    placed.push_back(held);
+                    result.memory_structs.push_back(describe_memory_struct(m, held, emit_impl::address_space::storage));
+                };
+                for (auto const& v : m.at(m.at(type).variant_fields))
+                    add_held(add_held, v.type);
+                placed.push_back(type);
+                result.memory_structs.push_back(describe_memory_struct(m, type, space));
             }
         }
     }

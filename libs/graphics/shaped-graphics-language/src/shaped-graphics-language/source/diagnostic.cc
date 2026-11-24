@@ -200,6 +200,8 @@ cc::string_view sgl::to_string(diagnostic_kind kind)
         return "non-exhaustive-case";
     case diagnostic_kind::duplicate_case_pattern:
         return "duplicate-case-pattern";
+    case diagnostic_kind::overlapping_cases:
+        return "overlapping-cases";
     case diagnostic_kind::missing_value_in_arm:
         return "missing-value-in-arm";
     case diagnostic_kind::needs_feature:
@@ -220,6 +222,12 @@ cc::string_view sgl::to_string(diagnostic_kind kind)
         return "invalid-pipeline";
     case diagnostic_kind::recursive_trace:
         return "recursive-trace";
+    case diagnostic_kind::query_escapes:
+        return "query-escapes";
+    case diagnostic_kind::query_traversal_misplaced:
+        return "query-traversal-misplaced";
+    case diagnostic_kind::query_hit_too_early:
+        return "query-hit-too-early";
     case diagnostic_kind::nesting_too_deep:
         return "nesting-too-deep";
     case diagnostic_kind::shadows_unshadowable:
@@ -479,6 +487,8 @@ cc::string_view sgl::summary_of(diagnostic_kind kind)
         return "a `case` that neither names every case of its enum nor has a `_` arm";
     case diagnostic_kind::duplicate_case_pattern:
         return "two arms of one `case` that name the same case";
+    case diagnostic_kind::overlapping_cases:
+        return "two cases of one level whose `@when`s a value satisfies at once";
     case diagnostic_kind::missing_value_in_arm:
         return "a `case` arm that neither produces a value nor exits";
     case diagnostic_kind::needs_feature:
@@ -489,6 +499,12 @@ cc::string_view sgl::summary_of(diagnostic_kind kind)
         return "a `pipeline` whose stages or settings do not fit together";
     case diagnostic_kind::recursive_trace:
         return "a ray type whose trace reaches a shader that traces it again";
+    case diagnostic_kind::query_escapes:
+        return "a query or a candidate held anywhere but where its `let` or its loop put it";
+    case diagnostic_kind::query_traversal_misplaced:
+        return "a query's candidates stepped through anywhere but by one loop in the block of its `let`";
+    case diagnostic_kind::query_hit_too_early:
+        return "a query's hit read before its candidate loop is over";
     case diagnostic_kind::shadows_unshadowable:
         return "a name that would hide a `@shadowable(false)` symbol";
     case diagnostic_kind::test_captures_runtime_value:
@@ -657,6 +673,7 @@ sgl::severity sgl::default_severity_of(diagnostic_kind kind)
     case diagnostic_kind::read_before_assignment:
     case diagnostic_kind::non_exhaustive_case:
     case diagnostic_kind::duplicate_case_pattern:
+    case diagnostic_kind::overlapping_cases:
     case diagnostic_kind::missing_value_in_arm:
     case diagnostic_kind::needs_feature:
     case diagnostic_kind::unknown_feature:
@@ -664,6 +681,9 @@ sgl::severity sgl::default_severity_of(diagnostic_kind kind)
     case diagnostic_kind::stage_not_allowed:
     case diagnostic_kind::invalid_pipeline:
     case diagnostic_kind::recursive_trace:
+    case diagnostic_kind::query_escapes:
+    case diagnostic_kind::query_traversal_misplaced:
+    case diagnostic_kind::query_hit_too_early:
     case diagnostic_kind::nesting_too_deep:
     case diagnostic_kind::shadows_unshadowable:
     case diagnostic_kind::test_captures_runtime_value:

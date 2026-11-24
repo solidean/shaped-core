@@ -667,8 +667,13 @@ auto sgl::check::impl::flattener::inline_bound(ast::expr_id call,
     c.note_body_read(callee);
     auto const& s = c.out.at(callee);
     auto is_open = s.info < 0 || frames.size() > k_max_inline_depth;
-    for (auto const& f : frames)
-        is_open = is_open || f.function == callee;
+    // a candidate loop's body calls nothing below it: what stands there is the loop it is written in (EMIT-276)
+    for (auto i = frames.size() - 1; i >= 0; --i)
+    {
+        is_open = is_open || frames[i].function == callee;
+        if (frames[i].is_candidate_body)
+            break;
+    }
     auto const* const node = is_open ? nullptr : &c.ast_of(s.file).at(s.declaration).node;
     auto const* const function = node != nullptr ? node->try_as<ast::fun_decl>() : nullptr;
     auto const* const property = node != nullptr ? node->try_as<ast::property_decl>() : nullptr;
@@ -899,4 +904,133 @@ auto sgl::check::impl::flattener::reads_in(flat_stmt_id id, local_id local) cons
                              found = found || ref->local == local;
                      });
     return found || !entry.at(id).node.is<flat_let>();
+}
+
+auto sgl::check::impl::flattener::nonuniform_element_of(flat_expr_id place) const -> flat_expr_id
+{
+    for (auto at = place; is_valid(at);)
+    {
+        auto const& x = entry.at(at);
+        if (auto const* const member = x.node.try_as<flat_member>())
+            at = member->object;
+        else if (auto const* const element = x.node.try_as<flat_buffer_element>())
+            at = element->buffer;
+        else if (auto const* const element = x.node.try_as<flat_element>())
+        {
+            auto const* const mark = entry.at(element->index).node.try_as<flat_call>();
+            auto const* const record = mark != nullptr ? c.out.builtin_function(mark->intrinsic) : nullptr;
+            if (record != nullptr && record->mark == builtins::index_mark::nonuniform
+                && c.out.takes_slots(entry.at(element->object).type))
+                return at;
+            at = element->object;
+        }
+        else
+            break;
+    }
+    return flat_expr_id::none;
+}
+
+auto sgl::check::impl::flattener::flatten_nonuniform_atomic(ast::expr_id id,
+                                                            type_id type,
+                                                            call_record const& record,
+                                                            cc::span<flat_expr_id const> values) -> flat_expr_id
+{
+    // the reducible updates, numbered as the prelude's `op` numbers them
+    constexpr cc::string_view updates[] = {"add", "subtract", "min", "max", "bit_and", "bit_or", "bit_xor"};
+    auto const& s = c.out.at(record.callee);
+    auto const* const r = is_valid(s.intrinsic) ? c.out.builtin_function(s.intrinsic) : nullptr;
+    auto const slots = c.out.at(record.slots);
+    // a pixel stage's helper invocations would never leave a compare-exchange loop, and SGL cannot tell one yet;
+    // the leader's own update is the native atomic, which the workaround's inlining leaves as it is
+    if (r == nullptr || !r->is_atomic || is_test || active_lanes_depth > 0 || entry.entry_stage == stage::pixel
+        || values.size() != 2 || slots.size() != 2 || slots[0] != 0 || slots[1] != 1 || !is_valid(values[0]))
+        return flat_expr_id::none;
+    auto op = -1;
+    for (auto i = 0; i < 7; ++i)
+        if (s.name == updates[i])
+            op = i;
+    auto const& atomic = c.out.at(entry.at(values[0]).type);
+    if (op < 0 || atomic.kind != type_kind::atomic)
+        return flat_expr_id::none;
+    auto const held = atomic.element;
+    auto const held_name = c.out.name_of(held);
+    auto const is_wide = held_name == builtins::k_long || held_name == builtins::k_ulong;
+    if (!is_wide && held_name != builtins::k_int && held_name != builtins::k_uint)
+        return flat_expr_id::none;
+    if (!is_valid(nonuniform_element_of(values[0])))
+        return flat_expr_id::none;
+
+    // EMIT-266: what the entry consults is a variant axis, whichever way this compile decides it
+    auto const target = compiled_for();
+    auto const is_vulkan = target.api == graphics_api::vulkan;
+    entry.consulted.set(feature::nonuniform_atomic_workaround);
+    if (!target.device_features.has(feature::nonuniform_atomic_workaround))
+        return flat_expr_id::none;
+    // A leader updates for its round in a compute stage with subgroups, where a vulkan device's `quad_control` says
+    // maximal reconvergence is enabled, without which a vulkan driver may take a round's operations over the subgroup.
+    // Its value before is each lane's own for an add or a subtract alone.
+    if (entry.entry_stage == stage::compute)
+    {
+        entry.consulted.set(feature::subgroups);
+        if (is_vulkan)
+            entry.consulted.set(feature::quad_control);
+    }
+    auto const leads = entry.entry_stage == stage::compute && !is_wide && target.device_features.has(feature::subgroups)
+                    && (!is_vulkan || target.device_features.has(feature::quad_control))
+                    && (op <= 1 || id == discarded_call);
+
+    auto callee = symbol_id::none;
+    if (auto const* const found
+        = c.prelude_names.get_ptr(cc::string(leads ? "nonuniform_update_by_leader" : "nonuniform_update_by_lane")))
+        for (auto const candidate : *found)
+        {
+            auto const& f = c.out.at(candidate);
+            if (f.kind != symbol_kind::function || f.info < 0)
+                continue;
+            auto const parameters = c.out.at(c.out.functions[f.info].parameters);
+            if (!parameters.empty() && c.out.at(parameters[0].type).kind == type_kind::atomic
+                && c.out.at(parameters[0].type).element == held)
+                callee = candidate;
+        }
+    auto const uint_names = c.prelude_names.get_ptr(cc::string(builtins::k_uint));
+    if (!is_valid(callee) || uint_names == nullptr || uint_names->empty())
+        return fail();
+    auto const uint_type = c.out.at(uint_names->front()).type;
+
+    auto const where = origin{.file = file(), .expr = id};
+    auto const label = add_label("nonuniform_atomic");
+    auto const outer = cc::move(block);
+    block = {};
+    // the place's indices are bound once, so every round and every retry reads one element, and the key is its index
+    auto const place = pin_place(values[0]);
+    auto const element = nonuniform_element_of(place);
+    auto const index = is_valid(element) ? entry.at(element).node.as<flat_element>().index : flat_expr_id::none;
+    auto key = is_valid(index) ? again_as_written(marked_index(index), id) : flat_expr_id::none;
+    if (is_valid(key) && entry.at(key).type != uint_type)
+        key = converted(key, uint_type, id);
+    if (!is_valid(key))
+    {
+        block = cc::move(outer);
+        return fail();
+    }
+    auto arguments = cc::vector<flat_expr_id>();
+    arguments.push_back(place);
+    if (leads)
+        arguments.push_back(key);
+    arguments.push_back(add_expr(int_type(), id, flat_int_literal{.value = op}));
+    arguments.push_back(values[1]);
+    ++active_lanes_depth;
+    auto const inlined = inline_call(id, callee, arguments);
+    --active_lanes_depth;
+    if (!is_valid(inlined.label))
+    {
+        block = cc::move(outer);
+        return fail();
+    }
+    entry.maximally_reconverges = entry.maximally_reconverges || (leads && is_vulkan);
+    add_stmt(where, flat_leave{.target = label,
+                               .value = add_expr(type, id, flat_block{.label = inlined.label, .body = inlined.body})});
+    auto const body = add_list(block);
+    block = cc::move(outer);
+    return add_expr(type, id, flat_block{.label = label, .body = body});
 }

@@ -252,3 +252,9 @@ Reading it as one lets every tool that shows a struct's members show a set's ray
 A hit group is a block of `name = value` lines, which is what a pipeline's block already is, so it reuses that reading too.
 `hit_group name for set:` spells which set a group belongs to where a reader looks first, and `for` is a keyword already.
 `callables` (AST-153) is a pipeline's short form for the same reason: a list of entry points is what that form holds.
+
+## AST-163
+
+`x: int in 0..<10` already parses: `:` and `in` share one level and run left to right, so it is `(x: int) in (0..<10)`.
+A new row of the member table is all it takes, which is what keeps it free of a syntax of its own.
+The range is a fact of the field rather than a type, so no type position spells it, and `x: (int in 0..<10)` means nothing.

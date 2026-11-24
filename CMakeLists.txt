@@ -212,13 +212,14 @@ endif()
 # v3 by default: every mainstream desktop x86 since Haswell (2013) and Zen 1 (2017) has it.
 # Android x86_64 defaults to v2, the most its ABI guarantees. Applied by tools/cmake/Simd.cmake; see docs/platforms.md.
 # v2-avx is v2 plus AVX without AVX2, FMA or BMI: the level of a consumer built for AVX alone (MSVC's /arch:AVX).
+# v3-adx is v3 plus ADX (ADCX, ADOX): Broadwell (2014) and Zen 1 (2017) on, for multi-word arithmetic with two carry chains.
 if(ANDROID)
     set(_sc_x64_level_default v2)
 else()
     set(_sc_x64_level_default v3)
 endif()
-set(SC_X64_LEVEL "${_sc_x64_level_default}" CACHE STRING "x86-64 feature level every function may assume: v1, v2, v2-avx, v3 or v4")
-set_property(CACHE SC_X64_LEVEL PROPERTY STRINGS v1 v2 v2-avx v3 v4)
+set(SC_X64_LEVEL "${_sc_x64_level_default}" CACHE STRING "x86-64 feature level every function may assume: v1, v2, v2-avx, v3, v3-adx or v4")
+set_property(CACHE SC_X64_LEVEL PROPERTY STRINGS v1 v2 v2-avx v3 v3-adx v4)
 
 # The clean-simd kernels compiled for runtime dispatch on top of that floor: `auto` (every x86-64 kernel above it, up
 # to avx512), a list such as `avx2;avx512`, or empty for none. Only kernels above the floor belong here — the ones at or

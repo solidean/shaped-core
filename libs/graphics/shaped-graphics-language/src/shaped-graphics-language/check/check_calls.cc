@@ -909,6 +909,9 @@ type_id checker::check_dot_call(function_scope& scope, ast::expr_id id, ast::cal
     if (receiver != error_type && name == "invoke" && out.name_of(receiver) == "hit_object"
         && out.builtin_type_of(receiver) != nullptr)
         return check_hit_invoke(scope, id, call);
+    // CHK-557, CHK-558: a candidate's calls are its own table's
+    if (receiver != error_type && is_query_kind(out.at(receiver).kind))
+        return check_query_call(scope, id, call, receiver);
     auto arguments = check_arguments(scope, call.arguments, false);
     if (receiver == error_type || member.name.empty())
         return error_type;

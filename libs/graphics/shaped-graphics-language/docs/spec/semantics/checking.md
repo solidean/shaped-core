@@ -115,6 +115,7 @@ use view
 * **CHK-22** Each `struct` declaration is one type, whatever its fields.
 * **CHK-23** A type position holds a name that resolves to a `struct` or an `enum`, or `void` (CHK-215); every other expression there is `unsupported-yet`.
   The exceptions are named where they are specified: a resource type (CHK-198), an array (CHK-285), a function type (CHK-317), a type parameter (CHK-338) and an instance of a generic struct (CHK-339).
+  Cases of a struct are one too, where a position keeps them (CHK-541).
 * **CHK-24** A name in a type position that is not declared is the normal error `unknown-name`, and one that stands for a function or a binding is `wrong-kind-of-name`.
 * **CHK-25** A format is not a type: nothing such as `rgba8` exists.
 * **CHK-26** A field, a binding member and a parameter have a type; one without is the normal error `missing-type`.
@@ -190,6 +191,7 @@ use view
   An extension inside a type's block is `unsupported-yet`; it is meant to extend `T` where that block alone sees it.
 * **CHK-238** A type scope holds one kind of thing per name: a field, a case, a property and functions of one name are the normal error `member-name-clash`, at the later one.
 * **CHK-239** A `struct` with a block has a **synthesized constructor**: a function of the struct's name, declared where the struct is, which returns the struct.
+  A struct with cases has a constructor per leaf instead (CHK-545).
   Its parameters are the fields in field order, each with the field's type, default and named-only mark.
 * **CHK-240** Functions of a struct's name may be declared wherever a `fun` may stand, and they are one overload set with its synthesized constructor where they are visible.
 * **CHK-241** Two functions of one overload set in one scope whose parameters agree in type, name and named-only mark, in order, are `duplicate-declaration`, at the later one.
@@ -366,6 +368,120 @@ enum light_kind:
     point
     spot
     sun
+```
+
+## Structs with cases
+
+* **CHK-540** A `struct` whose block declares a struct case (AST-162) is a **struct with cases** ([why](why/checking.md#chk-540)).
+  Each case is a struct of its own that holds every field above it, and a case that holds cases is the set of the **leaves** below it.
+  A value of a struct with cases is always in one of its leaves.
+  A struct holds 32 leaves at most, and one with more is `unsupported-yet`.
+  Two cases of one struct differ in name, or the later one is `duplicate-declaration`.
+  A case is a member of its struct's type scope as a field is (CHK-233), so a property or a function of its name is `member-name-clash`.
+  A struct with cases that is also a text type, a generic, a `@swizzle` struct, an edge struct or a ray set is `unsupported-yet`.
+* **CHK-541** `S.c` in a type position names the leaves at or below case `c` of `S`, and `S.c or S.d` the leaves of either.
+  A parameter, a result, a `let` and the type of `as` may name them, and any other type position is `unsupported-yet`.
+  The type such a position names is `S` itself: no overload, conversion or layout tells `S.c` from `S`.
+  What it adds is a fact the check pass keeps of each value of `S`: the leaves it is known to be in.
+  A value stands where only some leaves may when each leaf it may be in is one of them, or it is `type-mismatch`, whose detail names the leaves beyond them.
+  That is judged of an argument for a parameter, a returned value for a result, and the value of a `let` with a written type or an assignment to one.
+  A `let` with a written type holds what it says, one without that is no `mut` what its value is known to be, and a `let mut` without one any leaf.
+* **CHK-542** `v is p` is a `bool`: whether `v`, a value of a struct with cases, is in the leaves the pattern `p` names, and `v is not p` whether it is in none of them.
+  A pattern is a leading dot `.c`, a case written out `S.c`, or patterns joined by `or`.
+  A value of a struct without cases is `type-mismatch`, and a pattern that names no case of it `unknown-member`.
+  **`is` narrows**: where `v` names a local or a parameter that is no `mut`, what a test says of it holds of the name wherever control reaches only through that test.
+  A path of fields of such a name, `o.body`, narrows as the name does, and so does `self`, which no body assigns.
+  So a branch of an `if` sees its condition hold and each condition before it fail.
+  The second operand of `and` sees the first hold, that of `or` the first fail, and `not` swaps the two.
+  A `while` body sees its condition hold, and the statements after an `assert` see its condition hold.
+  The statements after an `if` chain see what every path that falls through it agrees on, the chain skipped where it has no `else`: after `if v is not .c: return`, `v` is in `c`.
+  A `mut` name is never narrowed, since an assignment could change its case between the test and a read; a `let` of it is.
+* **CHK-543** A field a case declares, in its paren list or its block, is a **variant field** ([why](why/checking.md#chk-543)).
+  A value reads it where every leaf the value is known to be in holds the field.
+  Elsewhere it is `unknown-member`, whose detail names the leaves that hold it.
+  A field of the paren list without a name is named by its position, `.0`, as a tuple's element is.
+  Two fields one leaf holds differ in name, or the later one is `duplicate-declaration`.
+  Two sibling cases' fields of one name are two fields whatever their types, and neither is read where the value may be in either case.
+  A variant field is a place where its object is one, and so is a part of it, `v.f.x = 1.0`: the field is read, the part assigned, and the field written back whole.
+  A part of one as a `mut` argument is `unsupported-yet`, since a body would write through no place of its own.
+  A variant field holds a scalar of 32 or 16 bits, a plain enum, a vector of those, or a struct or an array of what it holds; a 64-bit value or a matrix there is `unsupported-yet`.
+  The tag and the words of the carrier (EMIT-275) are no member a name reaches, and a common field of their names, `_tag` or `_w0`, is `duplicate-declaration`.
+* **CHK-544** A struct with cases that has a level its `@when`s do not tell apart holds a **tag**, a `uint`.
+  A value's tag is its leaf's position among the leaves, each case counted before the cases it holds.
+  A struct of one leaf, and one whose every level `@when`s tell apart, holds none.
+* **CHK-545** Each leaf `c` of `S` has a **case constructor** `S.c(…)`, a function of the type scope of `S` whose result is `S` in leaf `c` ([why](why/checking.md#chk-545)).
+  Its parameters are the common fields in field order, then the fields `@cases` gives the leaf, then each case's fields from the outermost down to `c`.
+  A case's fields are its paren fields, then its block's, which are named-only where it has paren fields too.
+  The fields a `@when` on the path fixes are the constructor's to write, and no parameter of it (CHK-546).
+  A struct with cases has no constructor of its own name (CHK-239), since a value of it is always in a leaf.
+* **CHK-546** `@when(condition)` on a case says which values are in it: a condition over the fields of its struct's root and of the cases above it, and never over a variant field of its own.
+  Every case of one level carries one or none does, or it is `invalid-attribute-arguments`.
+  A nested `@when` adds to its outer case's: a value is in the inner case where both hold.
+  The **checked fragment** is a condition made of fields that are a `bool`, an enum, an `int`, a `uint` or a `float`, compared with constants and joined by `and`, `or` and `not`.
+  Within it, two cases of one level that one value is in are `overlapping-cases`, whose detail names that value.
+  A level **covers** where every value of its outer case is in one of its cases; a field with a range is judged over its range alone (CHK-549), and a float as though no NaN arises (CHK-435).
+  A condition outside the fragment is `invalid-attribute-arguments`, unless `@unchecked` stands on its case, and a value is then in the first case of its level whose condition holds.
+  A leaf whose every `@when` on its path is a conjunction of equalities of fields and constants is built by its constructor, which writes each such field to its constant.
+  Any other leaf is a **view**: its constructor is `wrong-kind-of-name` where it is called, and `as` states a value is one (CHK-550).
+  A field a `@when` reads is `not-assignable` through its struct, since an assignment would change the case under a reader; a whole value assigned changes it.
+* **CHK-547** `@tag(.external)` on a struct with cases says no value holds its own case: it holds no tag and takes no `@when`.
+  `is` and `case` over it are `wrong-kind-of-name`, and `as` states a case of it unchecked under every profile.
+  `@tag` with any other argument is `invalid-attribute-arguments`, and so is `@tag` on a struct without cases.
+* **CHK-548** `@cases(.c, .d)` on a field of a struct's root shares it among the cases it names: a variant field that every leaf at or below them holds, at one offset in each.
+  An argument that names no case is `invalid-attribute-arguments`, and so is `@cases` on a struct without cases.
+* **CHK-549** A field may name the range of its values, `x: int in 0..<10` (AST-163) ([why](why/checking.md#chk-549)).
+  The field is an `int` or a `uint`, and its range two integer literals, the last included after `..=`.
+  The field is of its type alone, so overloading, conversions and arithmetic see a plain `int`, and only a store into it is judged.
+  A constant outside the range is `literal-not-representable`, and any other value is guarded by LEGAL-73 where it is stored.
+  A range on another type is `unsupported-yet`, and so is one on a binding member.
+* **CHK-550** `v as S.c` of a value of `S` states that it is in the leaves `S.c` names, which the check pass then knows of its result.
+  Where `v` is known to be in them already it is `v` itself; otherwise it is guarded by LEGAL-73, unless `S` is `@tag(.external)`.
+  `v as S.c` of a value of another type is `no-matching-overload`.
+* **CHK-552** A method or a property a case's block declares is one of its struct's type scope, whose receiver takes a value of that case's leaves alone.
+  So `self` is narrowed to the case in its body, and a call whose receiver may be in another case is `type-mismatch` by CHK-541.
+  Two cases' methods of one name and one signature are `duplicate-declaration` by CHK-241, since a call resolves by its arguments and never by a case.
+* **CHK-551** `case v:` over a struct with cases takes its arms apart by the leaves their patterns name (CHK-542), never by `==`.
+  An arm runs for the leaves its patterns name that no arm before it took, and narrows the scrutinee to them where CHK-542 narrows it.
+  An arm left no leaf is `unreachable-code`.
+  It is exhaustive where its arms take every leaf the scrutinee is known to be in and its struct covers (CHK-546), or where it carries a `_`.
+  Otherwise it is `non-exhaustive-case`, whose detail names the leaves left.
+
+```sgl
+struct shape:
+    tint: float3
+    case sphere(center: float3, radius: float)
+    case flat:
+        normal: float3
+        case disk(radius: float)
+        case plane
+
+fun area_of(s: shape) -> float:
+    if s is not .sphere:
+        return 0.0
+    return 4.0 * 3.14159 * s.radius * s.radius
+
+test area_of(shape.sphere(float3(1.0), float3(0.0), 1.0)) > 12.0
+test area_of(shape.plane(float3(1.0), float3(0.0, 0.0, 1.0))) == 0.0
+```
+
+A struct's own fields may say its case instead, as a material's type index does.
+
+```sgl
+struct material:
+    kind: int in 0..<2
+    roughness: float
+    @when(kind == 0)
+    case glass:
+        ior: float
+    @when(kind == 1)
+    case metal:
+        f0: float3
+
+fun specular(m: material) -> float => case m:
+    .glass => m.roughness * 0.5
+    .metal => m.f0.x
+
+test specular(material.metal(0.0, float3(0.9))) == 0.9
 ```
 
 ## Tests
@@ -1238,6 +1354,17 @@ A `require` in a test's body that nothing in it uses is `unused-require`, and a 
   The warning names a mark of the program's own file alone: a mark of a module or the prelude serves callers this program is not.
   A mark stands only as the whole index into a binding array, `textures[nonuniform i]`; anywhere else, a `let` or an index into a value array included, it is `wrong-kind-of-name`.
   Neither is a keyword: each is a function of the prelude, written as a call without parentheses, which a program's own name of that spelling shadows.
+* **CHK-561** An integer atomic's update at a `nonuniform` index into a binding array is written around the driver ([why](why/checking.md#chk-561)).
+  It is so where `has(.nonuniform_atomic_workaround)` holds, which only a device whose driver needs it has.
+  The updates are `add`, `subtract`, `min`, `max`, `bit_and`, `bit_or` and `bit_xor`.
+  Intel's and AMD's drivers combine such an atomic's invocations before they part them by element.
+  So the flattener writes it as functions of the prelude's, and the entry point consults the feature wherever it holds one, granted or not.
+  In a compute stage with `subgroups`, one invocation updates each element its subgroup picked, alone, by what that element's invocations combine to.
+  Elsewhere each invocation retries its own compare-exchange until no other update came between its read and its write, which AMD's driver gets right and Intel's now and then does not.
+  On vulkan the first needs `quad_control` too, whose extensions let the text state maximal reconvergence (EMIT-279).
+  Each invocation gets the value before its own update, as the atomic gives it: so the first form stands for `add` and `subtract`, and for the rest only where nothing reads that value.
+  A pixel stage keeps its atomic, since its helper invocations would never leave such a loop.
+  An entry point that holds none of these atomics is the same text whatever the feature says.
 * **CHK-399** An index the pass does not prove uniform is **proven varying** where it comes from what the stage is handed (CHK-283), or from what a trace or a callable writes back.
   It may come so through values, or through a `let mut` assigned under control flow that tests such a value.
   A `let` is its value where it stands, so control flow it stands in leaves it as uniform as its value: an early `return` before `maps[draw.slot]` needs no mark.
@@ -1616,6 +1743,48 @@ HLSL writes it on dx12 and vulkan; WebGPU has none, and sg's metal backend does 
   It gives `void`, and is the target's call of the callable at the table's place in the module's section plus `i`.
   Its builtin is `@stages(.raygen, .closest_hit, .miss, .callable)`, and a test that reaches one is `unsupported-yet`, as by CHK-329.
 
+### Queries
+
+* **CHK-553** `world.query(r)` of an acceleration member `world` and a `ray` `r` gives a **query**, a `trace_query[.g]` of the member's geometry `.g` ([why](why/checking.md#chk-553)).
+  `flags`, a `ray_flags`, and `mask`, an `int`, follow by name; any other argument is `no-matching-overload`.
+  `flags` is a constant once the entry point is inlined, or `invalid-constant-argument`; `mask` may be any `int`, of which the low 8 bits count.
+  Its builtins need `ray_query`, by CHK-322, and it stands in any stage an inline trace may.
+  Flags a target forbids together are left out as a trace leaves them, so a query that skips every kind its structure holds meets no candidate and commits nothing.
+* **CHK-554** A query is the `let` of the `world.query` that gave it, and a **candidate** the variable of a candidate loop ([why](why/checking.md#chk-554)).
+  Any other value of either is `query-escapes`.
+  So is a `let mut` of one, an assignment of one, a struct or an array that holds one, an `if` or a `return` that hands one on, and a `print` of one.
+  An argument is none of these: a call is inlined, and a parameter of type `trace_query[.g]` or `query_candidate[.g]` stands for the name it was handed.
+  `c.triangle()` and `c.box()` are values like any other: a `triangle_candidate` and a `procedural_box`, read from the candidate where they stand.
+* **CHK-555** `for c in q.candidates:` is a **candidate loop**: its body runs once per candidate the traversal of `q` meets, and `c` is a `query_candidate[.g]` ([why](why/checking.md#chk-555)).
+  `q.candidates` stands behind a `for`'s `in` and nowhere else, or `query-traversal-misplaced`.
+  The loop stands in the block of its query's `let`, after it and at its level, and a query has one loop at most; a loop anywhere else, or a second one, is `query-traversal-misplaced`.
+  `break` ends the traversal, keeping what it committed, `continue` goes on to the next candidate, and a `return` or a `yield` ends the traversal with what it leaves.
+  Each names the innermost loop around it, by CHK-119, so a `break` in a loop inside the body leaves that loop alone.
+  An attribute on a candidate loop is `unsupported-yet`, by CHK-39, since how often it runs is the driver's.
+  Its body is in non-uniform control flow (CHK-284), since each invocation meets its own candidates.
+* **CHK-556** A candidate loop's body is a decision of CHK-404: a write through a binding that it reaches is `stage-not-allowed`, whose detail says the driver decides how often the body runs.
+  It writes its own locals and the enclosing body's, and a commit writes the query, which is no binding.
+  A query or a trace inside the body is one of its own, and its own loop's body a decision too.
+* **CHK-557** A candidate's members are the table of [raytracing](../raytracing.md#stepping-through-a-trace) ([why](why/checking.md#chk-557)).
+  On a query of `.triangles`, a member the table gives a box alone is `unknown-member`, and on `.procedural` one it gives a triangle alone, the detail naming the query's geometry.
+  On `.mixed` each is a member, and one of the other kind reads an undefined value, as a mixed hit's attributes do on a triangle.
+  A member reads the query's state where it stands, so an `assert`'s condition takes none (CHK-227).
+* **CHK-558** `c.commit()` accepts a triangle candidate, and `c.commit(t)` with a `float` `t` reports a box's primitive hit at `t` ([why](why/checking.md#chk-558)).
+  Each gives a `bool`, whether it committed.
+  A `t` of another type is `type-mismatch`, and `c.commit(t)` on `.triangles` or `c.commit()` on `.procedural` is `no-matching-overload`.
+  `c.commit(t)` commits only where `c.t_min <= t <= c.t_current`, and elsewhere gives `false` and changes nothing.
+  On `.mixed` a commit of the other kind gives `false` and changes nothing.
+  Where the query's flags hold `accept_first_hit_and_end_search`, a commit that gives `true` ends the traversal once the candidate's body is done, as a `break` at its end would.
+* **CHK-559** `q.hit` is the hit a query committed: a `triangle_hit`, a `procedural_hit[void]` or a `mixed_hit[void]` for `.triangles`, `.procedural` and `.mixed` ([why](why/checking.md#chk-559)).
+  It is read after the query's candidate loop alone, in that loop's block or a block within it; a read inside the loop, before it, or of a query without one is `query-hit-too-early`.
+  A query a function is handed is judged where the call is inlined.
+  It may be read any number of times there, and each read gives the same hit.
+  It `is_hit` where the traversal committed anything, and otherwise its `t` is the ray's `t_max` and nothing else is set.
+* **CHK-560** `world.trace(r, …)` with a constant `flags` gives what its decisions written as a candidate loop give ([why](why/checking.md#chk-560)).
+  That is the loop of [raytracing](../raytracing.md#stepping-through-a-trace): a triangle's decision on `c.triangle()`, and a box's intersection on `c.box()`.
+  A box's any hit runs only where the box is not opaque, and `accept_and_end_search` is a `break`.
+  A trace's decisions are inlined into that body, so CHK-404 judges them as it judges the body.
+
 ### Declarations of a pipeline
 
 * **CHK-433** A trace of a ray type takes `reorder` by name.
@@ -1723,10 +1892,10 @@ hit_group textured for path_rays:
   So an instance checks only the branches its own arguments leave, as C++'s `if constexpr` discards the rest, and the open body still judges the names of every branch (CHK-338).
   A condition that reads the target, `has` or an option decides nothing here, so every branch it guards is checked for every compile.
   What follows a chain an instance decided is never `unreachable-code`, since it serves the instances that take another branch.
-* **CHK-268** A flat tree nests at most 40 levels, and an entry point whose tree nests deeper is `nesting-too-deep` and has no flat tree.
+* **CHK-268** A flat tree nests at most 128 levels, and an entry point whose tree nests deeper is `nesting-too-deep` and has no flat tree.
   A level is an operand, the body of a block expression, an expression a statement holds, and a statement list inside a statement; every call counts as inlined.
-  A top-level `let x = a + b + …` is one level for the `let` and one per term, so 40 terms is past the limit.
-  The later passes walk 44 levels, and the 4 past a program's are what a robustness profile's guard nests its operands deeper (LEGAL-65), so no site of a program is left unguarded.
+  A top-level `let x = a + b + …` is one level for the `let` and one per term, so 128 terms is past the limit.
+  The later passes walk 132 levels, and the 4 past a program's are what a robustness profile's guard nests its operands deeper (LEGAL-65), so no site of a program is left unguarded.
   This is an implementation limit rather than a rule of the language, and it is expected to rise.
 
 ## Control flow
@@ -1739,7 +1908,7 @@ hit_group textured for path_rays:
 * **CHK-113** `place op= value` is `place = place op value`: the operator resolves by CHK-70 to CHK-73, and its result is of the type of `place`.
 * **CHK-114** The condition of an `if` and of a `while` is a `bool`, or it is `type-mismatch`.
 * **CHK-115** `for name in first ..< end` runs over `int`: both bounds are `int`, and `name` is an immutable `int` local of the body.
-  A type on the variable is `int`; a range that is not `..<`, and anything else behind `in`, is `unsupported-yet` ([why](why/checking.md#chk-115)).
+  A type on the variable is `int`; a range that is not `..<`, and anything else behind `in`, is `unsupported-yet`, but a query's `candidates` (CHK-555) ([why](why/checking.md#chk-115)).
 * **CHK-116** `and`, `or` and `not` are the language's own: their operands are `bool` and so is their value, and no function declares them ([why](why/checking.md#chk-116)).
 * **CHK-117** In a comparison chain each operator resolves over its two neighbours by CHK-70 to CHK-73 and gives a `bool`, and the chain is a `bool`.
 * **CHK-118** A `loop:` that is a statement is left by `break`, and one that is a value by `break value`.
@@ -1986,14 +2155,14 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 
 | kind | reported by |
 |---|---|
-| `unsupported-yet` | CHK-8, CHK-61, CHK-134, CHK-213, CHK-237, CHK-291, CHK-299, CHK-307, CHK-314, CHK-321, CHK-329, CHK-333, CHK-338, CHK-339, CHK-344, CHK-346, CHK-347, CHK-350, CHK-352, CHK-353, CHK-357, CHK-366, CHK-374, CHK-381, CHK-383, CHK-387, CHK-389, CHK-397, CHK-431, CHK-432, CHK-434, CHK-516, CHK-522, CHK-523, CHK-526, CHK-524, CHK-525, CHK-450, CHK-453, CHK-454, CHK-538 |
+| `unsupported-yet` | CHK-540, CHK-541, CHK-543, CHK-549, CHK-8, CHK-61, CHK-134, CHK-213, CHK-237, CHK-291, CHK-299, CHK-307, CHK-314, CHK-321, CHK-329, CHK-333, CHK-338, CHK-339, CHK-344, CHK-346, CHK-347, CHK-350, CHK-352, CHK-353, CHK-357, CHK-366, CHK-374, CHK-381, CHK-383, CHK-387, CHK-389, CHK-397, CHK-431, CHK-432, CHK-434, CHK-516, CHK-522, CHK-523, CHK-526, CHK-524, CHK-525, CHK-450, CHK-453, CHK-454, CHK-538, CHK-555 |
 | `member-not-allowed-here` | CHK-490 |
-| `duplicate-declaration` | CHK-12, CHK-28, CHK-241, CHK-347, CHK-351, CHK-530 |
+| `duplicate-declaration` | CHK-552, CHK-540, CHK-543, CHK-12, CHK-28, CHK-241, CHK-347, CHK-351, CHK-530 |
 | `dependency-cycle` | CHK-18, CHK-136 |
 | `unknown-module`, `use-of-own-module` | CHK-347 |
 | `module-cycle` | CHK-349 |
 | `unknown-name` | CHK-24, CHK-62, CHK-245, CHK-330 |
-| `wrong-kind-of-name` | CHK-24, CHK-54, CHK-79, CHK-237, CHK-247, CHK-199, CHK-200, CHK-202, CHK-203, CHK-205, CHK-279, CHK-285, CHK-286, CHK-292, CHK-296, CHK-297, CHK-299, CHK-300, CHK-315, CHK-317, CHK-320, CHK-338, CHK-339, CHK-347, CHK-368, CHK-372, CHK-373, CHK-374, CHK-390, CHK-536, CHK-538, CHK-539 |
+| `wrong-kind-of-name` | CHK-546, CHK-547, CHK-24, CHK-54, CHK-79, CHK-237, CHK-247, CHK-199, CHK-200, CHK-202, CHK-203, CHK-205, CHK-279, CHK-285, CHK-286, CHK-292, CHK-296, CHK-297, CHK-299, CHK-300, CHK-315, CHK-317, CHK-320, CHK-338, CHK-339, CHK-347, CHK-368, CHK-372, CHK-373, CHK-374, CHK-390, CHK-536, CHK-538, CHK-539 |
 | `padding-not-stated` | CHK-532 |
 | `indexing-not-stated` | CHK-538 |
 | `unexpected-keyword` | CHK-315 |
@@ -2002,22 +2171,26 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `unknown-builtin` | CHK-31 |
 | `expected-body` | CHK-32, CHK-236 |
 | `opaque-struct-needs-builtin` | CHK-34 |
-| `invalid-attribute-arguments` | CHK-36, CHK-39, CHK-204, CHK-208, CHK-211, CHK-212, CHK-220, CHK-231, CHK-267, CHK-403, CHK-292, CHK-293, CHK-301, CHK-304, CHK-384, CHK-369, CHK-370, CHK-371, CHK-431, CHK-435, CHK-480, CHK-522, CHK-526, CHK-538 |
+| `invalid-attribute-arguments` | CHK-546, CHK-547, CHK-548, CHK-36, CHK-39, CHK-204, CHK-208, CHK-211, CHK-212, CHK-220, CHK-231, CHK-267, CHK-403, CHK-292, CHK-293, CHK-301, CHK-304, CHK-384, CHK-369, CHK-370, CHK-371, CHK-431, CHK-435, CHK-480, CHK-522, CHK-526, CHK-538 |
 | `binding-not-listed` | CHK-45, CHK-131, CHK-228 |
 | `as-precedence` | CHK-411 |
-| `type-mismatch` | CHK-52, CHK-56, CHK-77, CHK-112 to CHK-118, CHK-121, CHK-167, CHK-210, CHK-214, CHK-219, CHK-236, CHK-243, CHK-275, CHK-276, CHK-279, CHK-281, CHK-287, CHK-329, CHK-344, CHK-362, CHK-375, CHK-392, CHK-429, CHK-433, CHK-434 |
-| `not-assignable` | CHK-112, CHK-236, CHK-316, CHK-352, CHK-367, CHK-514, CHK-536, CHK-539 |
+| `type-mismatch` | CHK-552, CHK-541, CHK-542, CHK-52, CHK-56, CHK-77, CHK-112 to CHK-118, CHK-121, CHK-167, CHK-210, CHK-214, CHK-219, CHK-236, CHK-243, CHK-275, CHK-276, CHK-279, CHK-281, CHK-287, CHK-329, CHK-344, CHK-362, CHK-375, CHK-392, CHK-429, CHK-433, CHK-434, CHK-558 |
+| `not-assignable` | CHK-546, CHK-112, CHK-236, CHK-316, CHK-352, CHK-367, CHK-514, CHK-536, CHK-539 |
 | `read-before-assignment` | CHK-55 |
 | `missing-return` | CHK-125, CHK-236 |
-| `unreachable-code` | CHK-126, CHK-162, CHK-430 |
+| `unreachable-code` | CHK-126, CHK-162, CHK-430, CHK-551 |
 | `no-effect` | CHK-225 |
 | `nan-test-at-fast` | CHK-436 |
 | `workgroup-wastes-lanes` | CHK-521 |
 | `recursive-call` | CHK-130 |
 | `recursive-trace` | CHK-332 |
-| `unknown-member` | CHK-64, CHK-147, CHK-152, CHK-279, CHK-329, CHK-385, CHK-488 |
-| `no-matching-overload` | CHK-71, CHK-155, CHK-316, CHK-340, CHK-329, CHK-344, CHK-365, CHK-366, CHK-367, CHK-392, CHK-396, CHK-433, CHK-434, CHK-458 |
-| `non-exhaustive-case` | CHK-160 |
+| `unknown-member` | CHK-64, CHK-147, CHK-152, CHK-279, CHK-329, CHK-385, CHK-488, CHK-542, CHK-543, CHK-557 |
+| `no-matching-overload` | CHK-71, CHK-155, CHK-316, CHK-340, CHK-329, CHK-344, CHK-365, CHK-366, CHK-367, CHK-392, CHK-396, CHK-433, CHK-434, CHK-458, CHK-550, CHK-553, CHK-558 |
+| `non-exhaustive-case` | CHK-160, CHK-551 |
+| `overlapping-cases` | CHK-546 |
+| `query-escapes` | CHK-554 |
+| `query-traversal-misplaced` | CHK-555 |
+| `query-hit-too-early` | CHK-559 |
 | `duplicate-case-pattern` | CHK-161 |
 | `missing-value-in-arm` | CHK-168 |
 | `needs-feature` | CHK-201, CHK-320, CHK-382, CHK-368, CHK-372, CHK-451, CHK-510, CHK-511 |
@@ -2026,7 +2199,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `unused-require` | CHK-265 |
 | `pixel-stage-ignores-view` | CHK-515 |
 | `generic-not-instantiated` | CHK-338 |
-| `stage-not-allowed` | CHK-193, CHK-277, CHK-329, CHK-344, CHK-512 |
+| `stage-not-allowed` | CHK-193, CHK-277, CHK-329, CHK-344, CHK-512, CHK-556 |
 | `ambiguous-overload` | CHK-72 |
 | `missing-field`, `unknown-field`, `duplicate-field` | CHK-178 |
 | `invalid-entry-point` | CHK-87, CHK-88, CHK-89, CHK-93, CHK-271, CHK-273, CHK-276, CHK-294, CHK-301 to CHK-306, CHK-326 to CHK-328, CHK-342, CHK-380, CHK-481, CHK-484, CHK-485, CHK-520 |
@@ -2037,7 +2210,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `test-must-end-in-check` | CHK-226 |
 | `unmet-expectation` | CHK-232, CHK-267, CHK-403 |
 | `member-name-clash` | CHK-238, CHK-386 |
-| `literal-not-representable` | CHK-60, CHK-61, CHK-253, CHK-357 |
+| `literal-not-representable` | CHK-60, CHK-61, CHK-253, CHK-357, CHK-549 |
 | `call-spelling` | CHK-256 |
 | `literal-conversion-result` | CHK-85 |
 | `literal-needs-type` | CHK-257, CHK-313 |
@@ -2045,7 +2218,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `constant-without-value` | CHK-311 |
 | `constant-not-representable` | CHK-312, CHK-396 |
 | `missing-sampler` | CHK-279 |
-| `invalid-constant-argument` | CHK-280, CHK-285, CHK-299, CHK-309, CHK-378, CHK-389, CHK-425, CHK-426, CHK-433 |
+| `invalid-constant-argument` | CHK-280, CHK-285, CHK-299, CHK-309, CHK-378, CHK-389, CHK-425, CHK-426, CHK-433, CHK-553 |
 | `non-uniform-control-flow` | CHK-282, CHK-298, CHK-374, CHK-377, CHK-379, CHK-431 |
 | `non-uniform-index` | CHK-300, CHK-401 |
 | `needless-nonuniform` | CHK-300, CHK-401 |

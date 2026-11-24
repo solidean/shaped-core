@@ -242,7 +242,8 @@ struct form_parser
 
     [[nodiscard]] bool is_word_operator(group_id g) const
     {
-        return is_word(g, "and") || is_word(g, "or") || is_word(g, "not") || is_word(g, "as") || is_word(g, "in");
+        return is_word(g, "and") || is_word(g, "or") || is_word(g, "not") || is_word(g, "as") || is_word(g, "in")
+            || is_word(g, "is");
     }
 
     /// True if an operand can end with this group, which is what an operator has to touch to count as fused on its left.
@@ -693,7 +694,7 @@ struct form_parser
         case token_kind::symbol:
             if (is_word(g, "and") || is_word(g, "or"))
                 return i8(level::connective);
-            return is_word(g, "as") || is_word(g, "in") ? i8(level::ascription) : i8(-1);
+            return is_word(g, "as") || is_word(g, "in") || is_word(g, "is") ? i8(level::ascription) : i8(-1);
         case token_kind::op:
             if (is_prefix_shaped(g) || is_postfix_shaped(g))
                 return -1;
@@ -746,10 +747,11 @@ struct form_parser
     }
 
     /// The operand of a run at level `l`: at the connective level a `not` and what it negates, else the next level's.
-    form_id operand_of(level l)
+    /// OP-34: right after `is`, a `not` makes the two words one operator, which the tree holds as `is` over a `not`.
+    form_id operand_of(level l, bool after_is = false)
     {
         auto const tighter = level(u8(l) + 1);
-        if (l == level::connective && !at_end() && is_word(c.at, "not"))
+        if ((l == level::connective || after_is) && !at_end() && is_word(c.at, "not"))
         {
             auto const result
                 = make({.kind = form_kind::prefix_operator, .where = span_of_group(c.at), .token = here().token});
@@ -814,7 +816,8 @@ struct form_parser
             advance();
 
             auto const operand_group = c.at;
-            auto const right = at_end() ? missing(span_of_group(operator_group)) : operand_of(l);
+            auto const after_is = l == level::ascription && is_word(operator_group, "is");
+            auto const right = at_end() ? missing(span_of_group(operator_group)) : operand_of(l, after_is);
             if (l == level::ascription)
                 claim_attributes_at_cursor(right, operand_group);
             add_child(result, right, last);

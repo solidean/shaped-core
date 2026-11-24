@@ -348,6 +348,34 @@ TEST("sgl spirv - a splat a mix or a clamp reads too is written, though a scalin
 #endif
 }
 
+TEST("sgl spirv - a uniform sin and cos of one value in a loop are both written")
+{
+    // hoisting merged the two as one value, since it compared no math function (a lens flare's star step)
+    auto const e = written("binding work:\n"
+                           "    angle: float\n"
+                           "    values: mut buffer[float2]\n"
+                           "\n"
+                           "@compute(64) fun run(@thread_id id: int3){work}:\n"
+                           "    for i in 0 ..< id.x:\n"
+                           "        let s = sin(work.angle)\n"
+                           "        let c = cos(work.angle)\n"
+                           "        work.values[i] = float2(s, c)\n",
+                           "run", sgl::emit::native_route::require);
+    REQUIRE(e.has_value());
+    auto const& words = e.value().spirv;
+    // OpExtInst of GLSL.std.450: result type, result, set, then the instruction, 13 Sin and 14 Cos
+    auto sines = 0;
+    auto cosines = 0;
+    for (auto at = isize(5); at < words.size(); at += isize(words[at] >> 16))
+        if ((words[at] & 0xffffu) == 12)
+        {
+            sines += words[at + 4] == 13 ? 1 : 0;
+            cosines += words[at + 4] == 14 ? 1 : 0;
+        }
+    CHECK(sines == 1);
+    CHECK(cosines == 1);
+}
+
 TEST("sgl spirv - a sample at a level takes its offset as ConstOffset beside Lod (EMIT-253)")
 {
     auto const e

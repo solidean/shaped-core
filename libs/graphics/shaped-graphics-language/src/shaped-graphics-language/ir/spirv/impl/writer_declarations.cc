@@ -698,6 +698,12 @@ void writer::write_entry()
     _entry.push_back(_function);
     string_into(_entry, _p.entry_name);
     _entry.push_back_range(interface);
+    // CHK-561: a compute stage's rounds of subgroup operations see the invocations that reach them
+    if (_p.maximally_reconverges && _p.stage != check::stage::pixel)
+    {
+        require_extension("SPV_KHR_maximal_reconvergence");
+        emit(_modes, spv::ExecutionMode, {_function, k_mode_maximally_reconverges});
+    }
     if (_p.stage == check::stage::pixel)
     {
         emit(_modes, spv::ExecutionMode, {_function, k_mode_origin_upper_left});

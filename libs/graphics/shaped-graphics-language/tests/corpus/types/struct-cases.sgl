@@ -1,0 +1,222 @@
+// a struct with cases: every value is in one leaf case, and a case shares every field above it
+
+struct shape:
+    tint: float3
+
+    case sphere(center: float3, radius: float)
+    case box:
+        lo: float3
+        hi: float3
+    case flat:
+        normal: float3
+        case disk(radius: float)
+        case plane
+
+// a leaf is built by a function of its struct's type scope, the common fields first
+test:
+    let s = shape.sphere(float3(1.0), float3(0.0), 2.0)
+    s is .sphere
+    s is not .box
+    s.tint.x == 1.0
+
+// `is` narrows the name it tests, so a field of the case reads inside the branch
+fun area_of(s: shape) -> float:
+    if s is .sphere:
+        return 4.0 * 3.14159 * s.radius * s.radius
+    if s is .disk:
+        return 3.14159 * s.radius * s.radius
+    return 0.0
+
+test area_of(shape.disk(float3(0.0), float3(0.0, 1.0, 0.0), 1.0)) > 3.0
+test area_of(shape.box(float3(0.0), float3(0.0), float3(1.0))) == 0.0
+
+// a case that holds cases is the set of its leaves, and a field it declares reads on any of them
+test:
+    let p = shape.plane(float3(0.0), float3(0.0, 0.0, 1.0))
+    p is .flat
+    let up = if p is .flat => p.normal.z else 0.0
+    up == 1.0
+
+// an early return narrows the rest of the body to the cases that remain
+fun width_of(s: shape) -> float:
+    if s is not .box:
+        return 0.0
+    return s.hi.x - s.lo.x
+
+test width_of(shape.box(float3(0.0), float3(1.0), float3(4.0))) == 3.0
+
+// `and` narrows its second operand by its first
+test:
+    let s = shape.sphere(float3(0.0), float3(0.0), 3.0)
+    s is .sphere and s.radius == 3.0
+
+// a case arm narrows the scrutinee to its cases, and the arms name every leaf, so no `_` is needed
+fun extent_of(s: shape) -> float => case s:
+    .sphere => s.radius
+    .box => s.hi.x - s.lo.x
+    .disk => s.radius
+    .plane => 1000.0
+
+test extent_of(shape.sphere(float3(0.0), float3(0.0), 5.0)) == 5.0
+test extent_of(shape.plane(float3(0.0), float3(1.0))) == 1000.0
+
+// an arm may name a case that holds cases, or several cases at once
+fun is_round(s: shape) -> bool => case s:
+    .sphere or .disk => true
+    _ => false
+
+test is_round(shape.disk(float3(0.0), float3(1.0), 2.0))
+test not is_round(shape.box(float3(0.0), float3(0.0), float3(1.0)))
+
+// a parameter, a result and a `let` may be of some cases alone
+fun grown(s: shape.sphere, by: float) -> shape.sphere => shape.sphere(s.tint, s.center, s.radius + by)
+
+test grown(shape.sphere(float3(0.0), float3(0.0), 1.0), 1.0).radius == 2.0
+
+test:
+    let mut b: shape.box = shape.box(float3(0.0), float3(0.0), float3(1.0))
+    b.hi = float3(5.0)
+    b.lo.x == 0.0 and b.hi.y == 5.0
+
+// a method or a property in a case's block takes a value of that case, and its `self` reads the case's fields
+struct light:
+    intensity: float
+    case point(range: float):
+        falloff => self.intensity / (self.range * self.range)
+        fun scaled(self, by: float) -> light.point => light.point(self.intensity * by, self.range)
+    case sun:
+        direction: float3
+        fun is_overhead(self) => self.direction.y > 0.99
+
+test light.point(8.0, 2.0).falloff == 2.0
+test light.sun(1.0, float3(0.0, 1.0, 0.0)).is_overhead()
+
+fun dimmed(l: light) -> float:
+    if l is .point:
+        return l.scaled(0.5).falloff
+    return l.intensity
+
+test dimmed(light.point(8.0, 2.0)) == 1.0
+
+// a value that may be in another case is no receiver of it
+@expect(error = "type-mismatch")
+test:
+    let l: light = light.sun(1.0, float3(0.0, 1.0, 0.0))
+    l.falloff > 0.0
+
+// a path of fields of a name that is no `mut` narrows as the name does
+struct scene_object:
+    id: int
+    body: shape
+
+fun radius_of(o: scene_object) -> float:
+    if o.body is .sphere:
+        return o.body.radius
+    return case o.body:
+        .disk => o.body.radius
+        _ => 0.0
+
+test radius_of(scene_object(1, shape.sphere(float3(0.0), float3(0.0), 4.0))) == 4.0
+test radius_of(scene_object(2, shape.disk(float3(0.0), float3(1.0), 3.0))) == 3.0
+
+// a part of a field of a case is a place where the value is known to be in that case
+test:
+    let mut b: shape.box = shape.box(float3(0.0), float3(0.0), float3(1.0))
+    b.hi.y = 7.0
+    b.lo.x += 2.0
+    b.hi.y == 7.0 and b.hi.x == 1.0 and b.lo.x == 2.0
+
+// `as` states a case the program knows from elsewhere, which a test checks
+test:
+    let s: shape = shape.disk(float3(0.0), float3(1.0), 2.0)
+    (s as shape.disk).radius == 2.0
+
+// a field `@cases` shares stands in the cases it names, at one place in each
+struct hit:
+    t: float
+    @cases(.triangle, .curve)
+    barycentrics: float2
+    case triangle:
+        primitive: int
+    case curve:
+        segment: int
+    case miss
+
+test:
+    let h = hit.curve(1.0, float2(0.25, 0.5), 3)
+    let b = if h is .triangle or h is .curve => h.barycentrics.y else 0.0
+    b == 0.5 and h.segment == 3
+
+// a struct whose case no value says is built, and stated with `as`, but never asked with `is`
+@tag(.external)
+struct payload:
+    case lit:
+        color: float3
+    case shadowed:
+        occlusion: float
+
+fun brightness(p: payload, is_lit: bool) -> float:
+    if is_lit:
+        return (p as payload.lit).color.x
+    return 1.0 - (p as payload.shadowed).occlusion
+
+test brightness(payload.lit(float3(0.5)), true) == 0.5
+test brightness(payload.shadowed(0.25), false) == 0.75
+
+// a field of some cases is read where the value is known to be in them
+@expect(error = "unknown-member")
+test:
+    let s = shape.box(float3(0.0), float3(0.0), float3(1.0))
+    let mut t: shape = s
+    t.radius == 1.0
+
+// a `mut` name may be assigned between a test and a read, so nothing narrows it
+@expect(error = "unknown-member")
+test:
+    let mut s: shape = shape.sphere(float3(0.0), float3(0.0), 1.0)
+    if s is .sphere:
+        s.radius = 2.0
+    true
+
+// a parameter of some cases takes a value known to be in them
+@expect(error = "type-mismatch")
+test:
+    let s: shape = shape.sphere(float3(0.0), float3(0.0), 1.0)
+    grown(s, 1.0).radius == 2.0
+
+// a case naming some of the leaves needs a `_`
+@expect(error = "non-exhaustive-case")
+test:
+    let s: shape = shape.plane(float3(0.0), float3(1.0))
+    let n = case s:
+        .sphere => 1
+        .flat => 2
+    n == 2
+
+// nothing asks a struct with an external tag which case a value is
+@expect(error = "wrong-kind-of-name")
+test:
+    let p = payload.lit(float3(1.0))
+    p is .lit
+
+// `is` names a case of the value's struct
+@expect(error = "unknown-member")
+test:
+    let s = shape.sphere(float3(0.0), float3(0.0), 1.0)
+    s is .cube
+
+// every target writes the carrier: the common fields, the tag, and the words
+binding scene:
+    shapes: mut buffer[shape]
+    areas: mut buffer[float]
+
+@compute(64) fun measure(@thread_id id: int3){scene}:
+    let s = scene.shapes[id.x]
+    scene.areas[id.x] = area_of(s)
+    if s is .sphere:
+        scene.shapes[id.x] = grown(s, 1.0)
+    // a part of a field of a case, and a case's own method
+    let mut b: shape.box = shape.box(float3(0.0), float3(0.0), float3(1.0))
+    b.hi.y = scene.areas[id.x]
+    let l = light.point(b.hi.y, 2.0)
+    scene.areas[id.x] = l.scaled(2.0).falloff

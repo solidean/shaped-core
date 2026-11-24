@@ -1,0 +1,163 @@
+// A query is a trace the program steps through itself (CHK-553 to CHK-560): `let q = world.query(r)`, one loop over
+// `q.candidates` in the let's block, and `q.hit` after it.
+// A test here binds no acceleration pool, so every query meets nothing (EVAL-95); tests/interpret/query-test.cc runs
+// them against pools.
+
+require ray_query
+
+binding decals:
+    world: acceleration_structure[.procedural]
+    points: buffer[float4]
+    found: mut buffer[int4]
+
+binding scene:
+    world: acceleration_structure[.triangles]
+    mixed: acceleration_structure[.mixed]
+    hits: mut buffer[float4]
+
+fun probe() -> ray => ray(origin = pos3(0.0, 0.0, -1.0), direction = vec3(0.0, 0.0, 1.0), t_max = 100.0)
+
+// raytracing.md's decal lookup: up to 8 decals a point lies in, none committed, written after the loop
+@compute(8, 8) fun gather_decals(@thread_id id: int3){decals}:
+    let i = id.x + id.y * 8
+    let p = decals.points[i]
+    let r = ray(origin = pos3(p.x, p.y, p.z), direction = vec3(0.0, 0.0, 1.0), t_max = 1.0e-4)
+    @indexed(.memory) let mut ids = int[8].filled(-1)
+    let mut count = 0
+    let q = decals.world.query(r, mask = 0x02)
+    for c in q.candidates:
+        // the ray starts at the point, so its object-space origin is the point in the decal's box
+        let o = c.object_ray.origin
+        if abs(o.x) <= 0.5 and abs(o.y) <= 0.5 and abs(o.z) <= 0.5:
+            ids[count] = c.instance_id
+            count += 1
+            if count == 8 => break
+    decals.found[i * 2] = int4(ids[0], ids[1], ids[2], ids[3])
+    decals.found[i * 2 + 1] = int4(ids[4], ids[5], ids[6], ids[7])
+
+// a function may be handed a candidate or a query, which stands for the name it was given (CHK-554)
+fun is_near(c: query_candidate[.triangles], limit: float) -> bool => c.t < limit
+
+fun nearest(q: trace_query[.triangles]) -> float => q.hit.t
+
+// a return out of the loop ends the traversal with the function (CHK-555, EMIT-278)
+fun first_cut(r: ray){scene} -> int:
+    let q = scene.world.query(r, flags = ray_flags.cull_back_facing)
+    for c in q.candidates:
+        if c.primitive_index > 3 => return c.primitive_index
+    return -1
+
+@compute(64) fun trace_cells(@thread_id id: int3){scene}:
+    let r = ray(origin = pos3(id.x as float, 0.5, -1.0), direction = vec3(0.0, 0.0, 1.0))
+    let q = scene.world.query(r, flags = ray_flags.force_non_opaque | ray_flags.accept_first_hit_and_end_search)
+    let mut asked = 0
+    for c in q.candidates:
+        asked += 1
+        if c.primitive_index == 1 => continue
+        if is_near(c, 10.0) and c.commit() => asked += 100
+    scene.hits[id.x] = float4(nearest(q), asked as float, first_cut(r) as float, q.hit.barycentrics.y)
+
+@compute(64) fun trace_mixed(@thread_id id: int3){scene}:
+    let r = ray(origin = pos3(id.x as float, 0.5, -1.0), direction = vec3(0.0, 0.0, 1.0))
+    let q = scene.mixed.query(r, mask = id.x & 0xff)
+    let mut boxes = 0
+    for c in q.candidates:
+        if c.is_triangle:
+            c.commit()
+        else:
+            boxes += 1
+            // a query in the body is a trace of its own, with its own loop
+            let inner = scene.world.query(c.ray)
+            for d in inner.candidates:
+                d.commit()
+            if inner.hit.is_hit and c.commit(c.box().t_current * 0.5) => break
+    let h = q.hit
+    scene.hits[id.x] = float4(h.t, boxes as float, if h.kind == hit_kind.procedural => 1.0 else 0.0, 0.0)
+
+// without a pool a query meets nothing: its loop never runs, and its hit is the ray's end (CHK-559)
+test {scene}:
+    let q = scene.world.query(probe())
+    let mut n = 0
+    for c in q.candidates:
+        n += 1
+    n == 0
+    q.hit.t == 100.0 and not q.hit.is_hit
+    nearest(q) == 100.0
+    // `let _` evaluates the ray, and a query nobody steps through starts no trace
+    let _ = scene.world.query(probe())
+    first_cut(probe()) == -1
+
+test {scene}:
+    let q = scene.mixed.query(probe(), flags = ray_flags.skip_triangles | ray_flags.skip_procedural)
+    for c in q.candidates:
+        break
+    q.hit.kind == hit_kind.none
+
+@expect(error = "query-hit-too-early")
+test {scene}:
+    let q = scene.world.query(probe())
+    q.hit.is_hit
+
+@expect(error = "query-hit-too-early")
+test {scene}:
+    let q = scene.world.query(probe())
+    for c in q.candidates:
+        let t = q.hit.t
+    true
+
+@expect(error = "query-traversal-misplaced")
+test {scene}:
+    let q = scene.world.query(probe())
+    if probe().t_max > 1.0:
+        for c in q.candidates:
+            c.commit()
+    true
+
+@expect(error = "query-traversal-misplaced")
+test {scene}:
+    let q = scene.world.query(probe())
+    for c in q.candidates:
+        c.commit()
+    for c in q.candidates:
+        c.commit()
+    true
+
+@expect(error = "query-escapes")
+test {scene}:
+    let mut q = scene.world.query(probe())
+    true
+
+@expect(error = "query-escapes")
+test {scene}:
+    let q = scene.world.query(probe())
+    let p = q
+    true
+
+@expect(error = "unknown-member")
+test {scene}:
+    let q = scene.world.query(probe())
+    for c in q.candidates:
+        let o = c.is_opaque
+    true
+
+@expect(error = "no-matching-overload")
+test {scene}:
+    let q = scene.world.query(probe())
+    for c in q.candidates:
+        let ok = c.commit(1.0)
+    true
+
+// the body is a decision, whose writes through a binding the driver would repeat (CHK-556)
+@expect(error = "stage-not-allowed")
+@compute(64) fun writing_body(@thread_id id: int3){scene}:
+    let q = scene.world.query(probe())
+    for c in q.candidates:
+        scene.hits[id.x] = float4(c.t)
+
+@expect(error = "invalid-constant-argument")
+test {scene}:
+    let f = if probe().t_max > 1.0 => ray_flags.force_opaque else ray_flags.none
+    let q = scene.world.query(probe(), flags = f)
+    for c in q.candidates:
+        c.commit()
+    true

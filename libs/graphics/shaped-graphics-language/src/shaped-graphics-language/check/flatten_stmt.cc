@@ -29,14 +29,16 @@ void sgl::check::impl::flattener::flatten_return(origin from, ast::expr_id value
     if (ast::is_valid(value))
         result = flatten_expr(value);
     // CHK-345: the entry point's own report, decided by the fused any hit before it leaves
-    if (fused.has_value() && frames.size() == 1 && is_valid(result))
+    if (fused.has_value() && is_root_frame() && is_valid(result))
         result = decide_report(from, result);
     // CHK-418: the one color a pixel stage gives is its minted struct's one member
-    if (is_valid(pixel_targets) && frames.size() == 1 && is_valid(result))
+    if (is_valid(pixel_targets) && is_root_frame() && is_valid(result))
     {
         flat_expr_id const color[] = {result};
         result = add_expr(pixel_targets, from.expr, flat_construct{.arguments = add_list(color)});
     }
+    // EMIT-278: a return out of a native candidate loop's body aborts the traversal first
+    abort_crossed(from, return_label, &result);
     if (is_valid(return_label))
         add_stmt(from, flat_leave{.target = return_label, .value = result});
     else
@@ -116,6 +118,20 @@ void sgl::check::impl::flattener::flatten_assign(origin from, ast::assign_stmt c
             return flatten_texel_store(from, assign, t);
     if (is_swizzled(assign.target) && sgl::is_valid(assign.op))
         return flatten_swizzle_assign(from, assign, c.text_of(file(), c.file_of(file()).at(assign.op).where));
+    // CHK-543: a part of a field of a case is assigned through the field decoded
+    if (auto const field = variant_part_of(assign.target); ast::is_valid(field) && sgl::is_valid(assign.op))
+    {
+        if (!flatten_variant_part_assign(from, assign, field))
+            mark_failed();
+        return;
+    }
+    // CHK-543: a field of a case is assigned word by word
+    if (tables().target_at(assign.target).kind == target_kind::variant_field && sgl::is_valid(assign.op))
+    {
+        if (!flatten_variant_assign(from, assign))
+            mark_failed();
+        return;
+    }
     auto const place = flatten_expr(assign.target);
     auto value = flatten_expr(assign.value);
     auto const op = sgl::is_valid(assign.op) ? c.text_of(file(), c.file_of(file()).at(assign.op).where) : "";
@@ -136,6 +152,10 @@ void sgl::check::impl::flattener::flatten_assign(origin from, ast::assign_stmt c
         flat_expr_id const arguments[] = {read_of_place(place, assign.target), value};
         value = builtin_call(assign.value, callee, arguments);
     }
+    // CHK-549: a field with a range holds a value of it
+    if (auto const& t = tables().target_at(assign.target); t.kind == target_kind::field && is_valid(t.symbol))
+        if (auto const& owner = c.out.at(c.out.at(t.symbol).type); t.index < i32(owner.members.count))
+            value = guard_range(value, c.out.at(owner.members)[t.index], assign.value);
     judge_decision_store(place, assign.target);
     add_stmt(from, flat_assign{.place = place, .value = value});
 }
@@ -472,7 +492,7 @@ void sgl::check::impl::flattener::flatten_looped_for(origin from,
 
     auto const label = add_label("for");
     entry.labels[index_of(label)].is_rolled = is_rolled(id);
-    auto const is_test_loop = is_test && frames.size() == 1;
+    auto const is_test_loop = is_test && is_root_frame();
     if (is_test_loop)
         test_loops.push_back(index);
     current()->loops.push_back({.loop = label});
@@ -646,7 +666,7 @@ void sgl::check::impl::flattener::flatten_inclusive_for(origin from,
     auto const label = add_label("for");
     entry.labels[index_of(label)].is_rolled = is_rolled(id);
     auto const iteration = add_label("iteration");
-    auto const is_test_loop = is_test && frames.size() == 1;
+    auto const is_test_loop = is_test && is_root_frame();
     if (is_test_loop)
         test_loops.push_back(index);
     current()->loops.push_back({.loop = label, .continue_block = iteration});
@@ -777,6 +797,9 @@ void sgl::check::impl::flattener::flatten_walked_for(origin from,
 
 void sgl::check::impl::flattener::flatten_for(origin from, ast::stmt_id id, ast::for_stmt const& loop)
 {
+    // CHK-555: a loop over a query's candidates is the trace's two forms
+    if (c.is_candidates(file(), loop.iterable))
+        return flatten_candidate_loop(from, id, loop);
     auto const walk = ast::is_valid(loop.iterable) ? c.range_walk_of(file(), loop.iterable) : checker::range_walk();
     auto const* const r = walk.range;
     if (r == nullptr)
@@ -802,6 +825,11 @@ void sgl::check::impl::flattener::flatten_stmt(ast::stmt_id id)
     auto const at = cursor_scope(*this, from);
     if (auto const* const let = s.node.try_as<ast::let_stmt>())
     {
+        // CHK-553: a query's `let` writes its arguments, and the name stands for the query
+        if (auto const type = ast::is_valid(let->value) ? tables().type_at(let->value) : type_id::none;
+            type != type_id::none && type != checked_module::error_type && c.out.at(type).kind == type_kind::trace_query
+            && !let->is_mut && tables().target_at(let->value).kind == target_kind::overload)
+            return flatten_query_let(from, id, *let);
         auto const is_discarded = ast::is_valid(let->pattern) && ast().at(let->pattern).node.is<ast::wildcard>();
         // CHK-536: a let of a resource names it as a parameter would, so no local holds it, and `let _` evaluates
         // the index of the element it would name
@@ -920,11 +948,17 @@ void sgl::check::impl::flattener::flatten_expr_stmt(origin from, ast::expr_id va
             return;
         }
         if (!ast::is_valid(b->value))
-            return add_stmt(from, flat_leave{.target = loops.back().loop});
+        {
+            auto const target = loops.back().loop;
+            abort_crossed(from, target);
+            return add_stmt(from, flat_leave{.target = target});
+        }
         // by value: flattening the value may open a loop of its own
         auto const target = loops.back().value_block;
         is_failed = is_failed || !is_valid(target);
-        return add_stmt(from, flat_leave{.target = target, .value = flatten_expr(b->value)});
+        auto value = flatten_expr(b->value);
+        abort_crossed(from, target, &value);
+        return add_stmt(from, flat_leave{.target = target, .value = value});
     }
     if (x.node.is<ast::discard_expr>())
     {
@@ -940,7 +974,11 @@ void sgl::check::impl::flattener::flatten_expr_stmt(origin from, ast::expr_id va
             return;
         }
         if (is_valid(loops.back().continue_block))
+        {
+            abort_crossed(from, loops.back().continue_block);
             return add_stmt(from, flat_leave{.target = loops.back().continue_block});
+        }
+        abort_crossed(from, loops.back().loop);
         return add_stmt(from, flat_continue{.target = loops.back().loop});
     }
     if (auto const* const loop = x.node.try_as<ast::loop_expr>())
@@ -961,7 +999,8 @@ void sgl::check::impl::flattener::flatten_expr_stmt(origin from, ast::expr_id va
         }
         // by value: flattening the value may open a value block of its own
         auto const target = blocks.back();
-        auto const value = flatten_expr(y->value);
+        auto value = flatten_expr(y->value);
+        abort_crossed(from, target, &value);
         return add_stmt(from, flat_leave{.target = target, .value = value});
     }
     if (auto const* const c = x.node.try_as<ast::case_expr>())
@@ -970,7 +1009,7 @@ void sgl::check::impl::flattener::flatten_expr_stmt(origin from, ast::expr_id va
         return flatten_if_branches(from, ast().at(i->branches), label_id::none);
 
     // CHK-225: a line of type bool of the test's own body is a check.
-    if (is_test && frames.size() == 1 && tables().type_at(value) == bool_type())
+    if (is_test && is_root_frame() && tables().type_at(value) == bool_type())
         return flatten_check(from, value, false);
 
     // What is left is a call, and one that returns `void` is a block that is a statement.
@@ -1014,7 +1053,11 @@ void sgl::check::impl::flattener::flatten_expr_stmt(origin from, ast::expr_id va
         return add_stmt(from, flat_eval{.value = inlined});
     }
     // Any other call has a value, which is evaluated where it stands and dropped.
-    add_stmt(from, flat_eval{.value = flatten_expr(value)});
+    auto const outer_discarded = discarded_call;
+    discarded_call = value;
+    auto const dropped = flatten_expr(value);
+    discarded_call = outer_discarded;
+    add_stmt(from, flat_eval{.value = dropped});
 }
 
 void sgl::check::impl::flattener::flatten_target_text(origin from, ast::stmt_id stmt)

@@ -689,7 +689,8 @@ namespace
     auto out = flat_builder::extend(m, e);
     out.set_body(guard_undefined(out, ids_of(out.e, out.e.body), options));
     out.set_body(lower_selected_arrays(out, ids_of(out.e, out.e.body)));
-    out.set_body(erase_checks(out, ids_of(out.e, out.e.body), options.erases_prints, options.lowers_asserts));
+    out.set_body(erase_checks(out, ids_of(out.e, out.e.body), options.erases_prints, options.lowers_asserts,
+                              options.guards_undefined));
     out.set_body(lower_expressions(out, options));
     out.set_body(lower_cases(out));
     // Again, for the conditions the chain form of C1 wrote; on a tree that holds no block it changes nothing.

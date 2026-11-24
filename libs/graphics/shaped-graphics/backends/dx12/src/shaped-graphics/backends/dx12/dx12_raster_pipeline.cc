@@ -334,9 +334,9 @@ cc::result<dx12_raster_pipeline_handle> dx12_raster_pipeline::create(ID3D12Devic
     pso.Flags = D3D12_PIPELINE_STATE_FLAG_NONE;
 
     // See dx12_pipeline_layout::has_static_samplers and dx12_raster_pipeline::skips_cached_blob.
-    pipeline->skips_cached_blob = is_mesh_shaded;
-    auto const cached
-        = layout->has_static_samplers || is_mesh_shaded ? cc::span<byte const>() : desc.cached_pipeline.span();
+    pipeline->skips_cached_blob = is_mesh_shaded || desc.view_count > 1;
+    auto const cached = layout->has_static_samplers || pipeline->skips_cached_blob ? cc::span<byte const>()
+                                                                                   : desc.cached_pipeline.span();
     if (!cached.empty())
     {
         pso.CachedPSO.pCachedBlob = cached.data();

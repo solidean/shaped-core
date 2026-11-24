@@ -149,6 +149,11 @@ Each term links to the rule that defines it.
 | **conversion chain** | how an argument becomes its parameter's type; its length ranks candidates (CHK-70, CHK-254) |
 | **default type** | the type a number literal has where no other is asked of it: `int` or `float` (CHK-60, CHK-61) |
 | **case** | a bare name, or `name = value`, as a member of an `enum`; not the keyword `case` (AST-78, AST-115) |
+| **struct case** | `case name:` in a `struct`'s block, a struct of its own that holds every field above it (AST-162, CHK-540) |
+| **leaf** | a struct case that holds no case, which every value of its struct is one of (CHK-540) |
+| **variant field** | a field a struct case declares, or one `@cases` shares, held in the words of the variant region (CHK-543) |
+| **carrier** | the one struct a struct with cases is to every target: its common fields, its tag and its words (EMIT-275) |
+| **view** | a leaf no constructor builds, since a `@when` on its path is no conjunction of equalities (CHK-546) |
 | **owner** | the declaration or `struct_type` a member stands in; it decides which members are allowed (AST-85) |
 | **diagnostic** | a kind, a byte span and a message (DIAG-1) |
 | **normal error** | a forbidden construct with one reasonable reading, which the tree carries (DIAG-4) |

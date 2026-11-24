@@ -33,6 +33,8 @@ flow checker::check_statements(function_scope& scope, ast::range_of<ast::stmt_id
     auto result = flow::falls_through;
     auto is_reported = false;
     auto const& ast = ast_of(scope.file);
+    // CHK-555: a candidate loop stands among the statements of its query's `let`
+    scope.blocks.push_back(statements);
     for (auto const s : ast.at(statements))
     {
         // A test never runs where it stands, so it is no code a jump in front of it makes unreachable.
@@ -46,6 +48,7 @@ flow checker::check_statements(function_scope& scope, ast::range_of<ast::stmt_id
         }
         result = then(result, check_stmt(scope, s));
     }
+    scope.blocks.remove_back();
     return result;
 }
 
@@ -97,7 +100,12 @@ void checker::check_message(function_scope& scope, ast::expr_id message, bool ta
     {
         // `print total` prints the one value as it is
         if (takes_value)
-            (void)check_expr(scope, message);
+        {
+            // CHK-554: a print records values, and a query or a candidate is none
+            if (auto const type = check_expr(scope, message); type != error_type && is_query_kind(out.at(type).kind))
+                report(diagnostic_kind::query_escapes, file, span_of(file, message),
+                       cc::format("a print records values, and {} is none", out.name_of(type)));
+        }
         else
             unsupported(file, span_of(file, message), "an assert message that is no quoted literal");
         return;
@@ -106,7 +114,10 @@ void checker::check_message(function_scope& scope, ast::expr_id message, bool ta
     for (auto const part : ast.at(literal->interpolations))
     {
         auto const type = check_expr(scope, part);
-        if (type != error_type && !is_printable(type))
+        if (type != error_type && is_query_kind(out.at(type).kind))
+            report(diagnostic_kind::query_escapes, file, span_of(file, part),
+                   cc::format("a message interpolates a value, and {} is none", out.name_of(type)));
+        else if (type != error_type && !is_printable(type))
             report(diagnostic_kind::type_mismatch, file, span_of(file, part),
                    cc::format("a message interpolates a scalar, a plain vector or an enum, and this is {}",
                               out.name_of(type)));
@@ -159,8 +170,12 @@ flow checker::check_stmt(function_scope& scope, ast::stmt_id stmt)
         {
             check_condition(scope, loop.condition);
             scope.loops.push_back({});
+            // CHK-542: the body runs where its condition holds, which is what it may know of a name
+            auto const visible = scope.locals.size();
+            narrow(scope, narrowings_of(scope, loop.condition, true));
             // A `while` ends when its condition says so, whatever the condition is, so what follows it is reachable.
             (void)check_nested(scope, loop.body);
+            scope.locals.resize_down_to(visible);
             scope.loops.remove_back();
         },
         // CHK-420: its own scope, whose locals end with it; what it returns or leaves is what the statement does
@@ -222,6 +237,8 @@ flow checker::check_stmt(function_scope& scope, ast::stmt_id stmt)
             check_condition(scope, a.condition);
             if (ast::is_valid(a.message))
                 check_message(scope, a.message, false);
+            // CHK-542: what follows an assert runs where its condition held
+            narrow(scope, narrowings_of(scope, a.condition, true));
         },
         [&](ast::decl_stmt const& d)
         {
@@ -282,10 +299,14 @@ void checker::check_let(function_scope& scope, ast::stmt_id id, ast::let_stmt co
     auto const handed_before = handed.size();
     if (ast::is_valid(let.value))
         hand_arm_values(file, let.value);
+    // CHK-541: `let g: material.glass = v` holds values of those cases alone
+    auto written_cases = u32(0);
     // CHK-82: a written type is expected of the value, which a literal converts to
     if (ast::is_valid(let.type))
     {
+        accepts_cases = &written_cases;
         type = resolve_value_type(file, let.type, &scope, true);
+        accepts_cases = nullptr;
         // CHK-341: the prelude's `undefined()` has the type written of the `let mut` it stands in
         auto const* const call = ast::is_valid(let.value) ? ast.at(let.value).node.try_as<ast::call>() : nullptr;
         if (call != nullptr && let.is_mut && is_prelude_file(file) && is_named(file, call->callee, "undefined")
@@ -293,6 +314,8 @@ void checker::check_let(function_scope& scope, ast::stmt_id id, ast::let_stmt co
             set_target(file, let.value, {.kind = target_kind::undefined_value});
         else if (ast::is_valid(let.value))
             (void)check_expected(scope, let.value, type);
+        if (ast::is_valid(let.value))
+            judge_cases(file, span_of(file, let.value), type, cases_of(file, let.value, type), written_cases);
     }
     else if (ast::is_valid(let.value))
         type = check_expr(scope, let.value);
@@ -332,6 +355,9 @@ void checker::check_let(function_scope& scope, ast::stmt_id id, ast::let_stmt co
 
     if (auto const* const a = find_attribute(file, ast.at(id).attributes, "indexed"))
         judge_indexed(file, *a, type);
+    // CHK-554: a query is the `let` of its `world.query`, and a candidate no let's at all
+    if (!judge_query_let(scope, id, let, type))
+        type = error_type;
 
     if (!ast::is_valid(let.pattern))
         return;
@@ -376,7 +402,18 @@ void checker::check_let(function_scope& scope, ast::stmt_id id, ast::let_stmt co
     set_target(file, let.pattern, self);
     judge_shadowing(file, text_of(file, n->where), n->where);
     // only now: the value of `let x = x` does not see the `x` it declares
-    declare_local(scope, {.name = text_of(file, n->where), .where = self, .type = type, .is_mut = let.is_mut});
+    // CHK-542: a written type says what the local holds; without one a let that is no `mut` keeps what its value is
+    // known to be, and a `let mut` holds any case
+    auto const known = ast::is_valid(let.type)                 ? written_cases
+                     : !let.is_mut && ast::is_valid(let.value) ? cases_of(file, let.value, type)
+                                                               : u32(0);
+    declare_local(scope, {.name = text_of(file, n->where),
+                          .where = self,
+                          .type = type,
+                          .is_mut = let.is_mut,
+                          .cases = type != error_type && out.at(type).has_cases() && known != out.at(type).every_leaf()
+                                     ? known
+                                     : u32(0)});
 }
 
 sgl::check::local_indexing checker::indexing_of(i32 file, ast::attribute const* a) const
@@ -591,6 +628,30 @@ bool checker::judge_place(function_scope& scope, ast::expr_id expr, cc::string_v
         auto const kind = tables_of(file).target_at(root).kind;
         if ((kind == target_kind::overload || kind == target_kind::array_length) && !ast::is_valid(property))
             property = root;
+        // CHK-543: a part of a field of a case is assigned through its field, decoded and encoded again, which no
+        // body handed it as a place could do
+        if (kind == target_kind::variant_field && root != expr && !what.empty())
+        {
+            if (quiet_why != nullptr)
+                *quiet_why = cc::format("a part of a field of a case as {} is not supported yet", what);
+            else
+                unsupported(file, span_of(file, expr), cc::format("a part of a field of a case as {}", what));
+            return false;
+        }
+        // CHK-546: a field a `@when` reads says which case the value is, which an assignment would change under it
+        if (auto const& t = tables_of(file).target_at(root);
+            (kind == target_kind::field || kind == target_kind::variant_field) && is_valid(t.symbol)
+            && is_valid(out.at(t.symbol).type) && out.at(out.at(t.symbol).type).has_cases())
+        {
+            auto const& owner = out.at(out.at(t.symbol).type);
+            auto const& member
+                = kind == target_kind::field ? out.at(owner.members)[t.index] : out.at(owner.variant_fields)[t.index];
+            if (member.is_discriminant)
+                return refuse(span_of(file, expr), cc::format("{} says which case a {} is, as a @when reads it, so "
+                                                              "only a whole value "
+                                                              "assigned changes it",
+                                                              member.name, out.name_of(out.at(t.symbol).type)));
+        }
         root = node.as<ast::member>().object;
     }
     if (ast::is_valid(property))
@@ -672,6 +733,20 @@ void checker::check_assign(function_scope& scope, ast::stmt_id id, ast::assign_s
     {
         if (is_texel)
             check_texel_store(scope, assign.value, place);
+        // CHK-549: a field with a range holds a value in it
+        if (auto const& t = tables_of(file).target_at(assign.target);
+            (t.kind == target_kind::field || t.kind == target_kind::variant_field) && is_valid(t.symbol))
+        {
+            auto const& owner = out.at(out.at(t.symbol).type);
+            auto const& member
+                = t.kind == target_kind::field ? out.at(owner.members)[t.index] : out.at(owner.variant_fields)[t.index];
+            if (member.has_range)
+                judge_range(file, assign.value, member);
+        }
+        // CHK-541: a local of some cases takes a value of them alone
+        if (auto const* const n = ast.at(assign.target).node.try_as<ast::name>())
+            if (auto const* const local = scope.find_local(text_of(file, n->where)); local != nullptr && local->cases != 0)
+                judge_cases(file, span_of(file, assign.value), place, cases_of(file, assign.value, place), local->cases);
         return;
     }
 
@@ -706,13 +781,41 @@ flow checker::check_if(function_scope& scope, ast::if_stmt const& chain)
     auto const branches = ast_of(scope.file).at(chain.branches);
     auto result = flow::exits;
     auto has_else = false;
+    // CHK-542: a branch runs where its condition holds and every one before it failed, and what follows the chain is
+    // what every path that reaches it agrees on
+    auto const visible = scope.locals.size();
+    auto failed = cc::vector<narrowing>();
+    auto reaching = cc::vector<cc::vector<narrowing>>();
+    auto const over = [](cc::vector<narrowing> base, cc::span<narrowing const> later)
+    {
+        for (auto const& l : later)
+        {
+            auto replaced = false;
+            for (auto& b : base)
+                if (b.name == l.name)
+                {
+                    b.cases = l.cases;
+                    replaced = true;
+                }
+            if (!replaced)
+                base.push_back(l);
+        }
+        return base;
+    };
     for (auto const& branch : branches)
     {
         auto known = cc::optional<bool>(true);
+        auto holds = cc::vector<narrowing>();
+        auto fails = cc::vector<narrowing>();
         if (ast::is_valid(branch.condition))
         {
             check_condition(scope, branch.condition);
             known = chain.is_const ? known_condition(scope.file, branch.condition) : cc::nullopt;
+            if (!chain.is_const)
+            {
+                holds = narrowings_of(scope, branch.condition, true);
+                fails = narrowings_of(scope, branch.condition, false);
+            }
         }
         else
             has_else = true;
@@ -721,12 +824,27 @@ flow checker::check_if(function_scope& scope, ast::if_stmt const& chain)
         // What follows a decided chain serves the instances that take another branch, so it is never unreachable.
         if (known.has_value() && !known.value())
             continue;
+        auto const before = scope.locals.size();
+        narrow(scope, holds);
         auto const taken = check_nested(scope, branch.then);
+        scope.locals.resize_down_to(before);
         if (chain.is_const && known.has_value() && ast::is_valid(branch.condition))
+        {
+            scope.locals.resize_down_to(visible);
             return taken == flow::exits ? flow::unknown : taken;
+        }
+        if (taken != flow::exits)
+            reaching.push_back(over(failed, holds));
         result = either(result, taken);
+        narrow(scope, fails);
+        failed = over(cc::move(failed), fails);
     }
+    scope.locals.resize_down_to(visible);
     // Without an `else` the chain can be skipped whole.
+    if (!has_else)
+        reaching.push_back(failed);
+    if (!chain.is_const)
+        narrow(scope, join(reaching));
     return has_else ? result : flow::falls_through;
 }
 
@@ -767,6 +885,9 @@ void checker::check_for(function_scope& scope, ast::stmt_id id, ast::for_stmt co
     auto const& ast = ast_of(file);
     auto const int_type = type_of_builtin(builtins::k_int, file, span_of(file, id));
 
+    // CHK-555: a query's candidates are the one thing besides an int range a `for` runs over
+    if (is_candidates(file, loop.iterable))
+        return check_candidate_loop(scope, id, loop);
     auto const walk = ast::is_valid(loop.iterable) ? range_walk_of(file, loop.iterable) : range_walk();
     auto const* const r = walk.range;
     // CHK-415: a step is an int constant of at least 1, so the walk's length is known from its bounds alone
@@ -918,6 +1039,10 @@ void checker::check_return(function_scope& scope, source_span where, ast::expr_i
     }
     // CHK-82: the result type is expected of the value, which a literal converts to
     (void)check_expected(scope, value, scope.result);
+    // CHK-541: `-> material.glass` returns values of those cases alone
+    if (is_valid(scope.function) && out.at(scope.function).info >= 0)
+        judge_cases(file, span_of(file, value), scope.result, cases_of(file, value, scope.result),
+                    out.functions[out.at(scope.function).info].result_cases);
 }
 
 // ---- recursion ------------------------------------------------------------------------------------------------------

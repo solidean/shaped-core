@@ -466,6 +466,13 @@ public:
             return _partitioned_tlas;
         case sg::feature::clustered_geometry:
             return _clusters.has_value();
+        case sg::feature::nonuniform_atomic_workaround:
+            // docs/bugs-external/nonuniform-indexed-atomics-count-other-lanes
+            return !metrics.adapter().is_software
+                && (metrics.adapter().vendor_id == 0x8086 || metrics.adapter().vendor_id == 0x1002);
+        case sg::feature::nonuniform_length_workaround:
+            // docs/bugs-external/amd-vulkan-nonuniform-array-length-reads-first-lane
+            return !metrics.adapter().is_software && metrics.adapter().vendor_id == 0x1002;
         }
         return false;
     }
