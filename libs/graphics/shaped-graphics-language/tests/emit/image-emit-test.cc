@@ -171,6 +171,63 @@ TEST("sgl emit - WGSL and MSL write an out or read-only 16-bit normalized image,
     CHECK(sgl::emit::dump_errors(emit_source(k_norm16, 1, target::hlsl_vulkan)) == "");
 }
 
+TEST("sgl emit - a mut 16-bit normalized image in a binding array, a generic or an option's format is refused and "
+     "qualified as a plain one is")
+{
+    // EMIT-280 looks through a binding array to its element, and HLSL's array keeps the element's qualifier
+    constexpr auto arrayed = "require extended_image_formats, readwrite_image_formats, binding_arrays\n"
+                             "\n"
+                             "binding many:\n"
+                             "    normals: mut image_2d[.rg16_snorm][4]\n"
+                             "\n"
+                             "@compute(8, 8) fun spread(@thread_id id: int3){many}:\n"
+                             "    many.normals[1].store(id.xy, -many.normals[0].load(id.xy))\n";
+    CHECK(text_of(arrayed, target::hlsl_dx12)
+              .contains("RWTexture2D<snorm float2> many_normals[4] : register(u0, space0);\n"));
+    CHECK(sgl::emit::dump_errors(emit_source(arrayed, 0, target::msl)).contains("a `mut` image of .rg16_snorm"));
+
+    // a generic over the format takes the binding's image, and no text of it drops the qualifier
+    constexpr auto generic = "require extended_image_formats, readwrite_image_formats\n"
+                             "\n"
+                             "binding frames:\n"
+                             "    color: mut image_2d[.rgba16_unorm]\n"
+                             "\n"
+                             "fun copy_texel[f: pixel_format](img: mut image_2d[f], from: int2, to: int2):\n"
+                             "    img.store(to, img.load(from))\n"
+                             "\n"
+                             "@compute(8, 8) fun shuffle(@thread_id id: int3){frames}:\n"
+                             "    copy_texel(frames.color, id.xy, id.yx)\n";
+    auto const generic_dx12 = text_of(generic, target::hlsl_dx12);
+    CHECK(generic_dx12.contains("RWTexture2D<unorm float4> frames_color : register(u0, space0);\n"));
+    CHECK(!generic_dx12.contains("RWTexture2D<float4>"));
+    CHECK(sgl::emit::dump_errors(emit_source(generic, 0, target::wgsl)).contains("a `mut` image of .rgba16_unorm"));
+
+    // an option's format is the format the compile gave, judged and spelled as a written one
+    constexpr auto picked = "require extended_image_formats, readwrite_image_formats\n"
+                            "\n"
+                            "@option const out_format: pixel_format = .r32_float\n"
+                            "\n"
+                            "binding io:\n"
+                            "    picked: mut image_2d[out_format]\n"
+                            "\n"
+                            "@compute(8, 8) fun pick(@thread_id id: int3){io}:\n"
+                            "    io.picked[id.xy] = io.picked[id.xy]\n";
+    sgl::check::option_value const given[] = {{.name = "out_format", .value = cc::string(".rg16_unorm")}};
+    auto const native
+        = sgl::compile_to_text({.source = picked, .entry_point = "pick", .target = target::hlsl_dx12, .options = given});
+    REQUIRE(native.has_value()).dump("error", native.has_error() ? native.error() : cc::string());
+    CHECK(native.value().text.contains("RWTexture2D<unorm float2> io_picked : register(u0, space0);\n"));
+    for (auto const t : {target::wgsl, target::msl})
+    {
+        auto const refused
+            = sgl::compile_to_text({.source = picked, .entry_point = "pick", .target = t, .options = given});
+        REQUIRE(refused.has_error());
+        CHECK(refused.error().contains("a `mut` image of .rg16_unorm")).dump("error", refused.error());
+        // the default format reads and writes everywhere
+        CHECK(sgl::compile_to_text({.source = picked, .entry_point = "pick", .target = t}).has_value());
+    }
+}
+
 TEST("sgl emit - a coherent member is globallycoherent in HLSL, and device-coherent memory or a device-coherent "
      "texture in MSL")
 {

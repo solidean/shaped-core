@@ -87,7 +87,7 @@ enum class sg::feature
     /// A texture of a 16-bit normalized format, `r16_unorm` through `rgba16_snorm`, needs it whatever its usage, since core WebGPU has none of them.
     /// WebGPU grants them with `texture-formats-tier1` and `bgra8unorm-storage`.
     /// Vulkan grants them with `shaderStorageImageExtendedFormats` plus `VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT` on `B8G8R8A8_UNORM`
-    /// and on each 16-bit normalized format.
+    /// and on each 16-bit normalized format, which must also be sampled and a color attachment.
     /// D3D12 grants them with a typed UAV on `DXGI_FORMAT_B8G8R8A8_UNORM` and a typed UAV store on each 16-bit normalized
     /// format, the rest being required at feature level 11_0.
     extended_image_formats,

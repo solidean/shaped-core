@@ -229,19 +229,25 @@ public:
         vkGetPhysicalDeviceFormatProperties(_physical_device, VK_FORMAT_B8G8R8A8_UNORM, &bgra8);
         if ((bgra8.optimalTilingFeatures & VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT) == 0)
             _extended_image_formats = false;
-        // Nor are the 16-bit normalized formats' storage required: a device lacking one loses both image features, since
-        // the format is named in the shader and its storage support is all a read-write image of it asks besides.
+        // The 16-bit normalized formats' storage is asked per format too, which only a device without
+        // shaderStorageImageExtendedFormats may lack: one lacking it loses both image features, since the format is
+        // named in the shader and its storage support is all a read-write image of it asks besides.
+        // Their sampling, color attachment and blending are optional too, and sg creates a texture of one, of any usage,
+        // under extended_image_formats alone, which WebGPU's texture-formats-tier1 makes blendable, so a device lacking
+        // any of them loses that feature.
         _readwrite_image_formats = true;
+        constexpr auto k_norm16_texture_features
+            = VkFormatFeatureFlags(VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT
+                                   | VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND_BIT | VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT);
         for (auto const format : {VK_FORMAT_R16_UNORM, VK_FORMAT_R16_SNORM, VK_FORMAT_R16G16_UNORM,
                                   VK_FORMAT_R16G16_SNORM, VK_FORMAT_R16G16B16A16_UNORM, VK_FORMAT_R16G16B16A16_SNORM})
         {
             auto properties = VkFormatProperties{};
             vkGetPhysicalDeviceFormatProperties(_physical_device, format, &properties);
-            if ((properties.optimalTilingFeatures & VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT) == 0)
-            {
+            if ((properties.optimalTilingFeatures & k_norm16_texture_features) != k_norm16_texture_features)
                 _extended_image_formats = false;
+            if ((properties.optimalTilingFeatures & VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT) == 0)
                 _readwrite_image_formats = false;
-            }
         }
 
         // Linear filtering of the three 32-bit float formats is optional in Vulkan, so it is asked per format.
