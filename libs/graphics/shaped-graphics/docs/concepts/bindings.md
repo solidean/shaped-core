@@ -131,6 +131,7 @@ Most judgements are made before any backend sees the request, in [portability.cc
   The portable set is core WebGPU's image formats, and the refusal comes at texture creation and at layout creation.
   A texture of a 16-bit normalized format needs it whatever its usage, since core WebGPU has no texture of one at all.
 - A `read_write` image binding of a 16-bit normalized format needs `feature::readwrite_norm16_image_formats`, which no webgpu or metal device has, and the refusal comes at layout creation.
+  A view of one bound to any `read_write` image binding is judged by its own format at group creation too, so a layout reflected from HLSL with no format is covered.
 - A 32-bit float view bound to a `filterable_float` binding needs `feature::float32_filtering`, and the refusal comes at group creation.
   A 16-bit normalized one needs `feature::norm16_filtering`, which webgpu never has, judged the same way.
   A view of format `undefined` reads as its texture's own format, so that is the format judged.

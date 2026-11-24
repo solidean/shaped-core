@@ -16,6 +16,13 @@ bool needs_extended_image_format(pixel_format f)
     return supports_typed_uav(f) && !is_portable_image_format(f);
 }
 
+/// Whether `supported` has every feature a view is judged by, so that no view is refused.
+bool judges_no_view(feature_set supported)
+{
+    return supported.has(feature::float32_filtering) && supported.has(feature::norm16_filtering)
+        && supported.has(feature::readwrite_norm16_image_formats);
+}
+
 pixel_format read_format_of(raw_texture_view const& view)
 {
     if (view.format != pixel_format::undefined || view.texture == nullptr)
@@ -68,8 +75,20 @@ cc::optional<cc::string> impl::find_unsupported_texture(bool extended_image_form
 
 cc::optional<cc::string> impl::find_unsupported_view(feature_set supported, binding const& b, cc::span<raw_view const> views)
 {
-    if (supported.has(feature::float32_filtering) && supported.has(feature::norm16_filtering))
+    if (judges_no_view(supported))
         return {};
+    // a read-write image of a 16-bit normalized view, judged by the view's own format whatever the layout states, so a
+    // layout reflected from HLSL with no format is judged too
+    if (b.type == binding_type::image && b.access == access_mode::read_write
+        && !supported.has(feature::readwrite_norm16_image_formats))
+        for (auto const& view : views)
+            if (auto const* const image = try_as_texture_view(view);
+                image != nullptr && is_norm16_format(read_format_of(*image)))
+                return cc::format("binding_group: '{}' is a read_write image and its view is a 16-bit normalized "
+                                  "format, which needs sg::feature::readwrite_norm16_image_formats (which no webgpu or "
+                                  "metal device has), and this device lacks it; bind it as a write-only or read-only "
+                                  "image instead",
+                                  b.name);
     if (b.type != binding_type::texture || b.sample_type != texture_sample_type::filterable_float)
         return {};
     for (auto const& view : views)
@@ -96,7 +115,7 @@ cc::optional<cc::string> impl::find_unsupported_view(feature_set supported,
                                                      cc::span<binding const> bindings,
                                                      cc::span<named_view const> views)
 {
-    if (supported.has(feature::float32_filtering) && supported.has(feature::norm16_filtering))
+    if (judges_no_view(supported))
         return {};
     for (auto const& v : views)
         for (auto const& b : bindings)
@@ -138,7 +157,7 @@ cc::optional<cc::string> impl::find_unsupported_view(feature_set supported,
                                                      cc::span<binding const> bindings,
                                                      cc::span<slotted_view const> views)
 {
-    if (supported.has(feature::float32_filtering) && supported.has(feature::norm16_filtering))
+    if (judges_no_view(supported))
         return {};
     for (auto const& v : views)
     {

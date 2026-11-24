@@ -99,6 +99,28 @@ INVOCABLE_TEST("sg - a read-write 16-bit normalized image layout needs readwrite
     CHECK(ctx->uncached.try_create_binding_group_layout(bindings).has_value() == granted);
 }
 
+INVOCABLE_TEST("sg - a 16-bit normalized view on a read-write image binding that states no format needs "
+               "readwrite_norm16_image_formats",
+               (sg::context_handle const& ctx))
+{
+    if (!ctx->supports(sg::feature::extended_image_formats))
+        return; // no texture of one to view
+    // a layout as HLSL reflects one, which webgpu refuses before any view exists
+    auto bindings = cc::vector<sg::binding>();
+    bindings.push_back({.name = "normal", .type = sg::binding_type::image, .access = sg::access_mode::read_write});
+    bindings[0].texture_dimension = sg::texture_view_dimension::tex_2d;
+    sg::apply_stage_visibility(bindings, sg::shader_stage::compute);
+    auto const layout = ctx->uncached.try_create_binding_group_layout(bindings);
+    if (!layout.has_value())
+        return;
+    auto const texture = sg::texture_2d::from_raw(
+        ctx->persistent.create_raw_texture(texture_of(sg::pixel_format::rg16_unorm, sg::texture_usage::image)));
+    auto const views
+        = cc::vector<sg::named_view>{{.name = "normal", .view = texture.as_image_view<sg::pixel_format::rg16_unorm>()}};
+    CHECK(creates([&] { return ctx->persistent.create_binding_group(layout.value(), views, {}); })
+          == ctx->supports(sg::feature::readwrite_norm16_image_formats));
+}
+
 INVOCABLE_TEST("sg - a 16-bit normalized view on a filterable binding needs norm16_filtering",
                (sg::context_handle const& ctx))
 {

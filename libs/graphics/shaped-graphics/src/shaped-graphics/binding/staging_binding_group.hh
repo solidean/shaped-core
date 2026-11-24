@@ -230,7 +230,8 @@ private:
     // Stamped by the persistent scope right after the backend creates the group: the device's
     // features, which a view's filtering is judged by, and whether the context's portability and hit-record checks are on.
     friend class sg::context_persistent_scope;
-    feature_set _supported = feature_set(feature::float32_filtering) | feature::norm16_filtering;
+    feature_set _supported
+        = feature_set(feature::float32_filtering) | feature::norm16_filtering | feature::readwrite_norm16_image_formats;
     bool _records_buffer_uses = false;
     bool _records_tlases = false;
 };
