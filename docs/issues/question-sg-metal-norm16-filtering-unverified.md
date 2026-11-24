@@ -9,7 +9,8 @@ refs:
 
 # Metal grants `norm16_filtering` on every GPU, unverified
 
-sg's metal backend answers `sg::feature::norm16_filtering` true on every device: a sampled texture of `r16_unorm`, `r16_snorm`, `rg16_unorm`, `rg16_snorm`, `rgba16_unorm` or `rgba16_snorm` may be filtered.
+sg's metal backend answers `sg::feature::norm16_filtering` true on every device.
+So a sampled texture of `r16_unorm`, `r16_snorm`, `rg16_unorm`, `rg16_snorm`, `rgba16_unorm` or `rgba16_snorm` may be filtered there.
 That rests on Apple's Metal feature-set tables, read from memory, which give the 16-bit normalized formats the filter capability on the GPUs the backend's Metal 4 floor admits.
 Nobody has checked it, and Metal has no run-time query of a format's capabilities, so a wrong answer shows only as a filtered texture that comes out wrong, or a validation error.
 
