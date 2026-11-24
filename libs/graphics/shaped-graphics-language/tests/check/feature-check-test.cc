@@ -50,7 +50,7 @@ cc::string lib_user(cc::string_view body = "")
 } // namespace
 
 TEST("sgl check - an image of a 16-bit normalized format needs extended_image_formats, and a mut one "
-     "readwrite_image_formats")
+     "readwrite_norm16_image_formats")
 {
     // CHK-201: core WebGPU has none of the six, so each is outside the portable image formats
     for (auto const format : {"r16_unorm", "r16_snorm", "rg16_unorm", "rg16_snorm", "rgba16_unorm", "rgba16_snorm"})
@@ -68,9 +68,14 @@ TEST("sgl check - an image of a 16-bit normalized format needs extended_image_fo
         // a `mut` one asks for both, and each is named
         auto const read_written = cc::format("    a: mut image_2d[.{}]\n", format);
         CHECK(reports_for(listing("require extended_image_formats\n\n", read_written))
-                  .contains(cc::format("a `mut` image of .{} needs readwrite_image_formats", format)))
+                  .contains(cc::format("a `mut` image of .{} needs readwrite_norm16_image_formats", format)))
             .dump("format", format);
-        CHECK(reports_for(listing("require extended_image_formats, readwrite_image_formats\n\n", read_written)) == "")
+        // readwrite_image_formats does not grant it
+        CHECK(reports_for(listing("require extended_image_formats, readwrite_image_formats\n\n", read_written))
+                  .contains("readwrite_norm16_image_formats"))
+            .dump("format", format);
+        CHECK(reports_for(listing("require extended_image_formats, readwrite_norm16_image_formats\n\n", read_written))
+              == "")
             .dump("format", format);
     }
 }
@@ -111,7 +116,7 @@ TEST("sgl check - a require names a feature a shader can use, as sg names it")
              "shader_int64_atomics, "
              "unbounded_binding_arrays, shader_shared_int64_atomics, shader_int64_min_max_atomics, "
              "clustered_geometry, quad_control, multi_viewport, nonuniform_atomic_workaround, "
-             "nonuniform_length_workaround\n");
+             "nonuniform_length_workaround, readwrite_norm16_image_formats\n");
     CHECK(reports_for("require raytracing\n").contains("unknown-feature user:[raytracing]"));
     CHECK(reports_for("require ray_query, binding_arrays\n") == "");
 

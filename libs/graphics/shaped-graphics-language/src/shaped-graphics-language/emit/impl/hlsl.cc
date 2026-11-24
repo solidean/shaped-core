@@ -500,7 +500,7 @@ public:
                               t.is_depth ? cc::string_view("float") : type_text(p, *this, t.element));
         case type_kind::image:
         {
-            // EMIT-281: a 16-bit normalized texel says so, which DXIL records as the view's component type
+            // EMIT-280: a 16-bit normalized texel says so, which DXIL records as the view's component type
             auto const texel = builtin_spelling(p, texel_name_of(t.format));
             auto const qualifier = hlsl_texel_qualifier(t.format);
             if (qualifier.empty())

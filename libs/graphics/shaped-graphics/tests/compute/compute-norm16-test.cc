@@ -93,11 +93,9 @@ ASYNC_INVOCABLE_TEST("sg - an SGL shader stores 16-bit normalized images, clampe
     }
 
     // a `mut` image reads each code back as its float: the unorm pair swapped, the snorm channels negated
-    if (!ctx->supports(sg::feature::readwrite_image_formats))
+    // no metal or webgpu device has it, and SGL writes no `mut` one for msl or wgsl (EMIT-109)
+    if (!ctx->supports(sg::feature::readwrite_norm16_image_formats))
         SKIP("this context reads and writes no 16-bit normalized image in one shader");
-    if (ctx->backend() == sg::backend_kind::metal || ctx->backend() == sg::backend_kind::webgpu)
-        SKIP("SGL writes no `mut` 16-bit normalized image for msl or wgsl, whose devices never read and write one "
-             "(EMIT-280)");
     {
         auto const pipeline = co_await shaders::norm16_images::flip_norm16.acquire_pipeline(*ctx);
         auto const layout = ctx->cached.acquire_binding_group_layout<shaders::norm16_images::flipped>();

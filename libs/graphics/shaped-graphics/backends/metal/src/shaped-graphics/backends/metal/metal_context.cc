@@ -165,7 +165,13 @@ bool metal_context::supports(sg::feature f) const
     case sg::feature::pixel_view_read_workaround:
     case sg::feature::nonuniform_atomic_workaround:
     case sg::feature::nonuniform_length_workaround:
+    // read-write tier 2 names no 16-bit normalized format
+    case sg::feature::readwrite_norm16_image_formats:
         return false;
+    case sg::feature::norm16_filtering:
+        // Apple's feature-set tables give the six the filter capability on every GPU this backend's floor admits, and
+        // Metal asks nothing of a format at run time
+        return true;
     case sg::feature::ray_tracing_motion_blur:
         // motion acceleration structures, which a pipeline's trace takes natively
         return true;

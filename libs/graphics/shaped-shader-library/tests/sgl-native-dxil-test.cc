@@ -1345,7 +1345,7 @@ TEST("slib - SGL's DXIL of a 16-bit normalized image passes the validator, and i
         {
             // a `mut` one loads the texel too, which is a typed UAV load of the format
             auto const source
-                = cc::format("require extended_image_formats, readwrite_image_formats\n"
+                = cc::format("require extended_image_formats, readwrite_norm16_image_formats\n"
                              "\n"
                              "binding work:\n"
                              "    img: {} image_2d[.{}]\n"
@@ -1355,7 +1355,7 @@ TEST("slib - SGL's DXIL of a 16-bit normalized image passes the validator, and i
                              "{}",
                              access, f.name, f.value,
                              cc::string_view(access) == "mut" ? "    work.img[id.xy] += work.img[id.xy]\n" : "");
-            // EMIT-281: DXIL records the component type `unorm float2` and `snorm float4` say, as UNormF32 or SNormF32
+            // EMIT-280: DXIL records the component type `unorm float2` and `snorm float4` say, as UNormF32 or SNormF32
             auto const component
                 = f.name.ends_with("_unorm") ? cc::string_view("UAVunorm_f32") : cc::string_view("UAVsnorm_f32");
 

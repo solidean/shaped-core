@@ -256,7 +256,7 @@ TEST("sgl spirv - a 16-bit normalized image is a storage image of its format, an
         {
             // a `mut` one reads the texel back too, which the format named in the type makes a typed load
             auto const source
-                = cc::format("require extended_image_formats, readwrite_image_formats\n"
+                = cc::format("require extended_image_formats, readwrite_norm16_image_formats\n"
                              "\n"
                              "binding work:\n"
                              "    img: {} image_2d[.{}]\n"

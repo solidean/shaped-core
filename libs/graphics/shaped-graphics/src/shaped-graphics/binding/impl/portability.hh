@@ -8,30 +8,31 @@
 #include <shaped-graphics/resource/views.hh>
 
 // A form a device lacks the feature for is refused here, before any backend sees it, so every backend refuses it alike.
-// Each judgement takes the one feature's answer rather than the context, so a device lacking it is testable anywhere.
+// Each judgement takes the features' answers rather than the context, so a device lacking one is testable anywhere.
 // See libs/graphics/shaped-graphics/docs/concepts/bindings.md, "Features".
 namespace sg::impl
 {
 /// A binding whose access its kind cannot carry, as a message — refused whatever the device.
-/// Otherwise an image whose format needs `feature::extended_image_formats`, where `extended_image_formats` is false.
-[[nodiscard]] cc::optional<cc::string> find_unsupported_binding(bool extended_image_formats,
-                                                                cc::span<binding const> bindings);
+/// Otherwise an image whose format needs `feature::extended_image_formats` where `supported` lacks it, or a read-write
+/// image of a 16-bit normalized format where `supported` lacks `feature::readwrite_norm16_image_formats`.
+[[nodiscard]] cc::optional<cc::string> find_unsupported_binding(feature_set supported, cc::span<binding const> bindings);
 
 /// A texture with image usage whose format needs `feature::extended_image_formats`, as a message, where `extended_image_formats` is false.
 /// A texture of a 16-bit normalized format needs it whatever its usage, since core WebGPU has no texture of one at all.
 [[nodiscard]] cc::optional<cc::string> find_unsupported_texture(bool extended_image_formats,
                                                                 texture_description const& desc);
 
-/// A 32-bit float view bound to a `filterable_float` binding, as a message, where `float32_filtering` is false.
+/// A view bound to a `filterable_float` binding whose format `supported` cannot filter, as a message: a 32-bit float one
+/// without `feature::float32_filtering`, or a 16-bit normalized one without `feature::norm16_filtering`.
 /// A view of format `undefined` is judged by its texture's own format, which is what it reads as.
 /// A binding with no sample type is not judged: a layout reflected from HLSL states none, and only WebGPU reads one.
-[[nodiscard]] cc::optional<cc::string> find_unsupported_view(bool float32_filtering,
+[[nodiscard]] cc::optional<cc::string> find_unsupported_view(feature_set supported,
                                                              binding const& b,
                                                              cc::span<raw_view const> views);
-[[nodiscard]] cc::optional<cc::string> find_unsupported_view(bool float32_filtering,
+[[nodiscard]] cc::optional<cc::string> find_unsupported_view(feature_set supported,
                                                              cc::span<binding const> bindings,
                                                              cc::span<named_view const> views);
-[[nodiscard]] cc::optional<cc::string> find_unsupported_view(bool float32_filtering,
+[[nodiscard]] cc::optional<cc::string> find_unsupported_view(feature_set supported,
                                                              cc::span<binding const> bindings,
                                                              cc::span<slotted_view const> views);
 

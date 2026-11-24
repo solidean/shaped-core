@@ -193,6 +193,9 @@ public:
         case sg::feature::pixel_view_read_workaround:
         case sg::feature::nonuniform_atomic_workaround:
         case sg::feature::nonuniform_length_workaround:
+        // texture-formats-tier2 reads and writes none of the six, and WebGPU samples them as unfilterable-float alone
+        case sg::feature::readwrite_norm16_image_formats:
+        case sg::feature::norm16_filtering:
             return false;
         case sg::feature::ray_tracing_motion_blur:
             // the polyfill's walk places a moving instance at the ray's time

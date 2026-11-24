@@ -93,6 +93,8 @@ enum class sgl::check::feature : sgl::u8
     /// No program names it: the device's vulkan driver answers the length of a `nonuniform` element of a binding array
     /// with another lane's, so a vulkan text asks each length at uniform indices.
     nonuniform_length_workaround,
+    /// A `mut` image of a 16-bit normalized format, which WebGPU and Metal have on no device.
+    readwrite_norm16_image_formats,
 };
 
 CC_FLAG_ENUM_INDEXED(sgl::check, feature, u64);
@@ -102,44 +104,45 @@ namespace sgl::check
 using feature_set = cc::flags<feature>;
 
 inline constexpr cc::string_view k_feature_names[] = {
-    "binding_arrays",               //
-    "extended_image_formats",       //
-    "readwrite_image_formats",      //
-    "multisampled_array_textures",  //
-    "ray_query",                    //
-    "raytracing_pipeline",          //
-    "primitive_index",              //
-    "sample_rate_shading",          //
-    "geometry_shader",              //
-    "tessellation_shader",          //
-    "mesh_shader",                  //
-    "shader_f16",                   //
-    "shader_int16",                 //
-    "subgroups",                    //
-    "device_coherence",             //
-    "image_atomics",                //
-    "first_instance",               //
-    "helper_lane_query",            //
-    "vertex_layer_output",          //
-    "float_atomic_add",             //
-    "shader_execution_reordering",  //
-    "opacity_micromap",             //
-    "float_specials",               //
-    "float_denormals",              //
-    "view_instancing",              //
-    "pixel_view_read_workaround",   //
-    "vertex_pipeline_stores",       //
-    "shader_int64",                 //
-    "shader_f64",                   //
-    "shader_int64_atomics",         //
-    "unbounded_binding_arrays",     //
-    "shader_shared_int64_atomics",  //
-    "shader_int64_min_max_atomics", //
-    "clustered_geometry",           //
-    "quad_control",                 //
-    "multi_viewport",               //
-    "nonuniform_atomic_workaround", //
-    "nonuniform_length_workaround", //
+    "binding_arrays",                 //
+    "extended_image_formats",         //
+    "readwrite_image_formats",        //
+    "multisampled_array_textures",    //
+    "ray_query",                      //
+    "raytracing_pipeline",            //
+    "primitive_index",                //
+    "sample_rate_shading",            //
+    "geometry_shader",                //
+    "tessellation_shader",            //
+    "mesh_shader",                    //
+    "shader_f16",                     //
+    "shader_int16",                   //
+    "subgroups",                      //
+    "device_coherence",               //
+    "image_atomics",                  //
+    "first_instance",                 //
+    "helper_lane_query",              //
+    "vertex_layer_output",            //
+    "float_atomic_add",               //
+    "shader_execution_reordering",    //
+    "opacity_micromap",               //
+    "float_specials",                 //
+    "float_denormals",                //
+    "view_instancing",                //
+    "pixel_view_read_workaround",     //
+    "vertex_pipeline_stores",         //
+    "shader_int64",                   //
+    "shader_f64",                     //
+    "shader_int64_atomics",           //
+    "unbounded_binding_arrays",       //
+    "shader_shared_int64_atomics",    //
+    "shader_int64_min_max_atomics",   //
+    "clustered_geometry",             //
+    "quad_control",                   //
+    "multi_viewport",                 //
+    "nonuniform_atomic_workaround",   //
+    "nonuniform_length_workaround",   //
+    "readwrite_norm16_image_formats", //
 };
 inline constexpr isize k_feature_count = isize(sizeof(k_feature_names) / sizeof(k_feature_names[0]));
 

@@ -80,6 +80,55 @@ INVOCABLE_TEST("sg - a 16-bit normalized texture needs extended_image_formats wh
     }
 }
 
+INVOCABLE_TEST("sg - a read-write 16-bit normalized image layout needs readwrite_norm16_image_formats",
+               (sg::context_handle const& ctx))
+{
+    auto const granted = ctx->supports(sg::feature::readwrite_norm16_image_formats);
+    // the read-write image of a format it needs first, and never on webgpu or metal
+    if (granted)
+        CHECK(ctx->supports(sg::feature::extended_image_formats));
+    if (ctx->backend() == sg::backend_kind::webgpu || ctx->backend() == sg::backend_kind::metal)
+        CHECK(!granted);
+
+    auto bindings = cc::vector<sg::binding>();
+    bindings.push_back({.name = "normal", .type = sg::binding_type::image, .access = sg::access_mode::read_write});
+    bindings[0].texture_dimension = sg::texture_view_dimension::tex_2d;
+    bindings[0].image_format = sg::pixel_format::rg16_unorm;
+    sg::apply_stage_visibility(bindings, sg::shader_stage::compute);
+    CHECK(ctx->uncached.try_create_binding_group_layout(bindings).has_value() == granted);
+}
+
+INVOCABLE_TEST("sg - a 16-bit normalized view on a filterable binding needs norm16_filtering",
+               (sg::context_handle const& ctx))
+{
+    if (!ctx->supports(sg::feature::extended_image_formats))
+        return; // no texture of one to view
+    auto const granted = ctx->supports(sg::feature::norm16_filtering);
+    if (ctx->backend() == sg::backend_kind::webgpu)
+        CHECK(!granted);
+
+    auto const layout_of = [&](sg::texture_sample_type sample_type)
+    {
+        auto bindings = cc::vector<sg::binding>();
+        bindings.push_back({.name = "source", .type = sg::binding_type::texture});
+        bindings[0].texture_dimension = sg::texture_view_dimension::tex_2d;
+        bindings[0].sample_type = sample_type;
+        sg::apply_stage_visibility(bindings, sg::shader_stage::compute);
+        return ctx->uncached.create_binding_group_layout(bindings);
+    };
+    auto const filterable = layout_of(sg::texture_sample_type::filterable_float);
+    auto const unfilterable = layout_of(sg::texture_sample_type::unfilterable_float);
+    auto const texture = sg::texture_2d::from_raw(
+        ctx->persistent.create_raw_texture(texture_of(sg::pixel_format::rgba16_snorm, sg::texture_usage::texture)));
+    auto const group_of = [&](sg::binding_group_layout_handle const& layout)
+    {
+        auto const views = cc::vector<sg::named_view>{{.name = "source", .view = texture.as_texture_view()}};
+        return creates([&] { return ctx->persistent.create_binding_group(layout, views, {}); });
+    };
+    CHECK(group_of(filterable) == granted);
+    CHECK(group_of(unfilterable));
+}
+
 INVOCABLE_TEST("sg - a 32-bit float view on a filterable binding needs float32_filtering",
                (sg::context_handle const& ctx))
 {

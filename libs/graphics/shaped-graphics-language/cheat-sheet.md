@@ -607,8 +607,8 @@ f(mut v.zx)                              // a swizzle of distinct letters is a m
 @compute(tile, tile) fun blur(...)       // an option stands where a const stands: a workgroup size, an array length, an image format
                                          // a used module's option is set as `common.taps`, apart from the program's `taps` (CHK-354)
 texel[.rg16_float]                       // the type an image of that format loads and stores: float2; texel[out_format] per compile (CHK-390)
-out image_2d[.rg16_unorm]                // 16-bit normalized: needs extended_image_formats; HLSL's texel is `unorm float2` (EMIT-281)
-                                         // a `mut` one is written for neither wgsl nor msl, whose devices never read and write one (EMIT-280)
+out image_2d[.rg16_unorm]                // 16-bit normalized: needs extended_image_formats; HLSL's texel is `unorm float2` (EMIT-280)
+                                         // a `mut` one needs readwrite_norm16_image_formats, which no wgsl or msl device has (EMIT-109)
 img[xy] = v as texel[out_format]         // a store into a host-picked format: .x / .xy of a wider v, a narrower one filled from (0, 0, 0, 1)
                                          // the ONLY width change: `float4 as float2` is no conversion, and no kind changes (CHK-391, CHK-392)
 if tile > 8: ...                         // a branch on a constant keeps the side it takes, in text, footprint and verdicts (CHK-356)

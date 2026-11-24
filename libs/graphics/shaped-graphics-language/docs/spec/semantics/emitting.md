@@ -33,18 +33,15 @@ Back to the [semantics](_index.md); the reasons are in [why/emitting.md](why/emi
 * **EMIT-11** An entry point the module does not hold is `unknown-entry-point`.
 * **EMIT-12** A construct that no emitter carries yet is `unsupported`, and its detail names the construct; an emitter never guesses an address.
 * **EMIT-13** An entry point is written for every target or for none ([why](why/emitting.md#emit-13)).
-  No error depends on the target but EMIT-109's, EMIT-122's, EMIT-128's, EMIT-261's, EMIT-265's and EMIT-280's.
+  No error depends on the target but EMIT-109's, EMIT-122's, EMIT-128's, EMIT-261's and EMIT-265's.
 * **EMIT-109** An entry point that needs a feature no device of the target has is `target-lacks-feature`, and its detail names the feature.
   Today that is `wgsl` against `binding_arrays`, `multisampled_array_textures`, `raytracing_pipeline`, `geometry_shader` and `tessellation_shader`.
   It is also `wgsl` against `shader_int16`, `device_coherence`, `image_atomics`, `first_instance` and `helper_lane_query`, which core WebGPU has none of.
   And it is `wgsl` against `shader_int64`, `shader_f64` and `shader_int64_atomics`, which no WebGPU has.
   It is `wgsl` against `vertex_pipeline_stores` too, which only a native vertex stage needs there, since WebGPU draws the others as compute (CHK-531).
+  It is `wgsl` and `msl` against `readwrite_norm16_image_formats`, a `mut` image of a 16-bit normalized format, whose read-write tiers 2 both leave the six out.
   `ray_query` is none of them: WGSL writes a trace's emulated form (EMIT-135).
   The shader chose it by `require`, so a portable shader still meets EMIT-13's promise.
-* **EMIT-280** An entry point whose bindings list a `mut` image of a 16-bit normalized format is `target-lacks-feature` on `wgsl` and `msl` ([why](why/emitting.md#emit-280)).
-  Its detail names the member and the format.
-  Each has a device with `readwrite_image_formats`, and neither has one that reads and writes these six, so the feature cannot say it.
-  An `out` or read-only image of one is CHK-201's alone, and `hlsl-dx12` and `hlsl-vulkan` write a `mut` one.
 * **EMIT-66** A tree that is not core is the error `not-core`, and its detail names the first node that offends.
 * **EMIT-67** A `print` is `unsupported` without diagnostics, which is why the driver legalizes every entry point without them there (LEGAL-63).
   A description holds whichever a compile asks for, so no print keeps `sgl describe` from writing one.
@@ -304,7 +301,7 @@ A binding that is not `@inline` is a group.
 * **EMIT-97** A texture, an image and a sampler member are each one global minted as a buffer's is, by EMIT-85, and each has its target's own type by the table below.
 * **EMIT-98** `hlsl-vulkan` states an image's format as `[[vk::image_format]]`, in DXC's spelling, which DXC makes a typed image of.
   `hlsl-dx12` states none, since dx12 takes the format from the view, and neither does `bgra8_unorm` on vulkan, which SPIR-V has no name for.
-* **EMIT-281** HLSL's texel of a 16-bit normalized image says its normalization, `RWTexture2D<unorm float2>` and `RWTexture2D<snorm float4>`, on both HLSL targets ([why](why/emitting.md#emit-281)).
+* **EMIT-280** HLSL's texel of a 16-bit normalized image says its normalization, `RWTexture2D<unorm float2>` and `RWTexture2D<snorm float4>`, on both HLSL targets ([why](why/emitting.md#emit-280)).
   SGL's own DXIL states the view's component type as DXC does of that text, `UNormF32` or `SNormF32`, and its own SPIR-V names the format as `[[vk::image_format]]` does.
   Every other format's texel is its plain type.
 * **EMIT-99** A static sampler of a group is its `SamplerState`, or `SamplerComparisonState` where it has a `compare`, with its address and nothing else.
@@ -1136,7 +1133,7 @@ The C++ struct a package generates is that layout byte for byte, padding include
 | `too-many-samplers` | EMIT-133 |
 | `too-many-acceleration-structures` | EMIT-135 |
 | `ray-data-conflict` | EMIT-139 |
-| `target-lacks-feature` | EMIT-109, EMIT-122, EMIT-206, EMIT-261, EMIT-280 |
+| `target-lacks-feature` | EMIT-109, EMIT-122, EMIT-206, EMIT-261 |
 
 ## Open
 

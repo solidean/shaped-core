@@ -154,13 +154,6 @@ cc::result<webgpu_binding_group_layout_handle> webgpu_binding_group_layout::crea
                                             "and this device lacks it; declare it write or read instead",
                                             b.name));
         }
-        // texture-formats-tier2's read-write list leaves the 16-bit normalized formats out, so no device has it
-        if (b.type == sg::binding_type::image && b.access == sg::access_mode::read_write
-            && sg::is_norm16_format(b.image_format.value_or(sg::pixel_format::undefined)))
-            return cc::error(cc::format("binding_group_layout: image '{}' is read_write in a 16-bit normalized "
-                                        "format, which no webgpu device reads and writes in one shader, "
-                                        "texture-formats-tier2 included; declare it write or read instead",
-                                        b.name));
         if (b.type == sg::binding_type::texture && b.texture_dimension == sg::texture_view_dimension::tex_2d_ms_array)
             return cc::error(cc::format("binding_group_layout: '{}' is a multisampled array texture, which webgpu does "
                                         "not have (ctx.supports(sg::feature::multisampled_array_textures) is false)",

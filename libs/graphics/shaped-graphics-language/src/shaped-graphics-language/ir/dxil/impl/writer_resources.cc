@@ -85,7 +85,7 @@ struct resource_rule
 }
 
 /// DXIL's `ComponentType` of a storage image's texel: `UNormF32` or `SNormF32` for a 16-bit normalized format, as DXC
-/// records `unorm float2` and `snorm float4` (EMIT-281), and its element's own type for every other.
+/// records `unorm float2` and `snorm float4` (EMIT-280), and its element's own type for every other.
 [[nodiscard]] constexpr u32 texel_component_type(ir::type const& image, ir::type const& element)
 {
     auto const qualifier = image.is_storage_image ? check::hlsl_texel_qualifier(image.format) : cc::string_view();

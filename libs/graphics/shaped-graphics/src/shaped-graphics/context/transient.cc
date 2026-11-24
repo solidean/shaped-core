@@ -194,8 +194,7 @@ cc::result<binding_group_handle> context_transient_scope::try_create_binding_gro
                                                                                    cc::span<named_sampler const> samplers)
 {
     CC_ASSERT(layout != nullptr, "binding_group requires a binding_group_layout");
-    if (auto unsupported
-        = impl::find_unsupported_view(_ctx.supports(feature::float32_filtering), layout->bindings(), views);
+    if (auto unsupported = impl::find_unsupported_view(_ctx.supported_features(), layout->bindings(), views);
         unsupported.has_value())
         return cc::error(cc::move(unsupported.value()));
     _ctx._stats.add(stat::binding_groups_created);
@@ -226,8 +225,7 @@ cc::result<binding_group_handle> context_transient_scope::try_create_binding_gro
                                                                                    cc::span<named_sampler const> samplers)
 {
     CC_ASSERT(layout != nullptr, "binding_group requires a binding_group_layout");
-    if (auto unsupported
-        = impl::find_unsupported_view(_ctx.supports(feature::float32_filtering), layout->bindings(), views);
+    if (auto unsupported = impl::find_unsupported_view(_ctx.supported_features(), layout->bindings(), views);
         unsupported.has_value())
         return cc::error(cc::move(unsupported.value()));
     _ctx._stats.add(stat::binding_groups_created);

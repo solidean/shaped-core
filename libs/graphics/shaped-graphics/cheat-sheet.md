@@ -92,6 +92,8 @@ ctx.supports(sg::feature::ray_query)               // bool — THE capability qu
                                                    //   ray_query | raytracing_pipeline | timestamp_query | headless_present | geometry_shader | tessellation_shader | mesh_shader | binding_arrays
                                                    //   | readwrite_image_formats (false on core webgpu: read_write storage only in r32 formats)
                                                    //   | float32_filtering (filter r32/rg32/rgba32_float) | extended_image_formats (storage beyond is_portable_image_format)
+                                                   //   | readwrite_norm16_image_formats (read_write r16..rgba16 _unorm/_snorm; never webgpu/metal)
+                                                   //   | norm16_filtering (filter r16..rgba16 _unorm/_snorm; never webgpu)
                                                    //   | unaligned_block_compression (false on webgpu and metal: a BC texture needs whole 4x4 blocks,
                                                    //     and create_texture THROWS on one that has not; desc.unaligned_block_error(supports) asks first)
                                                    //   | texture_compression_bc (BC1-BC7 textures; vulkan enables textureCompressionBC, metal on Apple-silicon Macs, webgpu with the adapter's feature)
@@ -569,7 +571,8 @@ sg::is_portable_image_format(f) // bool — storage every device takes (core Web
                                   //         feature::extended_image_formats, so gate compute writes on both
 sg::is_float32_format(f)        // bool  — r32/rg32/rgba32_float: filtering one needs feature::float32_filtering
 sg::is_norm16_format(f)         // bool  — r16..rgba16 _unorm/_snorm: a texture of one, of ANY usage, needs feature::extended_image_formats;
-                                //         WebGPU never filters one, and no WebGPU or Metal device reads and writes one as an image
+                                //         read_write needs feature::readwrite_norm16_image_formats (never webgpu/metal), filtering
+                                //         feature::norm16_filtering (never webgpu); both refused on every backend without it
 sg::format_block_size(f)        // int   — bytes per texel, or per 4x4 block for BC (0 for undefined)
 sg::format_block_extent(f)      // int   — 1 (uncompressed) or 4 (BC)
 sg::format_aspect_count(f)      // int   — subresource planes (1, or 2 for depth+stencil)

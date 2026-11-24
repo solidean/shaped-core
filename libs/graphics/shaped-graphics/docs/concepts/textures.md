@@ -45,7 +45,8 @@ Consequences of that rule:
   Core WebGPU has none of them as a texture of any usage, and `texture-formats-tier1` adds all six.
   `sg::feature::extended_image_formats` gates them: creating a texture of one without it is a refusal, sampled or not, on every backend alike.
   The dx12 and vulkan backends ask each of the six of the device before they report the feature.
-  WebGPU never filters one, and no WebGPU or Metal device reads and writes one as an image in one shader.
+  Each backend-specific use is a feature of its own: a read-write image of one is `sg::feature::readwrite_norm16_image_formats`,
+  which no WebGPU or Metal device has, and filtering one is `sg::feature::norm16_filtering`, which WebGPU never has.
 - **`D24_UNORM_S8`** is excluded, being absent on Apple-Silicon Metal.
   `depth32_float_stencil8` is the portable depth-stencil format.
 - **BC** (BC1–BC7) *is* included, mapping in all four APIs, but it is a **runtime capability** every backend gates.

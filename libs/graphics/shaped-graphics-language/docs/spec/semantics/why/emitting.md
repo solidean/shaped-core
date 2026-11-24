@@ -453,14 +453,6 @@ Its inline SPIR-V, `[[vk::ext_instruction(8, "GLSL.std.450")]]`, takes the doubl
 
 ## EMIT-280
 
-WebGPU's `texture-formats-tier2` lists the formats it reads and writes, and the 16-bit normalized ones are not on the list; Apple's read-write tier 2 names none of them either.
-So a device that grants `readwrite_image_formats` still refuses the pipeline on those two APIs, at a point where the shader can no longer be told apart from any other that needs the feature.
-A feature of its own would be one no WebGPU or Metal device ever grants, which says no more than the target does.
-Refusing the text names the cause where the shader is compiled, the way EMIT-109 refuses what no device of the target has.
-The refusal is limited to these six, which are what the target has nothing for; the other formats tier 2 leaves out are a separate question.
-
-## EMIT-281
-
 DXIL records a typed UAV's component type, and DXC writes `UNorm` for `unorm float2` where a plain `float2` is `F32`.
 The view's format is UNorm, so the template that says so is the one a validator or a driver can check the view against.
 D3D12 also accepts a plain `float2` over such a view; the stricter template was chosen.

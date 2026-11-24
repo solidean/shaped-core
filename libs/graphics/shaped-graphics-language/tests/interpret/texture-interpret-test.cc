@@ -124,7 +124,7 @@ TEST("sgl textures - a 16-bit normalized image stores the value as given, where 
     auto lean = floats(0.0f, 0.0f, 0.0f, 0.0f);
     auto rough = floats(0.0f, 0.0f, 0.0f, 0.0f);
     auto const source = "require extended_image_formats\n"
-                        "require readwrite_image_formats\n"
+                        "require readwrite_norm16_image_formats\n"
                         "binding scene:\n"
                         "    lean: mut image_2d[.rg16_unorm]\n"
                         "    rough: out image_2d[.r16_snorm]\n"

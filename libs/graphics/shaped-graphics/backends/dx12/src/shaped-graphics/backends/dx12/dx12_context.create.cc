@@ -637,9 +637,11 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
     auto extended_image_formats
         = SUCCEEDED(check_feature_support(device.Get(), D3D12_FEATURE_FORMAT_SUPPORT, &bgra8, sizeof(bgra8)))
        && (bgra8.Support1 & D3D12_FORMAT_SUPPORT1_TYPED_UNORDERED_ACCESS_VIEW) != 0;
-    // The 16-bit normalized formats are asked one by one: a typed UAV store of each for extended_image_formats, and a
-    // typed UAV load of each for readwrite_image_formats, which TypedUAVLoadAdditionalFormats does not grant as a group.
-    auto readwrite_image_formats = true;
+    // The 16-bit normalized formats are asked one by one: a typed UAV store of each for extended_image_formats, a
+    // typed UAV load of each for readwrite_norm16_image_formats, which TypedUAVLoadAdditionalFormats does not grant as
+    // a group, and a sample of each for norm16_filtering.
+    auto readwrite_norm16_image_formats = true;
+    auto norm16_filtering = true;
     for (auto const format : {DXGI_FORMAT_R16_UNORM, DXGI_FORMAT_R16_SNORM, DXGI_FORMAT_R16G16_UNORM,
                               DXGI_FORMAT_R16G16_SNORM, DXGI_FORMAT_R16G16B16A16_UNORM, DXGI_FORMAT_R16G16B16A16_SNORM})
     {
@@ -650,7 +652,9 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
             || (support.Support2 & D3D12_FORMAT_SUPPORT2_UAV_TYPED_STORE) == 0)
             extended_image_formats = false;
         if (!queried || (support.Support2 & D3D12_FORMAT_SUPPORT2_UAV_TYPED_LOAD) == 0)
-            readwrite_image_formats = false;
+            readwrite_norm16_image_formats = false;
+        if (!queried || (support.Support1 & D3D12_FORMAT_SUPPORT1_SHADER_SAMPLE) == 0)
+            norm16_filtering = false;
     }
 
     // A failed query is an older runtime, which has neither.
@@ -720,7 +724,9 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
     ctx->_raytracing_tier = raytracing_tier;
     ctx->_unaligned_block_textures = unaligned_block_textures;
     ctx->_extended_image_formats = extended_image_formats;
-    ctx->_readwrite_image_formats = readwrite_image_formats;
+    // a read-write image of one needs its format first
+    ctx->_readwrite_norm16_image_formats = readwrite_norm16_image_formats && extended_image_formats;
+    ctx->_norm16_filtering = norm16_filtering;
     ctx->_native_16bit_shader_ops = native_16bit_shader_ops;
     ctx->_wave_ops = wave_ops;
     ctx->_int64_shader_ops = int64_shader_ops;

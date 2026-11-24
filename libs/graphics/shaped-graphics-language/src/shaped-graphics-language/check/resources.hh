@@ -129,8 +129,8 @@ inline constexpr image_format_info k_image_formats[] = {
     {"rg11b10_float", "rg11b10ufloat", "r11g11b10f", 3, k_float, false, false},
 };
 
-/// True for the six 16-bit normalized formats, `r16_unorm` through `rgba16_snorm`, which no device of `wgsl` or `msl`
-/// reads and writes as an image in one shader (EMIT-280), and whose HLSL texel names the normalization (EMIT-281).
+/// True for the six 16-bit normalized formats, `r16_unorm` through `rgba16_snorm`, whose `mut` image needs a feature of
+/// its own (CHK-201), and whose HLSL texel names the normalization (EMIT-280).
 [[nodiscard]] constexpr bool is_norm16_format(i32 format)
 {
     if (format < 0)
@@ -140,7 +140,7 @@ inline constexpr image_format_info k_image_formats[] = {
 }
 
 /// HLSL's qualifier of a texel of `format`, which DXIL records as the view's component type: `unorm` or `snorm` for
-/// the 16-bit normalized formats, and empty for every other (EMIT-281).
+/// the 16-bit normalized formats, and empty for every other (EMIT-280).
 [[nodiscard]] constexpr cc::string_view hlsl_texel_qualifier(i32 format)
 {
     if (!is_norm16_format(format))

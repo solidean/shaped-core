@@ -2,7 +2,7 @@
 // reads back what it stored.
 
 require extended_image_formats
-require readwrite_image_formats
+require readwrite_norm16_image_formats
 
 binding normals:
     lean: out image_2d[.rg16_unorm]
@@ -17,7 +17,7 @@ binding flipped:
     lean: mut image_2d[.rg16_unorm]
     rough: mut image_2d[.rgba16_snorm]
 
-// what a texel holds reads back as the float its code stands for, which no WebGPU or Metal device does (EMIT-280)
+// what a texel holds reads back as the float its code stands for, which no WebGPU or Metal device does (EMIT-109)
 @compute(8, 8) fun flip_norm16(@thread_id id: int3){flipped}:
     flipped.lean[id.xy] = flipped.lean[id.xy].yx
     flipped.rough[id.xy] = -flipped.rough[id.xy]

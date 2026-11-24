@@ -69,7 +69,7 @@ constexpr cc::string_view k_picked = "@option const out_format: pixel_format = .
 
 /// An `out` image of each 16-bit normalized format, a read-only one, and a `mut` one in an entry point of its own.
 constexpr cc::string_view k_norm16 = "require extended_image_formats\n"
-                                     "require readwrite_image_formats\n"
+                                     "require readwrite_norm16_image_formats\n"
                                      "\n"
                                      "binding outs:\n"
                                      "    a: out image_2d[.r16_unorm]\n"
@@ -113,7 +113,7 @@ cc::string picked_text(cc::string_view format, target t)
 
 TEST("sgl emit - a 16-bit normalized image's HLSL texel says unorm or snorm, and vulkan names its format")
 {
-    // EMIT-281 and EMIT-98: the texel names the normalization, and `[[vk::image_format]]` is DXC's spelling
+    // EMIT-280 and EMIT-98: the texel names the normalization, and `[[vk::image_format]]` is DXC's spelling
     auto const dx12 = text_of(k_norm16, target::hlsl_dx12);
     CHECK(dx12.contains("RWTexture2D<unorm float> outs_a : register(u0, space0);\n"));
     CHECK(dx12.contains("RWTexture2D<snorm float> outs_b : register(u1, space0);\n"));
@@ -160,13 +160,13 @@ TEST("sgl emit - WGSL and MSL write an out or read-only 16-bit normalized image,
     CHECK(msl.contains("    texture2d<float, access::write> outs_c [[id(2)]];\n"));
     CHECK(msl.contains("    texture2d<float, access::read> outs_source [[id(6)]];\n"));
 
-    // EMIT-280: neither has a device that reads and writes one, so the entry point that lists it has no text there
+    // EMIT-109: neither has a device with readwrite_norm16_image_formats, so the entry point that needs it has no text
     CHECK(sgl::emit::dump_errors(emit_source(k_norm16, 1, target::wgsl))
-          == "target-lacks-feature flip lists `muts.normal`, a `mut` image of .rg16_unorm, which no WebGPU device "
-             "reads and writes; declare it `out`, or read it as a texture\n");
+          == "target-lacks-feature flip needs readwrite_norm16_image_formats, which WebGPU does not have\n");
     CHECK(sgl::emit::dump_errors(emit_source(k_norm16, 1, target::msl))
-          == "target-lacks-feature flip lists `muts.normal`, a `mut` image of .rg16_unorm, which no Metal device "
-             "reads and writes; declare it `out`, or read it as a texture\n");
+          == "target-lacks-feature flip needs readwrite_norm16_image_formats, which Metal does not have\n");
+    // the entry point that only writes or reads them needs no such feature
+    CHECK(sgl::emit::dump_errors(emit_source(k_norm16, 0, target::wgsl)) == "");
     // the native targets write it
     CHECK(sgl::emit::dump_errors(emit_source(k_norm16, 1, target::hlsl_vulkan)) == "");
 }
@@ -174,8 +174,8 @@ TEST("sgl emit - WGSL and MSL write an out or read-only 16-bit normalized image,
 TEST("sgl emit - a mut 16-bit normalized image in a binding array, a generic or an option's format is refused and "
      "qualified as a plain one is")
 {
-    // EMIT-280 looks through a binding array to its element, and HLSL's array keeps the element's qualifier
-    constexpr auto arrayed = "require extended_image_formats, readwrite_image_formats, binding_arrays\n"
+    // EMIT-109 looks through a binding array to its element, and HLSL's array keeps the element's qualifier
+    constexpr auto arrayed = "require extended_image_formats, readwrite_norm16_image_formats, binding_arrays\n"
                              "\n"
                              "binding many:\n"
                              "    normals: mut image_2d[.rg16_snorm][4]\n"
@@ -184,10 +184,11 @@ TEST("sgl emit - a mut 16-bit normalized image in a binding array, a generic or 
                              "    many.normals[1].store(id.xy, -many.normals[0].load(id.xy))\n";
     CHECK(text_of(arrayed, target::hlsl_dx12)
               .contains("RWTexture2D<snorm float2> many_normals[4] : register(u0, space0);\n"));
-    CHECK(sgl::emit::dump_errors(emit_source(arrayed, 0, target::msl)).contains("a `mut` image of .rg16_snorm"));
+    CHECK(sgl::emit::dump_errors(emit_source(arrayed, 0, target::msl))
+              .contains("needs readwrite_norm16_image_formats, which Metal does not have"));
 
     // a generic over the format takes the binding's image, and no text of it drops the qualifier
-    constexpr auto generic = "require extended_image_formats, readwrite_image_formats\n"
+    constexpr auto generic = "require extended_image_formats, readwrite_image_formats, readwrite_norm16_image_formats\n"
                              "\n"
                              "binding frames:\n"
                              "    color: mut image_2d[.rgba16_unorm]\n"
@@ -200,10 +201,11 @@ TEST("sgl emit - a mut 16-bit normalized image in a binding array, a generic or 
     auto const generic_dx12 = text_of(generic, target::hlsl_dx12);
     CHECK(generic_dx12.contains("RWTexture2D<unorm float4> frames_color : register(u0, space0);\n"));
     CHECK(!generic_dx12.contains("RWTexture2D<float4>"));
-    CHECK(sgl::emit::dump_errors(emit_source(generic, 0, target::wgsl)).contains("a `mut` image of .rgba16_unorm"));
+    CHECK(sgl::emit::dump_errors(emit_source(generic, 0, target::wgsl))
+              .contains("needs readwrite_norm16_image_formats, which WebGPU does not have"));
 
     // an option's format is the format the compile gave, judged and spelled as a written one
-    constexpr auto picked = "require extended_image_formats, readwrite_image_formats\n"
+    constexpr auto picked = "require extended_image_formats, readwrite_image_formats, readwrite_norm16_image_formats\n"
                             "\n"
                             "@option const out_format: pixel_format = .r32_float\n"
                             "\n"
@@ -222,7 +224,7 @@ TEST("sgl emit - a mut 16-bit normalized image in a binding array, a generic or 
         auto const refused
             = sgl::compile_to_text({.source = picked, .entry_point = "pick", .target = t, .options = given});
         REQUIRE(refused.has_error());
-        CHECK(refused.error().contains("a `mut` image of .rg16_unorm")).dump("error", refused.error());
+        CHECK(refused.error().contains("needs readwrite_norm16_image_formats")).dump("error", refused.error());
         // the default format reads and writes everywhere
         CHECK(sgl::compile_to_text({.source = picked, .entry_point = "pick", .target = t}).has_value());
     }
