@@ -27,7 +27,8 @@ namespace sg::impl
 /// Also a 16-bit normalized view bound to a read-write image binding without `feature::readwrite_norm16_image_formats`,
 /// judged by the view's format whatever the binding states, so a layout reflected with no format is judged too.
 /// A view of format `undefined` is judged by its texture's own format, which is what it reads as.
-/// A binding with no sample type is not judged: a layout reflected from HLSL states none, and only WebGPU reads one.
+/// A texture binding with no sample type is not judged for filtering: a layout reflected from HLSL states none, and
+/// only WebGPU reads one.
 [[nodiscard]] cc::optional<cc::string> find_unsupported_view(feature_set supported,
                                                              binding const& b,
                                                              cc::span<raw_view const> views);

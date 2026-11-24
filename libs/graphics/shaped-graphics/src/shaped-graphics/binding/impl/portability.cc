@@ -86,8 +86,9 @@ cc::optional<cc::string> impl::find_unsupported_view(feature_set supported, bind
                 image != nullptr && is_norm16_format(read_format_of(*image)))
                 return cc::format("binding_group: '{}' is a read_write image and its view is a 16-bit normalized "
                                   "format, which needs sg::feature::readwrite_norm16_image_formats (which no webgpu or "
-                                  "metal device has), and this device lacks it; bind it as a write-only or read-only "
-                                  "image instead",
+                                  "metal device has), and this device lacks it; declare the image write-only or "
+                                  "read-only where its layout comes from (a layout reflected from HLSL makes every "
+                                  "RWTexture read_write, so there the shader itself has to change)",
                                   b.name);
     if (b.type != binding_type::texture || b.sample_type != texture_sample_type::filterable_float)
         return {};

@@ -111,14 +111,25 @@ INVOCABLE_TEST("sg - a 16-bit normalized view on a read-write image binding that
     bindings[0].texture_dimension = sg::texture_view_dimension::tex_2d;
     sg::apply_stage_visibility(bindings, sg::shader_stage::compute);
     auto const layout = ctx->uncached.try_create_binding_group_layout(bindings);
+    // dx12 and vulkan take a layout with no format, so there the group's judgement is reached, never skipped
+    if (ctx->backend() == sg::backend_kind::dx12 || ctx->backend() == sg::backend_kind::vulkan)
+        CHECK(layout.has_value());
     if (!layout.has_value())
         return;
     auto const texture = sg::texture_2d::from_raw(
         ctx->persistent.create_raw_texture(texture_of(sg::pixel_format::rg16_unorm, sg::texture_usage::image)));
-    auto const views
-        = cc::vector<sg::named_view>{{.name = "normal", .view = texture.as_image_view<sg::pixel_format::rg16_unorm>()}};
-    CHECK(creates([&] { return ctx->persistent.create_binding_group(layout.value(), views, {}); })
-          == ctx->supports(sg::feature::readwrite_norm16_image_formats));
+    auto const view = texture.as_image_view<sg::pixel_format::rg16_unorm>();
+    auto const granted = ctx->supports(sg::feature::readwrite_norm16_image_formats);
+    auto const views = cc::vector<sg::named_view>{{.name = "normal", .view = view}};
+    CHECK(creates([&] { return ctx->persistent.create_binding_group(layout.value(), views, {}); }) == granted);
+    CHECK(creates([&] { return ctx->transient.create_binding_group(layout.value(), views, {}); }) == granted);
+    auto const slotted = cc::vector<sg::slotted_view>{{.slot = sg::binding_slot(0), .view = view}};
+    CHECK(creates([&] { return ctx->persistent.create_binding_group(layout.value(), slotted, {}); }) == granted);
+
+    // a staging group judges its set alike, and reports the refusal where the group is minted
+    auto const staging = ctx->persistent.create_staging_binding_group(layout.value());
+    staging->set_binding("normal", view);
+    CHECK(staging->try_snapshot().has_value() == granted);
 }
 
 INVOCABLE_TEST("sg - a 16-bit normalized view on a filterable binding needs norm16_filtering",

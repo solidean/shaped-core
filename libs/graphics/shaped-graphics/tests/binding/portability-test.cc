@@ -188,6 +188,50 @@ TEST("sg::portability - a 16-bit normalized view on a read-write image binding i
     CHECK(sg::impl::find_unsupported_view(lacking, bindings, cc::span<sg::named_view const>(&named, 1)).has_value());
 }
 
+TEST("sg::portability - a read-write image's 16-bit normalized view is judged by the format it is viewed as, in an "
+     "array and by slot")
+{
+    // the image view of a texture of `texture_format`, read and written as `view_format`
+    auto const image_view_of = [](sg::pixel_format texture_format, sg::pixel_format view_format)
+    {
+        auto const texture
+            = std::make_shared<shape_only_texture const>(texture_of(texture_format, sg::texture_usage::image));
+        return sg::raw_view(sg::raw_texture_view{.bound_as = sg::view_class::image,
+                                                 .texture = texture,
+                                                 .view_dimension = sg::texture_view_dimension::tex_2d,
+                                                 .format = view_format});
+    };
+    auto b = sg::binding{.name = "normals", .type = sg::binding_type::image, .access = sg::access_mode::read_write};
+    b.texture_dimension = sg::texture_view_dimension::tex_2d;
+    auto const lacking = all_but(sg::feature::readwrite_norm16_image_formats);
+    auto const judged = [&](sg::raw_view const& view)
+    { return sg::impl::find_unsupported_view(lacking, b, cc::span<sg::raw_view const>(&view, 1)).has_value(); };
+
+    // a view reinterpreting the texture's format is judged by the view's format, which is what the shader reads
+    CHECK(judged(image_view_of(sg::pixel_format::r16_float, sg::pixel_format::r16_unorm)));
+    CHECK(!judged(image_view_of(sg::pixel_format::r16_unorm, sg::pixel_format::r16_uint)));
+    CHECK(judged(image_view_of(sg::pixel_format::rgba16_snorm, sg::pixel_format::rgba16_snorm)));
+
+    // an array binding is refused when any of its views is one, not only its first
+    b.count = 3;
+    auto const array = cc::vector<sg::raw_view>{
+        image_view_of(sg::pixel_format::rgba16_float, sg::pixel_format::undefined),
+        image_view_of(sg::pixel_format::r32_float, sg::pixel_format::r32_float),
+        image_view_of(sg::pixel_format::rg16_snorm, sg::pixel_format::undefined),
+    };
+    CHECK(sg::impl::find_unsupported_view(lacking, b, array).has_value());
+    CHECK(!sg::impl::find_unsupported_view(lacking, b, cc::span<sg::raw_view const>(array.data(), 2)).has_value());
+
+    // the overload over slots, which a generated group's views take, judges it too
+    auto bindings = cc::vector<sg::binding>();
+    bindings.push_back(b);
+    auto const r16 = image_view_of(sg::pixel_format::r16_unorm, sg::pixel_format::undefined);
+    auto const slotted = sg::slotted_view{.slot = sg::binding_slot(0), .view = r16};
+    auto const by_slot = cc::span<sg::slotted_view const>(&slotted, 1);
+    CHECK(sg::impl::find_unsupported_view(lacking, bindings, by_slot).has_value());
+    CHECK(!sg::impl::find_unsupported_view(all_but(sg::feature::norm16_filtering), bindings, by_slot).has_value());
+}
+
 TEST("sg::portability - a 16-bit normalized view is refused on a filterable binding without norm16_filtering")
 {
     auto const filterable = sampled_binding(sg::texture_sample_type::filterable_float);

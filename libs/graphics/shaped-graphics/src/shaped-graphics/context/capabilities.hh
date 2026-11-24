@@ -302,6 +302,7 @@ enum class sg::feature
     /// Vulkan grants it where each of the six has `VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT`, the format being named in the shader.
     /// Metal's read-write tier 2 and WebGPU's `texture-formats-tier2` list none of them, so neither ever grants it.
     /// Without it, a read-write image layout of one is refused on every backend, and SGL needs it for a `mut` image of one.
+    /// So is a view of one bound to any read-write image binding, whatever format the binding states.
     readwrite_norm16_image_formats,
 
     /// A sampled texture of a 16-bit normalized format, `r16_unorm` through `rgba16_snorm`, may be filtered.
