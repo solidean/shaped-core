@@ -3,6 +3,8 @@ created: 2026-11-23
 refs:
   - file: libs/graphics/shaped-graphics/tests/pipeline/vertex-pipeline-atomics-test.cc
   - test: sg - a geometry stage appends one record per primitive at the slot its atomic add claims
+claimed-by: Claude (for Julius Nehring-Wirxel)
+claimed-at: 2026-11-24T14:08Z
 ---
 
 # The geometry append test expects a mesh polyfill behind every polyfilled geometry stage, which metal does not build
