@@ -221,6 +221,25 @@ TEST("sgl check - an entry point declares what it needs, by its file, a binding 
     CHECK(reports_with_library(requiring, lib_user()) == "");
 }
 
+TEST("sgl check - an entry point listing a used module's mut 16-bit normalized image declares "
+     "readwrite_norm16_image_formats")
+{
+    // CHK-264: the module grants its binding both features, which says nothing about the file that uses it
+    constexpr auto library = "require extended_image_formats, readwrite_norm16_image_formats\n"
+                             "\n"
+                             "binding lib:\n"
+                             "    a: mut image_2d[.rg16_unorm]\n";
+    auto const missing = reports_with_library(library, lib_user("    require extended_image_formats\n"));
+    CHECK(missing.contains("main_ps needs readwrite_norm16_image_formats")).dump("reports", missing);
+    CHECK(!missing.contains("needs readwrite_image_formats")).dump("reports", missing);
+    // readwrite_image_formats does not declare it
+    CHECK(reports_with_library(library, lib_user("    require extended_image_formats, readwrite_image_formats\n"))
+              .contains("main_ps needs readwrite_norm16_image_formats"));
+    CHECK(reports_with_library(library, lib_user("    require extended_image_formats, "
+                                                 "readwrite_norm16_image_formats\n"))
+          == "");
+}
+
 TEST("sgl check - an entry point needs what it uses, and a feature its file permits is no floor")
 {
     // CHK-263: two entry points of one file under one `require`, only one of which lists what needs it.

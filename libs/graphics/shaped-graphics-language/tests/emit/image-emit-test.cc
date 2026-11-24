@@ -230,6 +230,76 @@ TEST("sgl emit - a mut 16-bit normalized image in a binding array, a generic or 
     }
 }
 
+TEST("sgl emit - a mut 16-bit normalized image through a binding array, a generic or an option needs "
+     "readwrite_norm16_image_formats, and readwrite_image_formats neither grants it nor is needed beside it")
+{
+    struct shape
+    {
+        cc::string_view name;
+        cc::string_view body; // follows the `require` line
+        cc::string_view entry_point;
+        cc::string_view extra_feature;
+    };
+    shape const shapes[] = {
+        {.name = "arrayed",
+         .body = "binding many:\n"
+                 "    normals: mut image_2d[.rg16_snorm][4]\n"
+                 "\n"
+                 "@compute(8, 8) fun spread(@thread_id id: int3){many}:\n"
+                 "    many.normals[1].store(id.xy, -many.normals[0].load(id.xy))\n",
+         .entry_point = "spread",
+         .extra_feature = ", binding_arrays"},
+        {.name = "generic",
+         .body = "binding frames:\n"
+                 "    color: mut image_2d[.rgba16_unorm]\n"
+                 "\n"
+                 "fun copy_texel[f: pixel_format](img: mut image_2d[f], from: int2, to: int2):\n"
+                 "    img.store(to, img.load(from))\n"
+                 "\n"
+                 "@compute(8, 8) fun shuffle(@thread_id id: int3){frames}:\n"
+                 "    copy_texel(frames.color, id.xy, id.yx)\n",
+         .entry_point = "shuffle",
+         .extra_feature = ""},
+        {.name = "picked",
+         .body = "@option const out_format: pixel_format = .r32_float\n"
+                 "\n"
+                 "binding io:\n"
+                 "    picked: mut image_2d[out_format]\n"
+                 "\n"
+                 "@compute(8, 8) fun pick(@thread_id id: int3){io}:\n"
+                 "    io.picked[id.xy] = io.picked[id.xy]\n",
+         .entry_point = "pick",
+         .extra_feature = ""},
+    };
+    sgl::check::option_value const given[] = {{.name = "out_format", .value = cc::string(".rg16_unorm")}};
+    for (auto const& s : shapes)
+    {
+        auto const compile = [&](cc::string_view readwrite)
+        {
+            auto const source
+                = cc::format("require extended_image_formats, {}{}\n\n{}", readwrite, s.extra_feature, s.body);
+            return sgl::compile_to_text({.source = source,
+                                         .entry_point = s.entry_point,
+                                         .target = target::hlsl_dx12,
+                                         .options = s.name == "picked" ? cc::span<sgl::check::option_value const>(given)
+                                                                       : cc::span<sgl::check::option_value const>()});
+        };
+        // the norm16 feature alone grants it, and the entry point states it and not readwrite_image_formats
+        auto const granted = compile("readwrite_norm16_image_formats");
+        REQUIRE(granted.has_value())
+            .dump("shape", s.name)
+            .dump("error", granted.has_error() ? granted.error() : cc::string());
+        CHECK(granted.value().features.has(sgl::check::feature::readwrite_norm16_image_formats)).dump("shape", s.name);
+        CHECK(!granted.value().features.has(sgl::check::feature::readwrite_image_formats)).dump("shape", s.name);
+        // readwrite_image_formats does not stand in for it
+        auto const refused = compile("readwrite_image_formats");
+        REQUIRE(refused.has_error()).dump("shape", s.name);
+        CHECK(refused.error().contains("readwrite_norm16_image_formats"))
+            .dump("shape", s.name)
+            .dump("error", refused.error());
+    }
+}
+
 TEST("sgl emit - a coherent member is globallycoherent in HLSL, and device-coherent memory or a device-coherent "
      "texture in MSL")
 {

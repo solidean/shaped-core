@@ -2,6 +2,7 @@
 #include <shaped-graphics/binding/binding.hh>
 #include <shaped-graphics/binding/binding_group.hh>
 #include <shaped-graphics/binding/pipeline_layout.hh>
+#include <shaped-graphics/binding/staging_binding_group.hh>
 #include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/exceptions.hh>
 #include <shaped-graphics/resource/pixel_format.hh>
@@ -127,6 +128,31 @@ INVOCABLE_TEST("sg - a 16-bit normalized view on a filterable binding needs norm
     };
     CHECK(group_of(filterable) == granted);
     CHECK(group_of(unfilterable));
+}
+
+INVOCABLE_TEST("sg - a staging binding group refuses a view on a filterable binding its device cannot filter",
+               (sg::context_handle const& ctx))
+{
+    auto bindings = cc::vector<sg::binding>();
+    bindings.push_back({.name = "source", .type = sg::binding_type::texture});
+    bindings[0].texture_dimension = sg::texture_view_dimension::tex_2d;
+    bindings[0].sample_type = sg::texture_sample_type::filterable_float;
+    sg::apply_stage_visibility(bindings, sg::shader_stage::compute);
+    auto const filterable = ctx->uncached.create_binding_group_layout(bindings);
+
+    // set refuses no view itself: the refusal is written down and reported where the group is minted
+    auto const snapshots = [&](sg::pixel_format format)
+    {
+        auto const texture = sg::texture_2d::from_raw(
+            ctx->persistent.create_raw_texture(texture_of(format, sg::texture_usage::texture)));
+        auto const staging = ctx->persistent.create_staging_binding_group(filterable);
+        staging->set_binding("source", texture.as_texture_view());
+        return staging->try_snapshot().has_value();
+    };
+    CHECK(snapshots(sg::pixel_format::r32_float) == ctx->supports(sg::feature::float32_filtering));
+    CHECK(snapshots(sg::pixel_format::rgba8_unorm));
+    if (ctx->supports(sg::feature::extended_image_formats))
+        CHECK(snapshots(sg::pixel_format::rg16_unorm) == ctx->supports(sg::feature::norm16_filtering));
 }
 
 INVOCABLE_TEST("sg - a 32-bit float view on a filterable binding needs float32_filtering",

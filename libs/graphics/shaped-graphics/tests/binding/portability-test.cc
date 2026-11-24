@@ -166,6 +166,20 @@ TEST("sg::portability - a 16-bit normalized view is refused on a filterable bind
     auto const views = cc::span<sg::named_view const>(&named, 1);
     CHECK(sg::impl::find_unsupported_view(all_but(sg::feature::norm16_filtering), bindings, views).has_value());
     CHECK(!sg::impl::find_unsupported_view(all_but(sg::feature::float32_filtering), bindings, views).has_value());
+
+    // and so does the one over slots, which a generated group's views take
+    auto const slotted = sg::slotted_view{.slot = sg::binding_slot(0), .view = norm};
+    auto const by_slot = cc::span<sg::slotted_view const>(&slotted, 1);
+    CHECK(sg::impl::find_unsupported_view(all_but(sg::feature::norm16_filtering), bindings, by_slot).has_value());
+    CHECK(!sg::impl::find_unsupported_view(all_but(sg::feature::float32_filtering), bindings, by_slot).has_value());
+
+    // a device lacking both refuses each format by its own feature
+    auto const neither = all_but(sg::feature::norm16_filtering).without(sg::feature_set(sg::feature::float32_filtering));
+    auto const r32_named = sg::named_view{.name = "source", .view = r32};
+    CHECK(sg::impl::find_unsupported_view(neither, bindings, views).value_or(cc::string()).contains("norm16_filtering"));
+    CHECK(sg::impl::find_unsupported_view(neither, bindings, cc::span<sg::named_view const>(&r32_named, 1))
+              .value_or(cc::string())
+              .contains("float32_filtering"));
 }
 
 TEST("sg::portability - an access a kind cannot carry is refused whatever the device")
