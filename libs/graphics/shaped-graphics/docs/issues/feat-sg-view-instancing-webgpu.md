@@ -3,6 +3,8 @@ priority: normal
 tags: [xr]
 parent: epic-xr
 created: 2026-11-09
+claimed-by: Claude (for Julius)
+claimed-at: 2026-11-24T16:46Z
 ---
 
 # Several views per draw on webgpu, as a draw per view
