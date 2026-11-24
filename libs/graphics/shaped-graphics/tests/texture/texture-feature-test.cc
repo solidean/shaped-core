@@ -58,6 +58,28 @@ INVOCABLE_TEST("sg - an image format outside the portable set needs extended_ima
     CHECK(ctx->uncached.try_create_binding_group_layout(bindings).has_value() == extended);
 }
 
+INVOCABLE_TEST("sg - a 16-bit normalized texture needs extended_image_formats whatever its usage",
+               (sg::context_handle const& ctx))
+{
+    auto const extended = ctx->supports(sg::feature::extended_image_formats);
+    for (auto const f : {sg::pixel_format::r16_unorm, sg::pixel_format::r16_snorm, sg::pixel_format::rg16_unorm,
+                         sg::pixel_format::rg16_snorm, sg::pixel_format::rgba16_unorm, sg::pixel_format::rgba16_snorm})
+    {
+        for (auto const usage :
+             {sg::texture_usages(sg::texture_usage::texture), sg::texture_usages(sg::texture_usage::image),
+              sg::texture_usages(sg::texture_usage::render_target)})
+        {
+            CHECK(creates(
+                      [&]
+                      { return ctx->persistent.create_raw_texture(texture_of(f, usage | sg::texture_usage::copy_src)); })
+                  == extended)
+                .dump("format", int(f));
+            CHECK(creates([&] { return ctx->transient.create_raw_texture(texture_of(f, usage)); }) == extended)
+                .dump("format", int(f));
+        }
+    }
+}
+
 INVOCABLE_TEST("sg - a 32-bit float view on a filterable binding needs float32_filtering",
                (sg::context_handle const& ctx))
 {

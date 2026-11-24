@@ -271,7 +271,6 @@ public:
         case sg::feature::headless_present:
         case sg::feature::geometry_shader:
         case sg::feature::tessellation_shader:
-        case sg::feature::readwrite_image_formats:
         case sg::feature::float32_filtering:
         case sg::feature::multisampled_array_textures:
         case sg::feature::sample_rate_shading:
@@ -287,6 +286,8 @@ public:
             return true;
         case sg::feature::extended_image_formats:
             return _extended_image_formats;
+        case sg::feature::readwrite_image_formats:
+            return _readwrite_image_formats;
         case sg::feature::opacity_micromap: // DXR 1.2, which only the Agility SDK carries
             return _opacity_micromap;
         case sg::feature::unaligned_block_compression:
@@ -787,7 +788,8 @@ public:
     // NOT_SUPPORTED until set.
     D3D12_RAYTRACING_TIER _raytracing_tier = D3D12_RAYTRACING_TIER_NOT_SUPPORTED;
     bool _unaligned_block_textures = false; // D3D12_OPTIONS8, cached at creation
-    bool _extended_image_formats = false;   // bgra8_unorm's typed UAV, cached at creation
+    bool _extended_image_formats = false; // bgra8_unorm's typed UAV and the 16-bit normalized stores, cached at creation
+    bool _readwrite_image_formats = false;  // the 16-bit normalized formats' typed UAV loads, cached at creation
     bool _withhold_binding_arrays = false;  // dx12_config::withhold_binding_arrays
     bool _withhold_primitive_index = false; // dx12_config::withhold_primitive_index
     bool _native_16bit_shader_ops = false;  // D3D12_OPTIONS4, cached at creation

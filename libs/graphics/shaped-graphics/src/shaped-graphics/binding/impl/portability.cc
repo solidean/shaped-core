@@ -45,9 +45,13 @@ cc::optional<cc::string> impl::find_unsupported_binding(bool extended_image_form
 
 cc::optional<cc::string> impl::find_unsupported_texture(bool extended_image_formats, texture_description const& desc)
 {
-    if (!desc.usage.has(texture_usage::image) || !needs_extended_image_format(desc.format))
-        return {};
     if (extended_image_formats)
+        return {};
+    // core WebGPU has no texture of these at all, sampled, rendered to or copied, so any usage needs the feature
+    if (is_norm16_format(desc.format))
+        return cc::string("texture: a 16-bit normalized format needs sg::feature::extended_image_formats (webgpu's "
+                          "texture-formats-tier1) whatever the texture is used as, and this device lacks it");
+    if (!desc.usage.has(texture_usage::image) || !needs_extended_image_format(desc.format))
         return {};
     return cc::string("texture: image usage in a format outside the portable image formats needs "
                       "sg::feature::extended_image_formats (webgpu's texture-formats-tier1), and this device lacks "

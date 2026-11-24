@@ -148,6 +148,12 @@ inline constexpr enum_case cases_pixel_format[] = {
     {"bc6h_rgb_sfloat", int(sg::pixel_format::bc6h_rgb_sfloat)},
     {"bc7_rgba_unorm", int(sg::pixel_format::bc7_rgba_unorm)},
     {"bc7_rgba_unorm_srgb", int(sg::pixel_format::bc7_rgba_unorm_srgb)},
+    {"r16_unorm", int(sg::pixel_format::r16_unorm)},
+    {"r16_snorm", int(sg::pixel_format::r16_snorm)},
+    {"rg16_unorm", int(sg::pixel_format::rg16_unorm)},
+    {"rg16_snorm", int(sg::pixel_format::rg16_snorm)},
+    {"rgba16_unorm", int(sg::pixel_format::rgba16_unorm)},
+    {"rgba16_snorm", int(sg::pixel_format::rgba16_snorm)},
 };
 inline constexpr enum_case cases_blend_factor[] = {
     {"zero", int(sg::blend_factor::zero)},

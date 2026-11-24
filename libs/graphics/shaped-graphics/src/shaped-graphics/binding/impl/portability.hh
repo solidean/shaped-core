@@ -18,6 +18,7 @@ namespace sg::impl
                                                                 cc::span<binding const> bindings);
 
 /// A texture with image usage whose format needs `feature::extended_image_formats`, as a message, where `extended_image_formats` is false.
+/// A texture of a 16-bit normalized format needs it whatever its usage, since core WebGPU has no texture of one at all.
 [[nodiscard]] cc::optional<cc::string> find_unsupported_texture(bool extended_image_formats,
                                                                 texture_description const& desc);
 

@@ -21,7 +21,7 @@ TEST("sg metal - every sg pixel format maps to a metal one")
     // something exotic.
     CHECK(mtl::pixel_format_of(sg::pixel_format::undefined) == MTL::PixelFormatInvalid);
 
-    for (auto i = 1; i <= int(sg::pixel_format::bc7_rgba_unorm_srgb); ++i)
+    for (auto i = 1; i <= int(sg::pixel_format::rgba16_snorm); ++i)
     {
         auto const format = sg::pixel_format(i);
         CHECK(mtl::pixel_format_of(format) != MTL::PixelFormatInvalid)

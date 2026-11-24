@@ -73,6 +73,8 @@ enum class sg::feature
 
     /// An image may be `read_write` in any image format, not only r32float / r32uint / r32sint.
     /// WebGPU core allows read-write on those three alone, and its `texture-formats-tier2` lifts that; write-only and read-only work everywhere.
+    /// No WebGPU or Metal tier reads and writes a 16-bit normalized format, so SGL refuses a `mut` image of one on `wgsl` and `msl`.
+    /// D3D12 grants it with a typed UAV load on each 16-bit normalized format, and Vulkan with their storage support.
     readwrite_image_formats,
 
     /// A sampled texture of `r32_float`, `rg32_float` or `rgba32_float` may be filtered.
@@ -82,9 +84,12 @@ enum class sg::feature
 
     /// An image may use a format outside `sg::is_portable_image_format`, such as `r8_unorm` or `rgb10a2_unorm`.
     /// `bgra8_unorm` is among them, and it is the one each API asks for on its own.
+    /// A texture of a 16-bit normalized format, `r16_unorm` through `rgba16_snorm`, needs it whatever its usage, since core WebGPU has none of them.
     /// WebGPU grants them with `texture-formats-tier1` and `bgra8unorm-storage`.
-    /// Vulkan grants them with `shaderStorageImageExtendedFormats` plus `VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT` on `B8G8R8A8_UNORM`.
-    /// D3D12 grants them with a typed UAV on `DXGI_FORMAT_B8G8R8A8_UNORM`, the rest being required at feature level 11_0.
+    /// Vulkan grants them with `shaderStorageImageExtendedFormats` plus `VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT` on `B8G8R8A8_UNORM`
+    /// and on each 16-bit normalized format.
+    /// D3D12 grants them with a typed UAV on `DXGI_FORMAT_B8G8R8A8_UNORM` and a typed UAV store on each 16-bit normalized
+    /// format, the rest being required at feature level 11_0.
     extended_image_formats,
 
     /// A block-compressed texture may have a width or height that is no multiple of its block (4 for BC).

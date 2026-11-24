@@ -71,6 +71,31 @@ TEST("sg::portability - an image format outside the portable set is refused with
     CHECK(!sg::impl::find_unsupported_binding(false, bindings).has_value());
 }
 
+TEST("sg::portability - a 16-bit normalized texture of any usage is refused without extended_image_formats")
+{
+    // core WebGPU has none of them, sampled, rendered to, copied or stored, so every usage asks
+    for (auto const f : {sg::pixel_format::r16_unorm, sg::pixel_format::r16_snorm, sg::pixel_format::rg16_unorm,
+                         sg::pixel_format::rg16_snorm, sg::pixel_format::rgba16_unorm, sg::pixel_format::rgba16_snorm})
+        for (auto const usage :
+             {sg::texture_usages(sg::texture_usage::texture), sg::texture_usages(sg::texture_usage::image),
+              sg::texture_usages(sg::texture_usage::render_target), sg::texture_usages(sg::texture_usage::copy_dst),
+              sg::texture_usage::texture | sg::texture_usage::copy_src})
+        {
+            auto const refusal = sg::impl::find_unsupported_texture(false, texture_of(f, usage));
+            CHECK(refusal.has_value()).dump("format", int(f));
+            CHECK(refusal.value_or(cc::string()).contains("texture-formats-tier1")).dump("format", int(f));
+            CHECK(!sg::impl::find_unsupported_texture(true, texture_of(f, usage)).has_value()).dump("format", int(f));
+        }
+
+    // a layout's image of one is refused as any format outside the portable set
+    auto b = sg::binding{.name = "normal", .type = sg::binding_type::image, .access = sg::access_mode::write};
+    b.texture_dimension = sg::texture_view_dimension::tex_2d;
+    b.image_format = sg::pixel_format::rg16_unorm;
+    auto const bindings = cc::span<sg::binding const>(&b, 1);
+    CHECK(sg::impl::find_unsupported_binding(false, bindings).has_value());
+    CHECK(!sg::impl::find_unsupported_binding(true, bindings).has_value());
+}
+
 TEST("sg::portability - an access a kind cannot carry is refused whatever the device")
 {
     auto const write_only_buffer

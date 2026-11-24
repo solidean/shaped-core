@@ -1179,7 +1179,8 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     // which is a binding group sg's raster scope accepts.
     // `imageCubeArray` is what a cube-array view needs, which WebGPU core binds and every desktop device has.
     // `shaderStorageImageExtendedFormats` is enabled wherever the device has it.
-    // sg::feature::extended_image_formats reports it together with bgra8_unorm's per-format storage support.
+    // sg::feature::extended_image_formats reports it together with the per-format storage support of bgra8_unorm and
+    // of the 16-bit normalized formats.
     // So are the geometry and tessellation stages, per-sample shading and wireframe fill, which sg::feature reports the same way:
     // a pipeline that uses one without the device feature enabled fails validation, whatever the device has.
     // `samplerAnisotropy` is enabled wherever the device has it too, and a sampler asking for anisotropy without it is created with it off.

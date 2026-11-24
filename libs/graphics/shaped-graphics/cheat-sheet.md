@@ -555,7 +555,8 @@ buf.as_index_buffer() / (range)            // -> index_buffer_view  (only buffer
 #include <shaped-graphics/resource/pixel_format.hh>
 sg::pixel_format             // enum: undefined, r8/rg8/rgba8 (unorm/snorm/uint/sint) + rgba8/bgra8 _unorm & _unorm_srgb,
                              //   r/rg/rgba 16f & 32f & int, rgb10a2_unorm, rg11b10_float,
-                             //   depth16_unorm/depth32_float/depth32_float_stencil8, bc1..bc7 (feature-gated)
+                             //   depth16_unorm/depth32_float/depth32_float_stencil8, bc1..bc7 (feature-gated),
+                             //   r/rg/rgba 16 _unorm & _snorm (feature-gated: extended_image_formats, any usage)
 sg::is_depth_format(f)          // bool  — depth or depth-stencil
 sg::is_depth_stencil_format(f)  // bool  — depth AND stencil planes
 sg::has_stencil(f)              // bool  — carries a stencil plane
@@ -567,6 +568,8 @@ sg::supports_typed_uav(f)       // bool  — can carry a typed UAV, i.e. texture
 sg::is_portable_image_format(f) // bool — storage every device takes (core WebGPU's set); any other typed-UAV format needs
                                   //         feature::extended_image_formats, so gate compute writes on both
 sg::is_float32_format(f)        // bool  — r32/rg32/rgba32_float: filtering one needs feature::float32_filtering
+sg::is_norm16_format(f)         // bool  — r16..rgba16 _unorm/_snorm: a texture of one, of ANY usage, needs feature::extended_image_formats;
+                                //         WebGPU never filters one, and no WebGPU or Metal device reads and writes one as an image
 sg::format_block_size(f)        // int   — bytes per texel, or per 4x4 block for BC (0 for undefined)
 sg::format_block_extent(f)      // int   — 1 (uncompressed) or 4 (BC)
 sg::format_aspect_count(f)      // int   — subresource planes (1, or 2 for depth+stencil)

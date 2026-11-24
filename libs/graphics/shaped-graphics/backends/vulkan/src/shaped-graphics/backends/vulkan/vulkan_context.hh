@@ -229,6 +229,20 @@ public:
         vkGetPhysicalDeviceFormatProperties(_physical_device, VK_FORMAT_B8G8R8A8_UNORM, &bgra8);
         if ((bgra8.optimalTilingFeatures & VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT) == 0)
             _extended_image_formats = false;
+        // Nor are the 16-bit normalized formats' storage required: a device lacking one loses both image features, since
+        // the format is named in the shader and its storage support is all a read-write image of it asks besides.
+        _readwrite_image_formats = true;
+        for (auto const format : {VK_FORMAT_R16_UNORM, VK_FORMAT_R16_SNORM, VK_FORMAT_R16G16_UNORM,
+                                  VK_FORMAT_R16G16_SNORM, VK_FORMAT_R16G16B16A16_UNORM, VK_FORMAT_R16G16B16A16_SNORM})
+        {
+            auto properties = VkFormatProperties{};
+            vkGetPhysicalDeviceFormatProperties(_physical_device, format, &properties);
+            if ((properties.optimalTilingFeatures & VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT) == 0)
+            {
+                _extended_image_formats = false;
+                _readwrite_image_formats = false;
+            }
+        }
 
         // Linear filtering of the three 32-bit float formats is optional in Vulkan, so it is asked per format.
         _float32_filtering = true;
@@ -390,7 +404,6 @@ public:
         case sg::feature::mesh_shader:
             return _mesh_shader;
         case sg::feature::binding_arrays:
-        case sg::feature::readwrite_image_formats:
         case sg::feature::unaligned_block_compression:
         case sg::feature::multisampled_array_textures:
             return true;
@@ -411,6 +424,8 @@ public:
             return _float32_filtering;
         case sg::feature::extended_image_formats:
             return _extended_image_formats;
+        case sg::feature::readwrite_image_formats:
+            return _readwrite_image_formats;
         case sg::feature::shader_f16:
             return _shader_f16;
         case sg::feature::shader_int16:
@@ -1038,6 +1053,7 @@ public:
     VkPhysicalDevice _physical_device = VK_NULL_HANDLE; // owned by the instance, not destroyed
     bool _float32_filtering = false;
     bool _extended_image_formats = false;
+    bool _readwrite_image_formats = false;
     /// The device features of the same names, enabled wherever the device has them.
     bool _geometry_shader = false;
     bool _texture_compression_bc = false;

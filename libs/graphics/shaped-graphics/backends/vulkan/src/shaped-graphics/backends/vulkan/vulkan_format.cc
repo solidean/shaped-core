@@ -120,6 +120,19 @@ VkFormat to_vk_format(sg::pixel_format f)
         return VK_FORMAT_BC7_UNORM_BLOCK;
     case sg::pixel_format::bc7_rgba_unorm_srgb:
         return VK_FORMAT_BC7_SRGB_BLOCK;
+
+    case sg::pixel_format::r16_unorm:
+        return VK_FORMAT_R16_UNORM;
+    case sg::pixel_format::r16_snorm:
+        return VK_FORMAT_R16_SNORM;
+    case sg::pixel_format::rg16_unorm:
+        return VK_FORMAT_R16G16_UNORM;
+    case sg::pixel_format::rg16_snorm:
+        return VK_FORMAT_R16G16_SNORM;
+    case sg::pixel_format::rgba16_unorm:
+        return VK_FORMAT_R16G16B16A16_UNORM;
+    case sg::pixel_format::rgba16_snorm:
+        return VK_FORMAT_R16G16B16A16_SNORM;
     }
 
     CC_ASSERT(false, "unhandled pixel_format in to_vk_format");

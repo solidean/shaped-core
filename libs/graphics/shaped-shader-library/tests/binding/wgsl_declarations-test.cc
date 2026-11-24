@@ -228,10 +228,30 @@ TEST("slib wgsl - a read-only storage texture reports read access")
 TEST("slib wgsl - a storage texture format sg has no pixel format for is refused by name")
 {
     CHECK(error_of(R"(
-        @group(0) @binding(0) var t: texture_storage_2d<r16unorm, write>;
+        @group(0) @binding(0) var t: texture_storage_2d<rgb10a2uint, write>;
         @compute @workgroup_size(1) fn main() {}
     )")
-              .contains("'r16unorm'"));
+              .contains("'rgb10a2uint'"));
+}
+
+TEST("slib wgsl - a 16-bit normalized storage texture is the sg format of that name")
+{
+    auto const r = slib::parse_wgsl_declarations(R"(
+        @group(0) @binding(0) var a: texture_storage_2d<r16unorm, write>;
+        @group(0) @binding(1) var b: texture_storage_2d<r16snorm, write>;
+        @group(0) @binding(2) var c: texture_storage_2d<rg16unorm, write>;
+        @group(0) @binding(3) var d: texture_storage_2d<rg16snorm, read>;
+        @group(0) @binding(4) var e: texture_storage_2d<rgba16unorm, write>;
+        @group(0) @binding(5) var f: texture_storage_2d<rgba16snorm, read>;
+        @compute @workgroup_size(1) fn main() {}
+    )");
+    REQUIRE(r.has_value());
+    CHECK(find(r.value(), "a")->image_format == sg::pixel_format::r16_unorm);
+    CHECK(find(r.value(), "b")->image_format == sg::pixel_format::r16_snorm);
+    CHECK(find(r.value(), "c")->image_format == sg::pixel_format::rg16_unorm);
+    CHECK(find(r.value(), "d")->image_format == sg::pixel_format::rg16_snorm);
+    CHECK(find(r.value(), "e")->image_format == sg::pixel_format::rgba16_unorm);
+    CHECK(find(r.value(), "f")->image_format == sg::pixel_format::rgba16_snorm);
 }
 
 TEST("slib wgsl - samplers report their kind")

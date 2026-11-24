@@ -686,6 +686,12 @@ enum pixel_format:
     bc6h_rgb_sfloat
     bc7_rgba_unorm
     bc7_rgba_unorm_srgb
+    r16_unorm
+    r16_snorm
+    rg16_unorm
+    rg16_snorm
+    rgba16_unorm
+    rgba16_snorm
 
 struct rasterization_state:
     fill: fill_mode
