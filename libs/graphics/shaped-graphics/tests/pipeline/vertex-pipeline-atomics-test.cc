@@ -107,7 +107,9 @@ ASYNC_INVOCABLE_TEST("sg - a geometry stage appends one record per primitive at 
         auto const trace = trace_buffers(*ctx);
         auto const corners = ctx->persistent.create_buffer_from_data(k_two_triangles, sg::buffer_usage::vertex_buffer);
         auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::vertex_pipeline_atomics::appending);
-        CHECK((pipeline->mesh_polyfill() != nullptr) == (use == sg::polyfill_use::always)).context(by);
+        // A polyfilled stage takes the compute route, a mesh polyfill, or the mesh route, a native mesh pipeline.
+        auto const built_polyfilled = pipeline->mesh_polyfill() != nullptr || pipeline->geometry_mesh_corners() > 0;
+        CHECK(built_polyfilled == (use == sg::polyfill_use::always)).context(by);
         auto const pixels = co_await sg_test::draw_offscreen(*ctx, appended_target(),
                                                              [&](sg::rendering_scope& scope)
                                                              {
