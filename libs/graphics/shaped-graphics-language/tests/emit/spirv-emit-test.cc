@@ -225,6 +225,69 @@ private:
 };
 } // namespace
 
+TEST("sgl spirv - a 16-bit normalized image is a storage image of its format, an extended one, which spirv-val takes")
+{
+#if defined(CC_OS_EMSCRIPTEN) || defined(CC_OS_IOS) || defined(CC_OS_TVOS)
+    SKIP("this platform runs no spirv-val, and has no std::system to start one with");
+#else
+    struct norm16
+    {
+        cc::string_view name;
+        u32 number; // SPIR-V's ImageFormat
+        cc::string_view value;
+    };
+    constexpr norm16 formats[] = {
+        {"r16_unorm", 14, "0.25"},
+        {"r16_snorm", 19, "-0.25"},
+        {"rg16_unorm", 12, "float2(0.25, 0.5)"},
+        {"rg16_snorm", 17, "float2(-0.25, 0.5)"},
+        {"rgba16_unorm", 10, "float4(0.25)"},
+        {"rgba16_snorm", 16, "float4(-0.25)"},
+    };
+#if defined(CC_OS_WINDOWS)
+    constexpr auto probe = "spirv-val --version > NUL 2>&1";
+#else
+    constexpr auto probe = "spirv-val --version > /dev/null 2>&1";
+#endif
+    auto const has_validator = std::system(probe) == 0;
+    auto modules = spirv_batch();
+    for (auto const& f : formats)
+        for (auto const access : {"out", "mut"})
+        {
+            // a `mut` one reads the texel back too, which the format named in the type makes a typed load
+            auto const source
+                = cc::format("require extended_image_formats, readwrite_image_formats\n"
+                             "\n"
+                             "binding work:\n"
+                             "    img: {} image_2d[.{}]\n"
+                             "\n"
+                             "@compute(8, 8) fun run(@thread_id id: int3){{work}}:\n"
+                             "    work.img[id.xy] = {}\n"
+                             "{}",
+                             access, f.name, f.value,
+                             cc::string_view(access) == "mut" ? "    work.img[id.xy] += work.img[id.xy]\n" : "");
+            auto const e = written(source, "run", sgl::emit::native_route::require);
+            REQUIRE(e.has_value());
+            auto const& words = e.value().spirv;
+            auto format = u32(0);
+            auto extended = false;
+            for (auto at = isize(5); at < words.size(); at += isize(words[at] >> 16))
+            {
+                if ((words[at] & 0xffffu) == 25) // OpTypeImage
+                    format = words[at + 8];
+                if ((words[at] & 0xffffu) == 17 && words[at + 1] == 49) // OpCapability StorageImageExtendedFormats
+                    extended = true;
+            }
+            CHECK(format == f.number).dump("format", f.name).dump("access", access);
+            CHECK(extended).dump("format", f.name).dump("access", access);
+            modules.add(words, f.name, "run", access);
+        }
+    if (!has_validator)
+        SKIP("no spirv-val on the path");
+    modules.validate();
+#endif
+}
+
 TEST("sgl spirv - a module is SPIR-V 1.6, and states its workgroup")
 {
     auto const e = written(k_doubled, "run", sgl::emit::native_route::require);

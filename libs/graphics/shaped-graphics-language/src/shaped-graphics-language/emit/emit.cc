@@ -3,6 +3,7 @@
 #include <clean-core/string/format.hh>
 #include <shaped-graphics-language/check/check.hh>
 #include <shaped-graphics-language/check/reserved_bindings.hh>
+#include <shaped-graphics-language/check/resources.hh>
 #include <shaped-graphics-language/check/source_lines.hh>
 #include <shaped-graphics-language/emit/impl/dialect.hh>
 #include <shaped-graphics-language/emit/impl/payload_access.hh>
@@ -399,6 +400,30 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
         if (!result.errors.empty())
             return result;
     }
+
+    // EMIT-280: no WebGPU or Metal device reads and writes a 16-bit normalized image in one shader, whatever it grants
+    if (t == target::wgsl || t == target::msl)
+        for (auto const id : e.bindings)
+        {
+            auto const& b = m.bindings[m.at(id).info];
+            for (auto const& member : m.at(b.members))
+            {
+                auto const& whole = m.at(member.type);
+                auto const& held = whole.kind == check::type_kind::array ? m.at(whole.element) : whole;
+                if (held.kind != check::type_kind::image || held.access != check::access_mode::read_write
+                    || !check::is_norm16_format(held.format))
+                    continue;
+                result.errors.push_back(
+                    {.kind = error_kind::target_lacks_feature,
+                     .symbol = id,
+                     .detail = cc::format("{} lists `{}.{}`, a `mut` image of .{}, which no {} device reads and "
+                                          "writes; "
+                                          "declare it `out`, or read it as a texture",
+                                          e.name, m.at(id).name, member.name, check::k_image_formats[held.format].name,
+                                          t == target::wgsl ? "WebGPU" : "Metal")});
+                return result;
+            }
+        }
 
     // EMIT-135: sg binds the roots as 16 words of one uniform, and the position is the call's last argument
     if (t == target::wgsl || sources.software_trace)

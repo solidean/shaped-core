@@ -67,6 +67,34 @@ constexpr cc::string_view k_picked = "@option const out_format: pixel_format = .
                                      "    let c = io.source.load(id.xy)\n"
                                      "    io.picked[id.xy] = c.xy as texel[out_format]\n";
 
+/// An `out` image of each 16-bit normalized format, a read-only one, and a `mut` one in an entry point of its own.
+constexpr cc::string_view k_norm16 = "require extended_image_formats\n"
+                                     "require readwrite_image_formats\n"
+                                     "\n"
+                                     "binding outs:\n"
+                                     "    a: out image_2d[.r16_unorm]\n"
+                                     "    b: out image_2d[.r16_snorm]\n"
+                                     "    c: out image_2d[.rg16_unorm]\n"
+                                     "    d: out image_2d[.rg16_snorm]\n"
+                                     "    e: out image_2d[.rgba16_unorm]\n"
+                                     "    f: out image_2d[.rgba16_snorm]\n"
+                                     "    source: image_2d[.rg16_snorm]\n"
+                                     "\n"
+                                     "binding muts:\n"
+                                     "    plain: mut image_2d[.r32_float]\n"
+                                     "    normal: mut image_2d[.rg16_unorm]\n"
+                                     "\n"
+                                     "@compute(8, 8) fun store(@thread_id id: int3){outs}:\n"
+                                     "    outs.a[id.xy] = 0.25\n"
+                                     "    outs.b[id.xy] = -0.25\n"
+                                     "    outs.c[id.xy] = float2(0.25, 0.5)\n"
+                                     "    outs.d[id.xy] = outs.source[id.xy]\n"
+                                     "    outs.e[id.xy] = float4(1.0)\n"
+                                     "    outs.f[id.xy] = float4(-1.0)\n"
+                                     "\n"
+                                     "@compute(8, 8) fun flip(@thread_id id: int3){muts}:\n"
+                                     "    muts.normal[id.xy] = muts.normal[id.xy].yx\n";
+
 cc::string text_of(cc::string_view source, target t)
 {
     auto const e = emit_source(source, 0, t);
@@ -82,6 +110,66 @@ cc::string picked_text(cc::string_view format, target t)
     return r.value().text;
 }
 } // namespace
+
+TEST("sgl emit - a 16-bit normalized image's HLSL texel says unorm or snorm, and vulkan names its format")
+{
+    // EMIT-281 and EMIT-98: the texel names the normalization, and `[[vk::image_format]]` is DXC's spelling
+    auto const dx12 = text_of(k_norm16, target::hlsl_dx12);
+    CHECK(dx12.contains("RWTexture2D<unorm float> outs_a : register(u0, space0);\n"));
+    CHECK(dx12.contains("RWTexture2D<snorm float> outs_b : register(u1, space0);\n"));
+    CHECK(dx12.contains("RWTexture2D<unorm float2> outs_c : register(u2, space0);\n"));
+    CHECK(dx12.contains("RWTexture2D<snorm float2> outs_d : register(u3, space0);\n"));
+    CHECK(dx12.contains("RWTexture2D<unorm float4> outs_e : register(u4, space0);\n"));
+    CHECK(dx12.contains("RWTexture2D<snorm float4> outs_f : register(u5, space0);\n"));
+    CHECK(dx12.contains("RWTexture2D<snorm float2> outs_source : register(u6, space0);\n"));
+
+    auto const vulkan = text_of(k_norm16, target::hlsl_vulkan);
+    CHECK(vulkan.contains("[[vk::binding(0, 0)]] [[vk::image_format(\"r16\")]] RWTexture2D<unorm float> outs_a;\n"));
+    CHECK(vulkan.contains("[[vk::binding(1, 0)]] [[vk::image_format(\"r16snorm\")]] RWTexture2D<snorm float> "
+                          "outs_b;\n"));
+    CHECK(vulkan.contains("[[vk::binding(2, 0)]] [[vk::image_format(\"rg16\")]] RWTexture2D<unorm float2> outs_c;\n"));
+    CHECK(vulkan.contains("[[vk::binding(3, 0)]] [[vk::image_format(\"rg16snorm\")]] RWTexture2D<snorm float2> "
+                          "outs_d;\n"));
+    CHECK(vulkan.contains("[[vk::binding(4, 0)]] [[vk::image_format(\"rgba16\")]] RWTexture2D<unorm float4> "
+                          "outs_e;\n"));
+    CHECK(vulkan.contains("[[vk::binding(5, 0)]] [[vk::image_format(\"rgba16snorm\")]] RWTexture2D<snorm float4> "
+                          "outs_f;\n"));
+
+    // a `mut` one is the same type, and no other format's texel takes a qualifier
+    auto const flipped = emit_source(k_norm16, 1, target::hlsl_dx12);
+    CHECK(sgl::emit::dump_errors(flipped) == "");
+    CHECK(flipped.text.contains("RWTexture2D<float> muts_plain : register(u0, space0);\n"));
+    CHECK(flipped.text.contains("RWTexture2D<unorm float2> muts_normal : register(u1, space0);\n"));
+    CHECK(!text_of(k_copy, target::hlsl_dx12).contains("norm "));
+}
+
+TEST("sgl emit - WGSL and MSL write an out or read-only 16-bit normalized image, and refuse a mut one")
+{
+    // the texel format of texture-formats-tier1, which WGSL has as a language extension and so enables nothing
+    auto const wgsl = text_of(k_norm16, target::wgsl);
+    CHECK(wgsl.contains("var outs_a: texture_storage_2d<r16unorm, write>;\n"));
+    CHECK(wgsl.contains("var outs_b: texture_storage_2d<r16snorm, write>;\n"));
+    CHECK(wgsl.contains("var outs_c: texture_storage_2d<rg16unorm, write>;\n"));
+    CHECK(wgsl.contains("var outs_d: texture_storage_2d<rg16snorm, write>;\n"));
+    CHECK(wgsl.contains("var outs_e: texture_storage_2d<rgba16unorm, write>;\n"));
+    CHECK(wgsl.contains("var outs_f: texture_storage_2d<rgba16snorm, write>;\n"));
+    CHECK(wgsl.contains("var outs_source: texture_storage_2d<rg16snorm, read>;\n"));
+    CHECK(!wgsl.contains("enable"));
+
+    auto const msl = text_of(k_norm16, target::msl);
+    CHECK(msl.contains("    texture2d<float, access::write> outs_c [[id(2)]];\n"));
+    CHECK(msl.contains("    texture2d<float, access::read> outs_source [[id(6)]];\n"));
+
+    // EMIT-280: neither has a device that reads and writes one, so the entry point that lists it has no text there
+    CHECK(sgl::emit::dump_errors(emit_source(k_norm16, 1, target::wgsl))
+          == "target-lacks-feature flip lists `muts.normal`, a `mut` image of .rg16_unorm, which no WebGPU device "
+             "reads and writes; declare it `out`, or read it as a texture\n");
+    CHECK(sgl::emit::dump_errors(emit_source(k_norm16, 1, target::msl))
+          == "target-lacks-feature flip lists `muts.normal`, a `mut` image of .rg16_unorm, which no Metal device "
+             "reads and writes; declare it `out`, or read it as a texture\n");
+    // the native targets write it
+    CHECK(sgl::emit::dump_errors(emit_source(k_norm16, 1, target::hlsl_vulkan)) == "");
+}
 
 TEST("sgl emit - a coherent member is globallycoherent in HLSL, and device-coherent memory or a device-coherent "
      "texture in MSL")

@@ -171,6 +171,9 @@ The WGSL writer maps it to WGSL's spelling (`rgba8unorm`, and `rg11b10ufloat` fo
 The portable formats are core WebGPU's image formats:
 `rgba8_unorm`, `rgba8_snorm`, `rgba8_uint`, `rgba8_sint`, `rgba16_uint`, `rgba16_sint`, `rgba16_float`, and the `r32`, `rg32` and `rgba32` formats in `float`, `uint` and `sint`.
 Every other image format needs a feature.
+The 16-bit `_unorm` and `_snorm` formats, `r16_unorm` through `rgba16_snorm`, are among them, and core WebGPU lacks them as textures altogether, sampled or not:
+sg refuses a texture of one, of any usage, on a device without `extended_image_formats`.
+No WebGPU or Metal device reads and writes one in one shader, so a `mut` image of one is written for neither ([EMIT-280](semantics/emitting.md#errors)).
 
 **An image whose format the host picks names an option** ([CHK-353](semantics/checking.md#consts)).
 Each format the host asks for is one compile, and the text names that format exactly as it names a written one, on every target and with no feature.
@@ -334,8 +337,9 @@ An entry point must declare each of those itself: by its file, by a binding it l
 | form | the feature that grants it |
 |---|---|
 | `texture_2d_ms_array` | `sg::feature::multisampled_array_textures`, which WebGPU lacks |
-| `mut image*[.F]` with `F` not `r32_float`, `r32_uint` or `r32_sint` | `sg::feature::readwrite_image_formats`, WebGPU's `texture-formats-tier2` |
+| `mut image*[.F]` with `F` not `r32_float`, `r32_uint` or `r32_sint` | `sg::feature::readwrite_image_formats`, WebGPU's `texture-formats-tier2`; a 16-bit normalized `F` is written for neither `wgsl` nor `msl` (EMIT-280) |
 | `image*[.F]` with `F` outside the portable image formats | `sg::feature::extended_image_formats`, WebGPU's `texture-formats-tier1` |
+| a texture of a 16-bit normalized format, whatever its usage | `sg::feature::extended_image_formats`; refused by sg at creation, never by SGL, since SGL never sees a sampled texture's format |
 | filtering a 32-bit float texture | `sg::feature::float32_filtering`, WebGPU's `float32-filterable`; refused by sg at bind time, never by SGL |
 | `T[N]` of a resource | `sg::feature::binding_arrays`, which WebGPU lacks ([Binding arrays](#binding-arrays)) |
 | `T[]` of a resource | `sg::feature::unbounded_binding_arrays`, which WebGPU lacks |

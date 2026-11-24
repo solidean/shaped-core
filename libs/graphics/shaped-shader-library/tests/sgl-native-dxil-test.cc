@@ -1318,3 +1318,67 @@ TEST("slib - an HLSL pixel stage whose path ends in a discard compiles through D
                 .dump("text", e.value().text);
         }
 }
+
+TEST("slib - SGL's DXIL of a 16-bit normalized image passes the validator, and its view is UNorm or SNorm as DXC's is")
+{
+#ifndef CC_OS_WINDOWS
+    SKIP("a DXIL compile reflects through the Windows SDK's d3d12shader.h, which the Linux DXC release does not ship");
+#endif
+    auto compiler = ssc::dxc::compiler::create();
+    if (compiler.has_error())
+        SKIP("no DXC");
+    struct norm16
+    {
+        cc::string_view name;
+        cc::string_view value;
+    };
+    constexpr norm16 formats[] = {
+        {"r16_unorm", "0.25"},
+        {"r16_snorm", "-0.25"},
+        {"rg16_unorm", "float2(0.25, 0.5)"},
+        {"rg16_snorm", "float2(-0.25, 0.5)"},
+        {"rgba16_unorm", "float4(0.25)"},
+        {"rgba16_snorm", "float4(-0.25)"},
+    };
+    for (auto const& f : formats)
+        for (auto const access : {"out", "mut"})
+        {
+            // a `mut` one loads the texel too, which is a typed UAV load of the format
+            auto const source
+                = cc::format("require extended_image_formats, readwrite_image_formats\n"
+                             "\n"
+                             "binding work:\n"
+                             "    img: {} image_2d[.{}]\n"
+                             "\n"
+                             "@compute(8, 8) fun run(@thread_id id: int3){{work}}:\n"
+                             "    work.img[id.xy] = {}\n"
+                             "{}",
+                             access, f.name, f.value,
+                             cc::string_view(access) == "mut" ? "    work.img[id.xy] += work.img[id.xy]\n" : "");
+            // EMIT-281: DXIL records the component type `unorm float2` and `snorm float4` say, as UNormF32 or SNormF32
+            auto const component
+                = f.name.ends_with("_unorm") ? cc::string_view("UAVunorm_f32") : cc::string_view("UAVsnorm_f32");
+
+            auto const native = written(source, "run");
+            REQUIRE(native.has_value()).dump("format", f.name).dump("access", access);
+            auto const refused = compiler.value().validate(native.value().dxil);
+            CHECK(!refused.has_value())
+                .dump("format", f.name)
+                .dump("access", access)
+                .dump("validator", refused.value_or(cc::string()));
+            auto const ours = compiler.value().disassemble(native.value().dxil);
+            REQUIRE(ours.has_value());
+            CHECK(ours.value().contains(component)).dump("format", f.name).dump("ours", ours.value());
+
+            auto const text
+                = sgl::compile_to_text({.source = source, .entry_point = "run", .target = sgl::emit::target::hlsl_dx12});
+            REQUIRE(text.has_value());
+            auto const built = compiler.value().compile({.source = text.value().text,
+                                                         .entry_point = text.value().entry_point,
+                                                         .stage = sg::shader_stage::compute});
+            REQUIRE(built.has_value()).dump("dxc", built.has_error() ? built.error().to_string() : cc::string());
+            auto const theirs = compiler.value().disassemble(built.value().bytecode);
+            REQUIRE(theirs.has_value());
+            CHECK(theirs.value().contains(component)).dump("format", f.name).dump("theirs", theirs.value());
+        }
+}

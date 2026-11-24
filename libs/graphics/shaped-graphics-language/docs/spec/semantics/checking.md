@@ -631,6 +631,7 @@ fun shade(k: float) -> float:
   Every rule that judges the format judges the value the `const` has.
 * **CHK-201** A form some backend lacks is the normal error `needs-feature` on every target alike, unless a `require` grants its feature ([Features](#features)):
   `texture_2d_ms_array`, an image outside the portable image formats, and a `mut` image outside the three `r32` formats.
+  The six 16-bit normalized formats are outside the portable ones, and a `mut` image of one is also written for neither `wgsl` nor `msl` (EMIT-280).
 * **CHK-202** `@unfilterable` stands on a texture member of floats, and on any other binding member is `wrong-kind-of-name`.
   Elsewhere it is an attribute the pass does not know, by CHK-39.
 * **CHK-203** `@non_filtering` stands on a `sampler` member, and on any other binding member is `wrong-kind-of-name`.
