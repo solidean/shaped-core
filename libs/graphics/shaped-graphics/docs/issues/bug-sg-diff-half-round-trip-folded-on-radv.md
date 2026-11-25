@@ -24,9 +24,14 @@ A known line matches by PCI vendor, so RADV and AMD's own vulkan driver are one 
   The `~` applies it to a conversion not marked exact, and a SPIR-V instruction is exact only where it is decorated `NoContraction`.
 - `NoContraction` on the outer `OpFConvert`, added by hand, keeps both conversions in RADV's NIR, and the result is rounded (`0x3d4ccccf` becomes `0x3d4cc000`).
   HLSL's `precise` does not do it through DXC, which decorates the `fmul` and neither conversion.
+  SPIR-V allows `NoContraction` only on an arithmetic instruction, and `OpFConvert` is a conversion, so this is not an emission to rely on, though `spirv-val` takes it.
+- The `RoundingModeRTE 16` execution mode does not keep the pair: RADV still folds it.
+- `UnpackHalf2x16(PackHalf2x16(x))` in place of the pair is rounded on RADV, which lowers it to `pack_half_2x16_rtz_split`, toward zero as EVAL-96 allows.
+  DXC writes HLSL's `f16tof32(f32tof16(x))` as that pair, so one HLSL spelling would serve both vulkan routes; NVIDIA's vulkan is not measured.
 
 ## Open
 
 - Whether known lines learn a driver (sg's `adapter.driver_name`, `radv`), so RADV's line names this issue and AMD's own driver keeps `across`.
-- Whether SGL's SPIR-V decorates a narrowing `OpFConvert` `NoContraction`, which would fix the native route on Mesa; whether it does on NVIDIA's vulkan too is not measured.
-- Whether Mesa's fold is one Vulkan allows for an undecorated `OpFConvert`; if not, it is an upstream report like the LDS spills (docs/bugs-external).
+- Whether SGL spells a conversion to a half that a float reads back as a pack and an unpack, which a driver cannot fold as it folds two conversions.
+- Whether Mesa's fold is one Vulkan allows.
+  It treats the pair as a contraction, which keeps more precision, as a fused multiply-add does; but SPIR-V gives a conversion no `NoContraction` to refuse it.
