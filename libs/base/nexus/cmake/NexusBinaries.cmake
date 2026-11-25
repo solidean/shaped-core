@@ -47,6 +47,18 @@ function(sc_nexus_binary target)
     endif()
 endfunction()
 
+# Whether `all` leaves `target` out: its own property, or that of any directory from its own up to the top.
+# The directory property is set only where add_subdirectory(... EXCLUDE_FROM_ALL) was called, not on the directories below it.
+function(_sc_nexus_excluded_from_all target out)
+    get_target_property(_excluded ${target} EXCLUDE_FROM_ALL)
+    get_target_property(_dir ${target} SOURCE_DIR)
+    while(NOT _excluded AND _dir)
+        get_property(_excluded DIRECTORY "${_dir}" PROPERTY EXCLUDE_FROM_ALL)
+        get_property(_dir DIRECTORY "${_dir}" PROPERTY PARENT_DIRECTORY)
+    endwhile()
+    set(${out} ${_excluded} PARENT_SCOPE)
+endfunction()
+
 function(sc_write_nexus_binary_manifest)
     get_property(_binaries GLOBAL PROPERTY SC_NEXUS_BINARIES)
 
@@ -55,6 +67,17 @@ function(sc_write_nexus_binary_manifest)
         string(REPLACE "=" ";" _parts "${_binary}")
         list(GET _parts 0 _name)
         list(GET _parts 1 _kinds)
+        # A binary `all` does not build carries no tests a test run could start: a tool of shaped-core's, consumed EXCLUDE_FROM_ALL.
+        # Its other kinds and its path stay, since a tool built on demand (`sgl`) is still found through the manifest.
+        _sc_nexus_excluded_from_all(${_name} _excluded)
+        if(_excluded)
+            string(REPLACE "," ";" _kind_list "${_kinds}")
+            list(REMOVE_ITEM _kind_list tests)
+            if(NOT _kind_list)
+                continue()
+            endif()
+            list(JOIN _kind_list "," _kinds)
+        endif()
         string(REPLACE "," "\", \"" _kinds_json "${_kinds}")
         list(APPEND _entries "    \"${_name}\": [\"${_kinds_json}\"]")
     endforeach()
