@@ -6,8 +6,8 @@ refs:
   - test: "sg - an SGL affine3 in GPU memory is its three rows*"
   - file: libs/graphics/shaped-graphics/backends/webgpu/src/shaped-graphics/backends/webgpu/webgpu_command_list.compute.cc
   - symbol: webgpu_command_list::compute_dispatch
-claimed-by: Claude (for Philip Trettner)
-claimed-at: 2026-11-25T20:15Z
+closed: 2026-11-25
+resolution: obsolete
 ---
 
 # A bare SGL @compute on webgpu reads a grid of zero, so every thread returns
@@ -25,3 +25,10 @@ Two layers, found while landing the mesh polyfill (2026-11-11):
   Whether the block reaches the shader at `grid_offset_in_block`, with its dynamic offset in binding order, is unchecked.
 
 The ship gate runs the native preset alone, which is how this went unseen; the webgpu suite also has unrelated failures of its own (sgl lsp layers, an rgb10a2 storage image in sr's mix, shaped-xr).
+
+## Log
+
+**2026-11-25: none of the three tests fails at `ae9381f3d`.**
+On `emscripten-webgpu-relwithdebinfo` under node, on Linux, each test above passes: the dispatch test with 521 checks.
+No commit since 2026-11-11 names the grid, so what fixed it is not known; it is closed as obsolete rather than bisected.
+A failure that returns is a regression of this issue.
