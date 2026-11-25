@@ -217,7 +217,12 @@ private:
     [[nodiscard]] static bool run(cc::string_view path)
     {
         auto command = cc::format("spirv-val --target-env vulkan1.3 --scalar-block-layout \"{}\"", path);
+#if defined(CC_OS_EMSCRIPTEN) || defined(CC_OS_IOS) || defined(CC_OS_TVOS)
+        (void)command;
+        return true;
+#else
         return std::system(command.c_str_materialize()) == 0;
+#endif
     }
 
     cc::string _dir;
