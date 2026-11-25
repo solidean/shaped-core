@@ -2,6 +2,8 @@
 created: 2026-11-13
 refs:
   - file: libs/graphics/shaped-graphics-language/tests/check/autodiff-fuzz-test.cc
+closed: 2026-11-25
+resolution: fixed
 ---
 
 # The autodiff fuzz test failed once: 7 of 8 random programs' tests passed, seed 10386997317814370177
@@ -21,3 +23,18 @@ Re-running the suite with `--seed 10386997317814370177` passed, so the nexus see
 Either the generated program depends on something else, or the failing check is at a tolerance a program sometimes misses.
 Not yet known: which of the eight programs failed, and by how much forward, backward and central differences disagreed; the test does not print the program or the values.
 A first step is to make the test print the program and the three derivatives of a failing check, then find a seed that reproduces it.
+
+## Fix
+
+The seeds above are program seeds the test dumped, not the run seed, which is why `--seed` never replayed them.
+The generator also changed twice on 2026-11-13, so they may not name the programs that failed.
+
+On 2026-11-25 a thorough run, repeated, failed after about 1400 programs, at program seed 12709058204785430431 and run seed 6005595812044661986.
+Forward and backward agreed, 2.629499 and 2.6294985; the central differences gave 2.506.
+The test point had x.y = -0.50, exactly on the edge of the `clamp(x, -0.5, 0.5)` in `f2`'s return.
+There the left slope is 2.623 and the right 2.390, and the derivative is the left one, correctly.
+The test's kink detector missed the kink: the one-sided differences were 0.233 apart, under its 4 × tolerance of about 0.28.
+Points are hundredths in [-1.50, 1.50] and clamp edges are ±0.5, so a point lands on one about once a coordinate in 300.
+
+So it was the test, not autodiff.
+A derivative now also passes where it matches either one-sided difference, and the `tests_passed` check dumps the program's source.

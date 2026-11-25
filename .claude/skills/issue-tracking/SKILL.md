@@ -22,6 +22,7 @@ Anything a session finds and does not finish becomes an issue, not a note in cha
 
 1. Pick the type (`bug feat perf debt chore question epic`) and the narrowest scope that owns it: a library's `docs/issues/` over the repository's.
 2. `issues new <type> <slug> --in <dir> -t "<title>" --ref file:<path> --ref test:<name>`, then write the body: what is wrong or wanted, and what is already known, measured vs. hypothesis.
+   A flake carries the run seed nexus printed, the preset and the `dev.py test … --seed N` command, never a seed the test dumped itself.
 3. A workaround in code gets `TEMPORARY(<id>)` naming a `debt` issue; code an issue concerns may get an `issue: <id>` comment.
 4. An issue in a submodule (`--in extern/<sub>`) is that repository's and is committed there.
 

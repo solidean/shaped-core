@@ -4,6 +4,8 @@ refs:
   - file: libs/graphics/shaped-graphics-language/src/shaped-graphics-language/emit/impl/text_writer.cc
   - file: libs/graphics/shaped-graphics-language/src/shaped-graphics-language/check/flatten.cc
   - test: sv vulkan - every mode and every denoiser draws the view it draws on dx12
+closed: 2026-11-25
+resolution: fixed
 ---
 
 # Every vulkan ray query flagged for micromaps makes DXC take minutes and emit invalid SPIR-V
@@ -52,4 +54,4 @@ A vulkan query now carries the flag only where its flags force 2 states or are n
 sv's queries all looked non-constant, since a mixed world's trace hands its flags on through a local the prelude names `given`.
 The plan now reads a local given a constant and never assigned again as that constant (EMIT-159), so their flags are known and force nothing.
 `light_thin` for vulkan compiles in 18 s and validates, and the full `shaped-viewer-test` passes, 553 tests, the vulkan agreement test among them.
-Fixed in the working tree on 2026-11-12, uncommitted.
+Fixed on 2026-11-12, in 4eeda3f04.

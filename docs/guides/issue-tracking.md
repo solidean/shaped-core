@@ -87,6 +87,9 @@ The frontmatter is YAML, and every key is optional.
 
 The body is free markdown under the repository's prose rules.
 It says what is wrong or wanted and what is already known, and grows a plan or a log as work goes on.
+**A failure seen once carries what replays it**: the run seed nexus printed (`nexus: run seed N`), the preset, and the command, `uv run dev.py test "<test>" --seed N --preset <p>`.
+A seed a test dumps itself, such as one random program's, is not the run seed, and `--seed` given it replays a different run.
+A test whose failure no seed replays draws its randomness from somewhere other than `nx::test_random()`, and that is a bug of the test, worth saying in the issue.
 What an issue teaches beyond its own life — a design decision, a measured invariant — belongs in the docs or a test when it lands, not only in the closed issue.
 
 ## Refs and markers: is this a known issue?

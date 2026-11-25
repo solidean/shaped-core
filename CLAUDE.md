@@ -558,7 +558,7 @@ A stale "no cc:: equivalent yet" reason sends the next author back to the old wa
 | Build & test reference           | [docs/guides/building-and-testing.md](docs/guides/building-and-testing.md) |
 | Run the full suite               | `uv run dev.py test`                                              |
 | Run one or a batch of tests      | `uv run dev.py test "<pattern>"` (a pattern matching no test name selects by source file: `vector-test.cc`, `libs/base/**/tests/memory/*`) |
-| Chase a flaky test               | `uv run dev.py test <binary> --repeat 100` (stops at the first failure, so its logs survive for `test_diag`) |
+| Chase a flaky test               | `uv run dev.py test <binary> --repeat 100` (stops at the first failure, so its logs survive for `test_diag`); file one with the run seed nexus printed |
 | Find why a test is slow          | `uv run dev.py test "<pattern>" --sample` (prints where the busy time went, by self and total; keeps `<binary>.ccrec`) |
 | Analyze a `.ccrec` recording     | a short script over clean-core's `ccrec` package — the `analyzing-recordings` skill |
 | Build a single target            | `uv run dev.py build -t <target>`                                 |

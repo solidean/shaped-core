@@ -533,11 +533,15 @@ struct program_writer
         line(1, cc::format("let right = (f{}(x + ax * (0.5 * h), y + ay * (0.5 * h)) - at) / (0.5 * h)", k));
         line(1, "let smooth = nearly_equal(wide, narrow, within = tolerance) and nearly_equal(left, right, within = "
                 "4.0 * tolerance)");
+        // a kink too shallow for `smooth` to see, such as a clamp's edge a point lands on, has a one-sided derivative
+        line(1, "let one_sided = nearly_equal(forward, left, within = 2.0 * tolerance) or nearly_equal(forward, right, "
+                "within = 2.0 * tolerance)");
         // `no_diff` changes the derivative and not the value, so only the two modes can be compared
         if (is_held)
             line(1, "return modes_agree");
         else
-            line(1, "return modes_agree and (nearly_equal(forward, narrow, within = tolerance) or not smooth)");
+            line(1, "return modes_agree and (nearly_equal(forward, narrow, within = tolerance) or one_sided or not "
+                    "smooth)");
         line(0, "");
         auto const point = [&] { return cc::format("float3({}, {}, {}), {}", number(), number(), number(), number()); };
         line(0, cc::format("test agrees{}({}, {})", k, point(), point()));
@@ -621,8 +625,8 @@ TEST("sgl autodiff - random programs: forward agrees with backward, and both wit
         auto const seed = seeds.next_u64();
         auto const source = random_program(seed, functions);
         auto const tested = sgl::test_source(source, "autodiff-fuzz.sgl");
-        CHECK(tested.errors == "").dump("seed", seed).dump("source", source);
-        CHECK(tested.tests_passed == functions).dump("seed", seed);
+        CHECK(tested.errors == "").dump("program seed", seed).dump("source", source);
+        CHECK(tested.tests_passed == functions).dump("program seed", seed).dump("source", source);
         if (!tested.errors.empty())
             continue;
         auto const texts = sgl::compile_all_to_text(
@@ -631,7 +635,7 @@ TEST("sgl autodiff - random programs: forward agrees with backward, and both wit
         for (auto const& e : texts.value())
             if (e.text.has_error())
                 CHECK(e.text.error() == "")
-                    .dump("seed", seed)
+                    .dump("program seed", seed)
                     .dump("target", sgl::emit::to_string(e.target))
                     .dump("source", source);
     }
