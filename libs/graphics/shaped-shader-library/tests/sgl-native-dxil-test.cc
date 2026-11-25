@@ -692,6 +692,9 @@ TEST("slib - at .precise both DXIL routes write a product as its scalar sums, an
     auto compiler = ssc::dxc::compiler::create();
     if (compiler.has_error())
         SKIP("no DXC");
+#ifndef CC_OS_WINDOWS
+    SKIP("DXC compiles DXIL only on Windows, where its reflection is");
+#endif
     auto const native_of = [&](cc::string_view entry) { return native_dxil_of(compiler.value(), k_products, entry); };
     auto const text_of = [&](cc::string_view entry) { return text_dxil_of(compiler.value(), k_products, entry); };
     constexpr cc::string_view fmad = "@dx.op.tertiary.f32(i32 46,";
@@ -721,6 +724,9 @@ TEST("slib - at .precise both DXIL routes write the geometry and mix as one form
     auto compiler = ssc::dxc::compiler::create();
     if (compiler.has_error())
         SKIP("no DXC");
+#ifndef CC_OS_WINDOWS
+    SKIP("DXC compiles DXIL only on Windows, where its reflection is");
+#endif
     constexpr cc::string_view source
         = "binding work:\n"
           "    values: mut buffer[float4]\n"
