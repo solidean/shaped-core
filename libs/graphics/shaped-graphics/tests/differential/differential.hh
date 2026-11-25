@@ -90,7 +90,16 @@ struct sg_diff::setup
 /// A divergence a vendor's driver is known for, which logs rather than fails until the driver stops showing it.
 struct sg_diff::known_divergence
 {
+    /// Which of a vendor's drivers a line names: every one, Mesa's alone, or the vendor's own alone.
+    enum class drivers : u8
+    {
+        any,
+        mesa,
+        own,
+    };
+
     u32 vendor_id = 0;
+    drivers driver = drivers::any;
     sg::backend_kind backend = sg::backend_kind::dx12;
     cc::string issue;
     /// Which tests it holds for: empty for every test at the file's own level, `precise` for the strict-floor twin

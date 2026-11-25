@@ -354,6 +354,10 @@ public:
         case sg::feature::nonuniform_length_workaround:
             // a vulkan driver's alone
             return false;
+        case sg::feature::float_round_trip_workaround:
+            // Intel's dx12 folds the cast pair too, but SGL's dx12 routes have no spelling of it yet:
+            // bug-sg-diff-half-corpus-fails-on-intel
+            return false;
         }
         return false;
     }

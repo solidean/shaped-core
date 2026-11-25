@@ -859,6 +859,11 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
   At `.fast` and `.specials` the targets' own products, `smoothstep`, geometry, `mix` and `cross` stay, and at `.fast` nothing is marked.
   What no single operation states, the denormals and SPIR-V's float execution modes, stays the entry point's.
   How a route keeps the guarantee of a scope narrower than its entry point is its own.
+* **EMIT-282** At `.precise` and `.ieee`, a float converted to a narrower float is written where the device's driver cannot fold it with a conversion back ([why](why/emitting.md#emit-282)).
+  It is so where `has(.float_round_trip_workaround)` holds, which sg's vulkan backend grants where the driver is Mesa's; elsewhere a conversion is written as it is.
+  SGL's own SPIR-V decorates that `OpFConvert` `NoContraction`.
+  HLSL for vulkan writes a conversion to a half as `float16_t(f16tof32(f32tof16(x)))`, which DXC writes as a pack and an unpack, and leaves a conversion to a float as it is.
+  An entry point at those levels that uses halves or doubles consults the feature, so a bake keeps one variant for the devices that have it.
 * **EMIT-186** HLSL writes `!=` of float or half lanes as `!(a == b)`, and a whole vector's as `any(!(a == b))`, which is true where either is a NaN.
   DXC lowers HLSL's own float `!=` to SPIR-V as `OpFOrdNotEqual`, false for a NaN, where DXIL's is unordered; the negated `==` is unordered on both.
   WGSL and MSL write `!=`, which is unordered in both.

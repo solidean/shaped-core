@@ -544,8 +544,14 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
                                    .block_size = check::k_acceleration_address_bytes});
     }
     // EMIT-266: what the entry consulted, each with what this target offers for it
+    // EMIT-282: an entry point that keeps a narrowing conversion's rounding consults whether the driver folds it,
+    // which only the level settled here says
+    auto consulted = e.consulted;
+    if (u8(float_guarantee) >= u8(check::float_level::precise)
+        && (entry.features.has(check::feature::shader_f16) || entry.features.has(check::feature::shader_f64)))
+        consulted.set(check::feature::float_round_trip_workaround);
     for (auto i = isize(0); i < check::k_feature_count; ++i)
-        if (auto const f = check::feature(i); e.consulted.has(f))
+        if (auto const f = check::feature(i); consulted.has(f))
         {
             auto axis = sgl::variant_axis{.f = f};
             for (auto const how : emit::fills_of(target, f))

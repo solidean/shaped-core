@@ -500,6 +500,9 @@ public:
         case sg::feature::nonuniform_length_workaround:
             // docs/bugs-external/amd-vulkan-nonuniform-array-length-reads-first-lane
             return !metrics.adapter().is_software && metrics.adapter().vendor_id == 0x1002;
+        case sg::feature::float_round_trip_workaround:
+            // NIR's algebraic pass folds an inexact f2f of an f2f, so every Mesa driver does
+            return cc::string_view(metrics.adapter().driver_info).starts_with("Mesa");
         }
         return false;
     }

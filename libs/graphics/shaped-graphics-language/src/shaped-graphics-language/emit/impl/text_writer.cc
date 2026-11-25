@@ -1352,6 +1352,9 @@ struct writer
                                   .reorders_through_nvapi = p.reorders_through_nvapi,
                                   .states_micromaps = p.states_micromaps,
                                   .is_precise = u8(p.float_guarantee) >= u8(check::float_level::precise),
+                                  .keeps_narrowing_rounded
+                                  = u8(p.float_guarantee) >= u8(check::float_level::precise)
+                                 && p.compiled_for.device_features.has(check::feature::float_round_trip_workaround),
                                   .arguments = arguments,
                                   .argument_types = types,
                                   .builtins = *p.m.builtins,

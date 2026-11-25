@@ -93,6 +93,9 @@ enum class sgl::check::feature : sgl::u8
     /// No program names it: the device's vulkan driver answers the length of a `nonuniform` element of a binding array
     /// with another lane's, so a vulkan text asks each length at uniform indices.
     nonuniform_length_workaround,
+    /// No program names it: the device's driver folds a float converted to a narrower float and straight back, which
+    /// `.precise` and `.ieee` forbid, so there such a conversion is written where the driver cannot fold it (EMIT-282).
+    float_round_trip_workaround,
     /// A `mut` image of a 16-bit normalized format, which WebGPU and Metal have on no device.
     readwrite_norm16_image_formats,
 };
@@ -142,6 +145,7 @@ inline constexpr cc::string_view k_feature_names[] = {
     "multi_viewport",                 //
     "nonuniform_atomic_workaround",   //
     "nonuniform_length_workaround",   //
+    "float_round_trip_workaround",    //
     "readwrite_norm16_image_formats", //
 };
 inline constexpr isize k_feature_count = isize(sizeof(k_feature_names) / sizeof(k_feature_names[0]));

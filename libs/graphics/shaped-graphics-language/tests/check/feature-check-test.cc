@@ -116,7 +116,7 @@ TEST("sgl check - a require names a feature a shader can use, as sg names it")
              "shader_int64_atomics, "
              "unbounded_binding_arrays, shader_shared_int64_atomics, shader_int64_min_max_atomics, "
              "clustered_geometry, quad_control, multi_viewport, nonuniform_atomic_workaround, "
-             "nonuniform_length_workaround, readwrite_norm16_image_formats\n");
+             "nonuniform_length_workaround, float_round_trip_workaround, readwrite_norm16_image_formats\n");
     CHECK(reports_for("require raytracing\n").contains("unknown-feature user:[raytracing]"));
     CHECK(reports_for("require ray_query, binding_arrays\n") == "");
 

@@ -489,3 +489,13 @@ Where a function has several written forms, the one kept is DXC's, so the text r
 A division by a square root is two operations every route writes alike, so `v * (1 / length(v))` is written everywhere instead.
 
 A transcendental is no basic operation: each vendor computes `exp2` or `sin` its own way within the precision its API states, and no flag makes two of them agree.
+
+## EMIT-282
+
+At `.fast` and `.specials` a target may keep a half at a float's precision (EVAL-96), so a driver that folds `(x as half) as float` into `x` is right there.
+Above them the conversion rounds, and Mesa's NIR folds the pair anyway: its algebraic rule takes any `f2f` of an `f2f` not marked exact.
+A conversion carries no `NoContraction` in DXC's SPIR-V, and SPIR-V names the decoration for arithmetic instructions alone, so nothing a program writes marks one exact.
+Mesa marks a decorated `OpFConvert` exact all the same, and `spirv-val` takes it, so SGL's own SPIR-V keeps the rounding at no cost.
+DXC's text has no such decoration, and its pack and unpack cost RDNA 3 one instruction more than a conversion that rounds: a price `.precise` pays, on the drivers that need it alone.
+Intel's vulkan driver folds that pack and unpack instead, and rounds the cast pair, so the spelling is the device's, as CHK-561's is.
+Intel's dx12 and NVIDIA's vulkan fold the cast pair too; neither has a spelling here yet, so neither grants the feature.

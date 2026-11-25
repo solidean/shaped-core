@@ -341,6 +341,61 @@ TEST("sgl spirv - at .specials a float operation may contract, so it is undecora
     CHECK(with_mode(precise, 4461) == 1);
 }
 
+namespace
+{
+/// A float's round trip through a half, at `level`.
+[[nodiscard]] cc::string round_trip_at(cc::string_view level)
+{
+    return cc::format("require shader_f16\n"
+                      "binding work:\n"
+                      "    values: mut buffer[float]\n"
+                      "\n"
+                      "@float(.{}) @compute(64) fun run(@thread_id id: int3){{work}}:\n"
+                      "    work.values[id.x] = (work.values[id.x] as half) as float\n",
+                      level);
+}
+
+[[nodiscard]] sgl::emitted_source round_trip(cc::string_view level, bool folds, sgl::emit::native_route route)
+{
+    auto features = sgl::check::feature_set{sgl::check::feature::shader_f16, sgl::check::feature::float_specials};
+    if (folds)
+        features.set(sgl::check::feature::float_round_trip_workaround);
+    auto const source = round_trip_at(level);
+    auto e = sgl::compile_to_text({.source = source,
+                                   .entry_point = "run",
+                                   .target = sgl::emit::target::hlsl_vulkan,
+                                   .device_features = features,
+                                   .native = route});
+    REQUIRE(e.has_value()).dump("error", e.has_error() ? e.error() : cc::string());
+    return cc::move(e.value());
+}
+} // namespace
+
+TEST("sgl spirv - at .precise a narrowing conversion is kept from a driver that folds its round trip (EMIT-282)")
+{
+    using sgl::emit::native_route;
+    // NoContraction on the FMul of none: the conversion itself, where the device's driver folds the pair
+    CHECK(decorated(round_trip("precise", true, native_route::require).spirv, 42) == 1);
+    CHECK(decorated(round_trip("precise", false, native_route::require).spirv, 42) == 0);
+    CHECK(decorated(round_trip("specials", true, native_route::require).spirv, 42) == 0);
+
+    // the text: through f32tof16 on such a device alone, at a level that forbids the fold
+    CHECK(round_trip("precise", true, native_route::text).text.contains("f16tof32(f32tof16("));
+    CHECK(!round_trip("precise", false, native_route::text).text.contains("f32tof16"));
+    CHECK(!round_trip("specials", true, native_route::text).text.contains("f32tof16"));
+
+    // a bake keeps one variant for the devices whose driver folds it, at .precise alone
+    auto const consults = [](sgl::emitted_source const& e)
+    {
+        for (auto const& a : e.axes)
+            if (a.f == sgl::check::feature::float_round_trip_workaround)
+                return true;
+        return false;
+    };
+    CHECK(consults(round_trip("precise", false, native_route::text)));
+    CHECK(!consults(round_trip("specials", false, native_route::text)));
+}
+
 TEST("sgl spirv - a pixel stage's position keeps its guarantee on the reciprocal it writes of w (EMIT-281)")
 {
     // FragCoord's w is 1/w where the program reads w, so its one division is the program's own arithmetic

@@ -131,6 +131,8 @@ ctx.supports(sg::feature::ray_query)               // bool — THE capability qu
                                                    //     at a nonuniform binding-array index wrongly, so SGL writes it around them; CHK-561)
                                                    //   | nonuniform_length_workaround (no capability: AMD's vulkan driver reads a nonuniform
                                                    //     element's length from another lane, so SGL asks it at uniform indices)
+                                                   //   | float_round_trip_workaround (no capability: Mesa folds a float's round trip through a
+                                                   //     narrower one, so SGL writes it where it cannot at .precise; EMIT-282)
                                                    //     SGL's @view_index; dx12's ViewInstancingTier, vulkan's multiview,
                                                    //     false on metal (amplification not wired yet) and webgpu)
                                                    //   | vertex_pipeline_stores (a vertex, geometry or tessellation stage writes

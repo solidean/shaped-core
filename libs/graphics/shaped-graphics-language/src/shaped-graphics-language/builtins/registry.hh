@@ -67,6 +67,9 @@ struct sgl::builtins::call_context
     bool states_micromaps = false;
     /// The entry point's float guarantee is `.precise` or stricter, so a product is written in its fixed order (EMIT-281).
     bool is_precise = false;
+    /// As `is_precise`, on a device whose driver folds a float's round trip through a narrower one, so a conversion to
+    /// a half is written where it cannot (EMIT-282).
+    bool keeps_narrowing_rounded = false;
     cc::span<written const> arguments;
     /// Each argument's type as the target spells it, for a record with a `helper`; empty for any other.
     cc::span<cc::string const> argument_types;

@@ -296,6 +296,12 @@ enum class sg::feature
     /// See docs/bugs-external/amd-vulkan-nonuniform-array-length-reads-first-lane.
     nonuniform_length_workaround,
 
+    /// Not a capability: this device's driver folds a float converted to a narrower float and straight back into the
+    /// float itself, so SGL writes such a conversion where the driver cannot fold it at `.precise` and `.ieee`.
+    /// vulkan sets it where the driver is Mesa's, whose NIR folds the pair; every other device converts as written.
+    /// See libs/graphics/shaped-graphics/docs/issues/bug-sg-diff-half-round-trip-folded-on-radv.md.
+    float_round_trip_workaround,
+
     /// An image of a 16-bit normalized format, `r16_unorm` through `rgba16_snorm`, may be `read_write`; `extended_image_formats` grants the format.
     /// It is apart from `readwrite_image_formats` because no WebGPU or Metal device has it, where both grant that one on some devices.
     /// D3D12 grants it where each of the six has a typed UAV load, beside the typed UAV store `extended_image_formats` asks.
@@ -370,6 +376,7 @@ inline constexpr feature k_all_features[] = {
     feature::multi_viewport,
     feature::nonuniform_atomic_workaround,
     feature::nonuniform_length_workaround,
+    feature::float_round_trip_workaround,
     feature::readwrite_norm16_image_formats,
     feature::norm16_filtering,
 };
@@ -477,6 +484,8 @@ static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize
         return "nonuniform_atomic_workaround";
     case feature::nonuniform_length_workaround:
         return "nonuniform_length_workaround";
+    case feature::float_round_trip_workaround:
+        return "float_round_trip_workaround";
     case feature::readwrite_norm16_image_formats:
         return "readwrite_norm16_image_formats";
     case feature::norm16_filtering:

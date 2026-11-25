@@ -272,7 +272,12 @@ value_ref lowering::converted(value_ref value, type_ref from, type_ref to)
         return add(source.kind == type_kind::float_ ? op::fne : op::ine, to, {value, splat(zero, from)});
     }
     if (source.kind == type_kind::float_ && target.kind == type_kind::float_)
-        return add(op::f_resize, to, {value});
+    {
+        // EMIT-282: where the driver folds a round trip the guarantee forbids folding, the narrowing says it rounds
+        auto const keeps = target.width < source.width && u8(_guarantee) >= u8(check::float_level::precise)
+                        && _plan.compiled_for.device_features.has(check::feature::float_round_trip_workaround);
+        return add(op::f_resize, to, {value}, keeps ? k_ir_kept_rounding : u8(0));
+    }
     if (source.kind == type_kind::float_)
         return add(target.is_signed ? op::f_to_s : op::f_to_u, to, {value});
     if (target.kind == type_kind::float_)

@@ -193,6 +193,8 @@ public:
         case sg::feature::pixel_view_read_workaround:
         case sg::feature::nonuniform_atomic_workaround:
         case sg::feature::nonuniform_length_workaround:
+        // WebGPU keeps no level above `.fast`, where folding the round trip is allowed
+        case sg::feature::float_round_trip_workaround:
         // texture-formats-tier2 reads and writes none of the six, and WebGPU samples them as unfilterable-float alone
         case sg::feature::readwrite_norm16_image_formats:
         case sg::feature::norm16_filtering:

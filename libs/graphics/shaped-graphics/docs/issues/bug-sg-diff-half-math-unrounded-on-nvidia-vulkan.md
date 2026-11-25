@@ -28,4 +28,6 @@ It fails on vulkan's dxc and native routes alike.
 
 ## Open
 
-- Whether the `RoundingModeRTE` execution mode for 16-bit floats keeps the driver from folding, which would also fix AMD's toward-zero rounding.
+- Whether the `RoundingModeRTE` execution mode for 16-bit floats keeps the driver from folding; on RADV it does not.
+- Whether NVIDIA's vulkan keeps a `NoContraction` `OpFConvert` and a pack and unpack, as Mesa does, so `float_round_trip_workaround` could hold there too (EMIT-282).
+- Since EVAL-96 lets `.fast` and `.specials` keep a half at a float's precision, the fold fails only the precise twin and the GPU-to-GPU tests, which the file's `precise` and `across` lines log.

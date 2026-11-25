@@ -263,13 +263,33 @@ cc::string type_name(numeric const& n, i32 width)
 }
 
 /// `x as T` as each target writes it: a conversion to `T`, `float3(x)` in HLSL and MSL and `vec3f(x)` in WGSL.
-spelling conversion_to(numeric const& to, i32 width)
+constexpr cc::string_view k_half_round_trip_names[] = {"f16tof32", "f32tof16"};
+
+/// EMIT-282: a float converted to a half in HLSL for vulkan, through `f32tof16` where the device's driver would fold
+/// the cast with a conversion back, which DXC writes as a pack and an unpack no such driver folds.
+written write_float_to_half_on_vulkan(call_context const& c)
+{
+    auto const type = c.data == 1 ? cc::string("float16_t") : cc::format("float16_t{}", c.data);
+    if (!c.keeps_narrowing_rounded)
+        return {.text = cc::format("{}({})", type, c.arguments[0].text)};
+    return {.text = cc::format("{}(f16tof32(f32tof16({})))", type, c.arguments[0].text)};
+}
+
+/// `from` is null for a conversion from a bool.
+spelling conversion_to(numeric const& to, i32 width, numeric const* from)
 {
     auto const hlsl = width == 1 ? cc::string(to.hlsl) : cc::format("{}{}", to.hlsl, width);
     auto const wgsl = width == 1                    ? cc::string(to.wgsl_scalar)
                     : to.wgsl_vector_suffix.empty() ? cc::format("vec{}<{}>", width, to.wgsl_scalar)
                                                     : cc::format("vec{}{}", width, to.wgsl_vector_suffix);
-    return {.hlsl = hlsl, .wgsl = wgsl, .msl = type_name(to, width)};
+    auto s = spelling{.hlsl = hlsl, .wgsl = wgsl, .msl = type_name(to, width)};
+    if (from != nullptr && from->kind == value_kind::scalar_float && to.kind == value_kind::scalar_half)
+    {
+        s.hlsl_vulkan = write_float_to_half_on_vulkan;
+        s.data = u32(width);
+        s.hlsl_names = k_half_round_trip_names;
+    }
+    return s;
 }
 
 /// WGSL folds a constant exactly, and no uint holds a negative int (CHK-312).
@@ -307,7 +327,7 @@ void sgl::builtins::register_conversions(registry& r)
                                             source, target),
                     .evaluate = converter_to(to.kind),
                     .unrepresentable_when_constant = unrepresentable_of(from, to),
-                    .write = conversion_to(to, width),
+                    .write = conversion_to(to, width, &from),
                 });
             }
 
@@ -334,7 +354,7 @@ void sgl::builtins::register_conversions(registry& r)
                     .signature = signature,
                     .evaluate = converter_to(to.kind),
                     .unrepresentable_when_constant = unrepresentable_of(from, to),
-                    .write = conversion_to(to, width),
+                    .write = conversion_to(to, width, &from),
                     .takes_literal_at_default = true,
                 });
             }
@@ -355,7 +375,7 @@ void sgl::builtins::register_conversions(registry& r)
                 .signature = cc::format("@pure @operator(\"as\") fun convert_{}_to_{}(x: {}) -> {}", source, target,
                                         source, target),
                 .evaluate = evaluate,
-                .write = conversion_to(to, width),
+                .write = conversion_to(to, width, nullptr),
             });
         }
 

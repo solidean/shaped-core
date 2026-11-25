@@ -572,6 +572,9 @@ void writer::instruction_of(u32 index)
     auto const& rule = k_rule_of.rules[isize(i.code)];
     if (u8(i.guarantee) >= u8(check::float_level::precise) && rule.keeps_contraction)
         emit(_annotations, spv::Decorate, {id, spv::NoContraction});
+    // EMIT-282: Mesa folds an undecorated conversion with the one back, and keeps a decorated one
+    if (i.code == op::f_resize && i.sub == k_ir_kept_rounding)
+        emit(_annotations, spv::Decorate, {id, spv::NoContraction});
     if (i.aux == k_ir_nonuniform && (i.code == op::access_chain || i.code == op::load || i.code == op::combine_sampler))
         nonuniform(i, id);
 

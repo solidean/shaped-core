@@ -165,6 +165,7 @@ bool metal_context::supports(sg::feature f) const
     case sg::feature::pixel_view_read_workaround:
     case sg::feature::nonuniform_atomic_workaround:
     case sg::feature::nonuniform_length_workaround:
+    case sg::feature::float_round_trip_workaround:
     // read-write tier 2 names no 16-bit normalized format
     case sg::feature::readwrite_norm16_image_formats:
         return false;

@@ -89,6 +89,8 @@ A `known` line names the vendor, the backend and the issue:
 ```
 
 The vendor is `amd`, `apple`, `intel` or `nvidia`, matched by the adapter's PCI vendor id, and the backend is `dx12`, `vulkan`, `metal` or `webgpu`.
+A vendor may name its drivers: `amd/mesa` is RADV and any other Mesa driver of AMD's hardware, `amd/own` is AMD's own, and `amd` is both.
+Mesa's are those whose driver info starts `Mesa`, so no driver's name need be known.
 On a matching context a difference logs at info, naming the issue, where it would fail.
 **A known line that stops diverging fails**, against the reference and against the interpreter: a fixed driver retires its line, and the issue gets checked.
 A trailing `precise` scopes a line to [the strict-floor twin](#the-strict-floor-twin) alone.

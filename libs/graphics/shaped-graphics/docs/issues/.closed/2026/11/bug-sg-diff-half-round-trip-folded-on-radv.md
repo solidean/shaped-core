@@ -6,6 +6,8 @@ refs:
   - test: "sg differential - every corpus entry point*"
   - issue: bug-sg-diff-half-math-unrounded-on-nvidia-vulkan
   - issue: debt-sg-diff-gpu-comparisons-hold-a-conversion-to-one-rounding
+closed: 2026-11-25
+resolution: fixed
 ---
 
 # RADV folds a float's round trip through a half, and the known amd vulkan lines take it for AMD's own driver
@@ -31,9 +33,10 @@ A known line matches by PCI vendor, so RADV and AMD's own vulkan driver are one 
 - On RDNA 3 `(x * 0.1) as half as float` is one instruction folded, `v_mul_f32`, and two rounded through `NoContraction`, `v_fma_mixlo_f16` and `v_fma_mix_f32`.
   The pack and unpack is three, since `v_cvt_pkrtz_f16_f32` takes no multiply into it: one more than a driver that rounds as it should.
 
-## Open
+## Resolved
 
-- Whether known lines learn a driver (sg's `adapter.driver_name`, `radv`), so RADV's line names this issue and AMD's own driver keeps `across`.
-- Whether SGL spells a conversion to a half that a float reads back as a pack and an unpack, which a driver cannot fold as it folds two conversions.
-- Whether Mesa's fold is one Vulkan allows.
-  It treats the pair as a contraction, which keeps more precision, as a fused multiply-add does; but SPIR-V gives a conversion no `NoContraction` to refuse it.
+- EVAL-96 lets `.fast` and `.specials` keep a half at a float's precision, a conversion's too, so the fold is right there and `half_math.sgl` passes against the interpreter at its own level.
+- At `.precise` and `.ieee`, sg's vulkan backend grants `float_round_trip_workaround` on a Mesa driver, and EMIT-282 writes the conversion where NIR cannot fold it.
+  SGL's own SPIR-V decorates the `OpFConvert` `NoContraction`, and the text writes `float16_t(f16tof32(f32tof16(x)))`; the precise twin passes on both routes.
+- A known line's vendor may name Mesa's drivers or its own, `amd/mesa` and `amd/own`, so `half_arithmetic.sgl`'s line names AMD's own driver and RADV is held to the reference.
+- Whether Mesa's fold is one Vulkan allows stays open, a question for Mesa and Khronos rather than this tree: SPIR-V gives a conversion no `NoContraction` to refuse it.

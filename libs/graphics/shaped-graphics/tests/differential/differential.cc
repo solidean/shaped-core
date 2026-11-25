@@ -120,6 +120,7 @@ constexpr isize k_named_elements = 4;
 namespace
 {
 /// `nvidia vulkan bug-...`: a vendor by its PCI id, a backend, and the issue that explains the divergence.
+/// The vendor may name its drivers, `amd/mesa` for Mesa's or `amd/own` for AMD's own, which tell RADV from AMD's.
 [[nodiscard]] cc::optional<sg_diff::known_divergence> known_divergence_of(cc::string_view text)
 {
     auto words = cc::vector<cc::string_view>();
@@ -137,13 +138,24 @@ namespace
     auto result = sg_diff::known_divergence{.issue = cc::string(words[2])};
     if (words.size() == 4)
         result.scope = cc::string(words[3]);
-    if (words[0] == "amd")
+    auto vendor = words[0];
+    if (vendor.ends_with("/mesa"))
+    {
+        result.driver = sg_diff::known_divergence::drivers::mesa;
+        vendor = vendor.subview({.offset = 0, .size = vendor.size() - 5});
+    }
+    else if (vendor.ends_with("/own"))
+    {
+        result.driver = sg_diff::known_divergence::drivers::own;
+        vendor = vendor.subview({.offset = 0, .size = vendor.size() - 4});
+    }
+    if (vendor == "amd")
         result.vendor_id = 0x1002;
-    else if (words[0] == "apple")
+    else if (vendor == "apple")
         result.vendor_id = 0x106B;
-    else if (words[0] == "intel")
+    else if (vendor == "intel")
         result.vendor_id = 0x8086;
-    else if (words[0] == "nvidia")
+    else if (vendor == "nvidia")
         result.vendor_id = 0x10DE;
     else
         return cc::nullopt;
@@ -164,9 +176,15 @@ namespace
 
 sg_diff::known_divergence const* sg_diff::workload::known_on(sg::context const& ctx, cc::string_view scope) const
 {
+    auto const& adapter = ctx.metrics.adapter();
+    auto const is_mesa = cc::string_view(adapter.driver_info).starts_with("Mesa");
     for (auto const& k : known)
-        if (k.vendor_id == ctx.metrics.adapter().vendor_id && k.backend == ctx.backend() && k.scope == scope)
+    {
+        auto const drives
+            = k.driver == known_divergence::drivers::any || (k.driver == known_divergence::drivers::mesa) == is_mesa;
+        if (k.vendor_id == adapter.vendor_id && drives && k.backend == ctx.backend() && k.scope == scope)
             return &k;
+    }
     return nullptr;
 }
 
@@ -304,7 +322,9 @@ sg_diff::corpus sg_diff::read_corpus()
                     known.push_back(parsed.value());
                 else
                     problem = cc::format("'{}' is no known divergence; one is `known <vendor> <backend> <issue>`, the "
-                                         "vendor amd, apple, intel or nvidia, the backend dx12, vulkan, metal or "
+                                         "vendor amd, apple, intel or nvidia, with `/mesa` or `/own` for those drivers "
+                                         "alone, the backend "
+                                         "dx12, vulkan, metal or "
                                          "webgpu, and a trailing `precise` or `across` for the strict-floor twin or "
                                          "the GPU-to-GPU tests alone",
                                          value);
