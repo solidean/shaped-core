@@ -3,7 +3,9 @@
 A cross preset compiles every target for its own machine, the tree's own `sgl` included, and the build machine cannot run that one.
 Emscripten is the one that matters today: every WebAssembly preset builds the SGL shader packages of the tier-1 tests.
 So a shader package whose SGL entries the compiler has to read would have nothing to read them with.
-This builds `sgl` in the platform's default native preset and hands its path to the cross build as SC_SGL_TOOL.
+This builds `sgl` in the platform's default native preset, deploys a copy of it to build/host-tools/, and hands the copy's path to the cross build as SC_SGL_TOOL.
+A copy, because a cross build runs it outside every dependency graph the native build knows of, the build server's background rebuilds included.
+Run in place, it would hold the native build's own output open, and on Windows the next native link of `sgl` could not replace it.
 `SC_HOST_TOOLSET` pins that preset's toolset, as `--toolset` does for a native one; the cross build's own `--toolset` names its cross compiler instead.
 A cross CI runner sets it, since the image's default compiler is not one the tree builds with.
 
@@ -13,12 +15,17 @@ The package generator depends on the tool's file, so a stale one would regenerat
 Public API:
     host_preset(root)                      -> Preset
     ensure_host_sgl(root, ...)             -> Path | StepResult
+    deployed_sgl(root)                     -> Path
+    is_tool_current(build_dir, root)       -> bool
 """
 
 from __future__ import annotations
 
+import filecmp
 import os
 import platform
+import shutil
+import time
 from pathlib import Path
 
 from . import cmake
@@ -44,8 +51,50 @@ def host_preset(root: Path) -> Preset:
         raise ToolsetError(f"SC_HOST_TOOLSET={toolset} for the host preset: {e}") from None
 
 
+def deployed_sgl(root: Path) -> Path:
+    """Where the host `sgl` a cross build runs is deployed: one per checkout, whatever the cross preset."""
+    return root / "build" / "host-tools" / ("sgl.exe" if platform.system() == "Windows" else "sgl")
+
+
+def is_tool_current(build_dir: Path, root: Path) -> bool:
+    """Whether a configured cross build already runs the deployed `sgl`; one that runs any other must reconfigure."""
+    cache = build_dir / "CMakeCache.txt"
+    if not cache.is_file():
+        return True
+    for line in cache.read_text(encoding="utf-8", errors="replace").splitlines():
+        if line.startswith("SC_SGL_TOOL:"):
+            return line.partition("=")[2].strip() == deployed_sgl(root).as_posix()
+    return False
+
+
+def _deploy(built: Path, root: Path) -> Path:
+    """Copies `built` over the deployed `sgl` where it differs, and returns the deployed path.
+
+    The copy lands beside it first and then takes its name, so a run never starts half a file.
+    A deployed `sgl` that is running cannot be replaced on Windows but can be renamed, so it is moved aside first;
+    what was moved aside goes once nothing runs it any more.
+    """
+    target = deployed_sgl(root)
+    if target.is_file() and filecmp.cmp(built, target, shallow=False):
+        return target
+    target.parent.mkdir(parents=True, exist_ok=True)
+    fresh = target.with_name(target.name + ".new")
+    shutil.copy2(built, fresh)
+    try:
+        os.replace(fresh, target)
+    except PermissionError:
+        target.rename(target.with_name(f"{target.name}.old-{time.time_ns()}"))
+        os.replace(fresh, target)
+    for old in target.parent.glob(f"{target.name}.old-*"):
+        try:
+            old.unlink()
+        except OSError:
+            pass  # still running; the next deploy tries again
+    return target
+
+
 def ensure_host_sgl(root: Path, *, mirror: bool = False, verbose: bool = False) -> Path | StepResult:
-    """A runnable `sgl`, built in the host preset: its path, or the step that failed to produce it."""
+    """A runnable `sgl`, built in the host preset and deployed: its deployed path, or the step that failed to produce it."""
     host = host_preset(root)
     configured = ensure_configured(host, root=root, mirror=mirror, verbose=verbose)
     if configured is not None and not configured.ok:
@@ -66,5 +115,5 @@ def ensure_host_sgl(root: Path, *, mirror: bool = False, verbose: bool = False) 
 
     for target in targets.discover_targets(host.build_dir, host.build_type):
         if target.name == SGL_TARGET and target.artifact is not None:
-            return target.artifact
+            return _deploy(target.artifact, root)
     raise RuntimeError(f"the host preset {host.name!r} built `{SGL_TARGET}` but its artifact was not found")
