@@ -92,6 +92,8 @@ The vendor is `amd`, `apple`, `intel` or `nvidia`, matched by the adapter's PCI 
 On a matching context a difference logs at info, naming the issue, where it would fail.
 **A known line that stops diverging fails**, against the reference and against the interpreter: a fixed driver retires its line, and the issue gets checked.
 A trailing `precise` scopes a line to [the strict-floor twin](#the-strict-floor-twin) alone.
+A trailing `across` scopes it to the tests that hold one GPU to another, the reference and the backends of one machine.
+Those see a difference both APIs allow, a conversion rounded toward zero against one rounded to nearest, which the interpreter's ranges pass.
 A matching context is never what the others are held to, and a refresh writes no reference from it.
 Two routes of one matching context are not held to each other, since one driver folding both alike proves nothing.
 
@@ -141,6 +143,8 @@ Every configuration is held to that range, and the file's `across` bound applies
 a builtin's own precision, and a texture read, a subgroup operation, a derivative or an atomic, each of which takes its arguments exactly.
 The test says at info how much of `across` each file used against the interpreter, beyond its ranges, over every configuration it holds no known divergence for.
 That number is how far a file's tolerance carries what the ranges leave out, and 0 says the ranges hold everything.
+A file held `exact` passes a ranged element only where it equals one end of its range, bit for bit.
+Its ranges are alternatives, a conversion's two roundings above all, and a value between them is no rounding of it: Intel's dx12 returns one.
 So does a construct a device runs natively, the trace above all: its emulated form is the interpreter's stand-in for the hardware, whose precision is its own.
 
 ### The strict-floor twin

@@ -36,9 +36,9 @@ void judge(sg_diff::workload const& w,
            configuration const& c,
            cc::string_view against,
            cc::vector<cc::string> const& lines,
-           cc::string_view floor = {})
+           cc::string_view scope = {})
 {
-    auto const* const known = w.known_on(*c.ctx, floor);
+    auto const* const known = scope == "across" ? w.known_between_gpus(*c.ctx) : w.known_on(*c.ctx, scope);
     if (known == nullptr)
     {
         for (auto const& line : lines)
@@ -60,10 +60,10 @@ cc::shared_async<cc::unit> held_alike(sg_diff::workload const& w, cc::span<confi
 {
     auto configurations = cc::vector<configuration const*>();
     for (auto const& c : all)
-        if (w.known_on(*c.ctx) == nullptr)
+        if (w.known_between_gpus(*c.ctx) == nullptr)
             configurations.push_back(&c);
     for (auto const& c : all)
-        if (w.known_on(*c.ctx) != nullptr)
+        if (w.known_between_gpus(*c.ctx) != nullptr)
             configurations.push_back(&c);
 
     auto reference = cc::optional<sg_diff::run_result>();
@@ -87,7 +87,7 @@ cc::shared_async<cc::unit> held_alike(sg_diff::workload const& w, cc::span<confi
         auto const tolerance = c.ctx == reference_of->ctx ? w.routes : w.across;
         auto const lines = sg_diff::differences(reference.value(), result, tolerance);
         // two routes of one known driver may agree with each other, so agreeing proves nothing here
-        if (auto const* const known = w.known_on(*c.ctx); known != nullptr)
+        if (auto const* const known = w.known_between_gpus(*c.ctx); known != nullptr)
         {
             if (!lines.empty())
                 CC_LOG_INFO("differential: {} {}: {} against {} diverges as {} says: {}", w.file, w.entry, c.label,
@@ -233,7 +233,7 @@ ASYNC_TEST("sg differential - every corpus entry point computes what its committ
             for (auto const& c : configurations)
             {
                 // a driver the file knows to diverge writes no reference
-                if (w.known_on(*c.ctx) != nullptr)
+                if (w.known_between_gpus(*c.ctx) != nullptr)
                     continue;
                 auto const result = co_await sg_diff::run(c.ctx.get(), &w, c.route);
                 if (result.skipped.has_value())
@@ -263,7 +263,7 @@ ASYNC_TEST("sg differential - every corpus entry point computes what its committ
                                                  w.entry, o.name, c.ctx->metrics.adapter().name, c.route.name);
                     write_text(name, cc::string_view(reinterpret_cast<char const*>(o.bytes.data()), o.bytes.size()));
                 }
-            judge(w, c, sg_diff::reference_name(w), sg_diff::against_reference(reference.value(), w, result));
+            judge(w, c, sg_diff::reference_name(w), sg_diff::against_reference(reference.value(), w, result), "across");
         }
     }
 }

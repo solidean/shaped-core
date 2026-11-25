@@ -82,11 +82,19 @@ TEST("sgl interpret bounds - the level a test reaches is the one a bounding run 
     CHECK(r.is_exact(0));
 }
 
-TEST("sgl interpret bounds - a conversion to a half rounds at every level")
+TEST("sgl interpret bounds - a conversion to a half rounds to nearest or toward zero, at every level")
 {
-    auto const r = run_bounded("    io.output[0] = (io.input[0] as half) as float\n", floats(0.3f), 1);
-    CHECK(r.value(0) == 0.300048828125f);
-    CHECK(r.is_exact(0));
+    // EVAL-96: the target's rounding, D3D's toward zero or the device's on vulkan; the interpreter's value is nearest
+    for (auto const level : {sgl::check::float_level::fast, sgl::check::float_level::ieee})
+    {
+        auto const r = run_bounded("    io.output[0] = (io.input[0] as half) as float\n", floats(0.3f), 1, level);
+        CHECK(r.value(0) == 0.300048828125f);
+        CHECK(r.most(0) == 0.300048828125f);
+        CHECK(r.least(0) == 0.2998046875f);
+    }
+    // a value a half holds converts to itself either way
+    auto const exact = run_bounded("    io.output[0] = (io.input[0] as half) as float\n", floats(0.25f), 1);
+    CHECK(exact.is_exact(0));
 }
 
 TEST("sgl interpret bounds - a float product may be left unrounded, as a contraction keeps it, above precise alone")
