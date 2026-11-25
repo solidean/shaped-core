@@ -3,6 +3,8 @@ created: 2026-11-25
 refs:
   - issue: feat-sgl-interpreter-bounds-float-departures
   - file: libs/graphics/shaped-graphics-language/src/shaped-graphics-language/interpret/impl/bounds.cc
+closed: 2026-11-25
+resolution: fixed
 ---
 
 # A bounding run widens a sum by what reassociating it may cost
