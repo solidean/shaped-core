@@ -842,12 +842,14 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
   `reflect(i, n)` is `i - n * k` of `k = 2 * dot(n, i)`, the scalar factor first.
   `refract(i, n, eta)` is `eta * i - (eta * d + sqrt(k)) * n` of `d = dot(n, i)` and `k = 1 - (eta * eta) * (1 - d * d)` where `k >= 0`, and zero elsewhere, a NaN `k` included.
   `mix(a, b, t)` is `a + t * (b - a)`, DXC's lowering of `lerp`.
-  `cross(a, b)` is `a_p * b_q - a_q * b_p` in each lane, as DXC writes it.
+  `cross(a, b)` is `(a1*b2 - a2*b1, a2*b0 - a0*b2, a0*b1 - a1*b0)`, as DXC writes it.
   The text routes write these as helpers of their own: `sgl_ordered_mul`, `sgl_ordered_dot`, `sgl_ordered_smoothstep`, and `sgl_ordered_` before each other name.
-  These are the forms of `float` and `half`; a `double`'s builtins are bodies of the prelude, which every route computes alike.
+  These are the forms of `float` and `half`.
+  A `double`'s builtins are bodies of the prelude, the same operations on every route but `sqrt` and `inverse_sqrt`, which are each API's own (EVAL-108).
   The interpreter keeps a float's exact meaning (EVAL-6), from which these forms depart by their roundings (EVAL-96).
-  Not kept alike: a transcendental keeps the target's own precision, which no level makes alike across vendors.
-  Nor `determinant`, which stays each target's own, nor a subgroup's float reduction or scan, nor a float atomic, whose order the hardware picks.
+  A transcendental keeps the target's own precision, which no level makes alike across vendors.
+  `determinant` stays each target's own.
+  A subgroup's float reduction or scan, and a float atomic, add in the order the hardware picks.
   From `.specials` on, a call of a target's operation carries its precise mark, as DXC's `-Gis` writes it.
   SGL's own DXIL writes no fast-math flag, and marks each call of a DXIL operation that gives a float `!dx.precise`, naming one `!{i32 1}`.
   SGL's own SPIR-V decorates each float arithmetic instruction `NoContraction`, and an extended instruction stays undecorated, as DXC writes it.

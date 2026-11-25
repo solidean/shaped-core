@@ -580,3 +580,59 @@ TEST("sgl float - a text at .precise spells a half vector's helpers in halves, e
         CHECK(text.contains(cc::format("return t * (t * (({0})3.0 - ({0})2.0 * t));", half))).dump("text", text);
     }
 }
+
+TEST("sgl float - a text's cross is each lane's a_p * b_q - a_q * b_p at .precise, and the target's at .fast "
+     "(EMIT-NEW)")
+{
+    constexpr cc::string_view source = "require shader_f16\n"
+                                       "\n"
+                                       "binding work:\n"
+                                       "    values: mut buffer[float4]\n"
+                                       "\n"
+                                       "fun crossed(id: int3){work} -> float4:\n"
+                                       "    let v = work.values[id.x]\n"
+                                       "    let w = work.values[0]\n"
+                                       "    let h = half3(v.x as half, v.y as half, v.z as half)\n"
+                                       "    let g = half3(w.x as half, w.y as half, w.z as half)\n"
+                                       "    let c = cross(h, g)\n"
+                                       "    let f = cross(v.xyz, w.xyz)\n"
+                                       "    let e = cross(vec3(v.x, v.y, v.z), vec3(w.x, w.y, w.z))\n"
+                                       "    return float4(c.x as float, f.y, e.z, 0.0)\n"
+                                       "\n"
+                                       "@compute(64) fun loose(@thread_id id: int3){work}:\n"
+                                       "    work.values[id.x] = crossed(id)\n"
+                                       "\n"
+                                       "@float(.precise) @compute(64) fun strict(@thread_id id: int3){work}:\n"
+                                       "    work.values[id.x] = crossed(id)\n";
+    auto const of = [&](cc::string_view entry, target t)
+    {
+        auto const e
+            = sgl::compile_to_text({.source = source, .source_name = "cross.sgl", .entry_point = entry, .target = t});
+        REQUIRE(e.has_value())
+            .dump("target", sgl::emit::to_string(t))
+            .dump("error", e.has_error() ? e.error() : cc::string());
+        return e.value().text;
+    };
+    for (auto const t : {target::hlsl_dx12, target::hlsl_vulkan, target::msl, target::wgsl})
+    {
+        auto const loose = of("loose", t);
+        CHECK(loose.contains("cross(h, g)")).dump("text", loose);
+        CHECK(loose.contains("cross(v.xyz, w.xyz)")).dump("text", loose);
+        CHECK(!loose.contains("sgl_ordered_")).dump("text", loose);
+    }
+    for (auto const t : {target::hlsl_dx12, target::hlsl_vulkan, target::msl})
+    {
+        auto const strict = of("strict", t);
+        auto const half = t == target::msl ? cc::string_view("half3") : cc::string_view("float16_t3");
+        for (auto const type : {half, cc::string_view("float3")})
+            CHECK(strict.contains(cc::format("{0} sgl_ordered_cross({0} a, {0} b)\n{{\n    return {0}(a[1] * b[2] - "
+                                             "a[2] * "
+                                             "b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]);\n}}\n",
+                                             type)))
+                .dump("type", type)
+                .dump("text", strict);
+        // a vec3's and a float3's helper are one text, written once
+        CHECK(bare_calls(strict, "sgl_ordered_cross") == 5).dump("text", strict);
+        CHECK(bare_calls(strict, "cross") == 0).dump("text", strict);
+    }
+}
