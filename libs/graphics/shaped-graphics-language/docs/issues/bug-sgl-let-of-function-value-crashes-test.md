@@ -3,6 +3,8 @@ created: 2026-11-22
 priority: next
 refs:
   - file: libs/graphics/shaped-graphics-language/tests/corpus/calls/function-values.sgl
+claimed-by: Claude (for Julius Nehring-Wirxel)
+claimed-at: 2026-11-24T14:28Z
 ---
 
 # A let of a function value, called, crashes sgl test

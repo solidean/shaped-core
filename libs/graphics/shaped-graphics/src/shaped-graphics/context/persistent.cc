@@ -191,8 +191,7 @@ cc::result<binding_group_handle> context_persistent_scope::try_create_binding_gr
                                                                                     cc::span<named_sampler const> samplers)
 {
     CC_ASSERT(layout != nullptr, "binding_group requires a binding_group_layout");
-    if (auto unsupported
-        = impl::find_unsupported_view(_ctx.supports(feature::float32_filtering), layout->bindings(), views);
+    if (auto unsupported = impl::find_unsupported_view(_ctx.supported_features(), layout->bindings(), views);
         unsupported.has_value())
         return cc::error(cc::move(unsupported.value()));
     _ctx._stats.add(stat::binding_groups_created);
@@ -223,8 +222,7 @@ cc::result<binding_group_handle> context_persistent_scope::try_create_binding_gr
                                                                                     cc::span<named_sampler const> samplers)
 {
     CC_ASSERT(layout != nullptr, "binding_group requires a binding_group_layout");
-    if (auto unsupported
-        = impl::find_unsupported_view(_ctx.supports(feature::float32_filtering), layout->bindings(), views);
+    if (auto unsupported = impl::find_unsupported_view(_ctx.supported_features(), layout->bindings(), views);
         unsupported.has_value())
         return cc::error(cc::move(unsupported.value()));
     _ctx._stats.add(stat::binding_groups_created);
@@ -271,7 +269,7 @@ cc::result<staging_binding_group_handle> context_persistent_scope::try_create_st
         = _ctx.try_create_staging_binding_group(cc::move(layout), unbounded_capacity, lifetime_scope::persistent);
     if (created.has_value())
     {
-        created.value()->_float32_filtering = _ctx.supports(feature::float32_filtering);
+        created.value()->_supported = _ctx.supported_features();
         created.value()->_records_buffer_uses = _ctx.portability_checks();
         created.value()->_records_tlases = _ctx.hit_record_checks();
     }

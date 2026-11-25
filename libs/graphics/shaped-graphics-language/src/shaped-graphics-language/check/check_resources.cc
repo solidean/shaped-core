@@ -418,9 +418,11 @@ type_id checker::qualify_resource(i32 file, ast::expr_id expr, type_id inner, as
         auto qualified = t;
         qualified.access = is_write_only ? access_mode::write : access_mode::read_write;
         // a format a value parameter stands for is judged where the image handed over was declared, which it unifies with
+        // a 16-bit normalized one asks a feature of its own, which no WebGPU or Metal device has
         if (!is_write_only && t.format >= 0 && !k_image_formats[t.format].is_readwrite_portable)
             judge_feature(file, where, cc::format("a `mut` image of .{}", k_image_formats[t.format].name),
-                          feature::readwrite_image_formats);
+                          is_norm16_format(t.format) ? feature::readwrite_norm16_image_formats
+                                                     : feature::readwrite_image_formats);
         return resource_type(cc::move(qualified));
     }
     if (t.kind == type_kind::texture)

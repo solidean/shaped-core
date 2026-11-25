@@ -104,12 +104,18 @@ inline constexpr image_format_info k_image_formats[] = {
     {"r16_float", "r16float", "r16f", 1, k_float, false, false},
     {"r16_uint", "r16uint", "r16ui", 1, k_uint, false, false},
     {"r16_sint", "r16sint", "r16i", 1, k_sint, false, false},
+    {"r16_unorm", "r16unorm", "r16", 1, k_float, false, false},
+    {"r16_snorm", "r16snorm", "r16snorm", 1, k_float, false, false},
     {"rg16_float", "rg16float", "rg16f", 2, k_float, false, false},
     {"rg16_uint", "rg16uint", "rg16ui", 2, k_uint, false, false},
     {"rg16_sint", "rg16sint", "rg16i", 2, k_sint, false, false},
+    {"rg16_unorm", "rg16unorm", "rg16", 2, k_float, false, false},
+    {"rg16_snorm", "rg16snorm", "rg16snorm", 2, k_float, false, false},
     {"rgba16_float", "rgba16float", "rgba16f", 4, k_float, true, false},
     {"rgba16_uint", "rgba16uint", "rgba16ui", 4, k_uint, true, false},
     {"rgba16_sint", "rgba16sint", "rgba16i", 4, k_sint, true, false},
+    {"rgba16_unorm", "rgba16unorm", "rgba16", 4, k_float, false, false},
+    {"rgba16_snorm", "rgba16snorm", "rgba16snorm", 4, k_float, false, false},
     {"r32_float", "r32float", "r32f", 1, k_float, true, true},
     {"r32_uint", "r32uint", "r32ui", 1, k_uint, true, true},
     {"r32_sint", "r32sint", "r32i", 1, k_sint, true, true},
@@ -122,6 +128,25 @@ inline constexpr image_format_info k_image_formats[] = {
     {"rgb10a2_unorm", "rgb10a2unorm", "rgb10a2", 4, k_float, false, false},
     {"rg11b10_float", "rg11b10ufloat", "r11g11b10f", 3, k_float, false, false},
 };
+
+/// True for the six 16-bit normalized formats, `r16_unorm` through `rgba16_snorm`, whose `mut` image needs a feature of
+/// its own (CHK-201), and whose HLSL texel names the normalization (EMIT-280).
+[[nodiscard]] constexpr bool is_norm16_format(i32 format)
+{
+    if (format < 0)
+        return false;
+    auto const name = k_image_formats[format].name;
+    return name.ends_with("16_unorm") || name.ends_with("16_snorm");
+}
+
+/// HLSL's qualifier of a texel of `format`, which DXIL records as the view's component type: `unorm` or `snorm` for
+/// the 16-bit normalized formats, and empty for every other (EMIT-280).
+[[nodiscard]] constexpr cc::string_view hlsl_texel_qualifier(i32 format)
+{
+    if (!is_norm16_format(format))
+        return {};
+    return k_image_formats[format].name.ends_with("_unorm") ? cc::string_view("unorm") : cc::string_view("snorm");
+}
 
 /// The type a texel of `format` loads as and stores from: `float4` for `rgba8_unorm`, `float` for `r32_float`.
 [[nodiscard]] cc::string texel_name_of(i32 format);

@@ -451,6 +451,13 @@ The choice is by API rather than by route, since that is where the instructions 
 DXC hands a double to its own `floor` or `sqrt` as a float even for SPIR-V, an `OpFConvert` on either side of the float instruction.
 Its inline SPIR-V, `[[vk::ext_instruction(8, "GLSL.std.450")]]`, takes the double as it is, which is the device of EMIT-225.
 
+## EMIT-280
+
+DXIL records a typed UAV's component type, and DXC writes `UNorm` for `unorm float2` where a plain `float2` is `F32`.
+The view's format is UNorm, so the template that says so is the one a validator or a driver can check the view against.
+D3D12 also accepts a plain `float2` over such a view; the stricter template was chosen.
+It is limited to the six formats that came with it, so no text of a format SGL already had changes.
+
 ## EMIT-278
 
 Nothing reads a query after its loop but its committed hit, which an abort keeps, so the abort changes no answer.

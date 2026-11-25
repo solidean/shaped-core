@@ -463,26 +463,32 @@ fun nonuniform_native(a: mut atomic[uint], op: int, v: uint) -> uint:
 
 /// `a` updated by `op` with `v`, one round for each `key` the subgroup's lanes hold, in which the first lane holding it
 /// updates `a` alone, natively, by what the round's lanes combine to.
+/// Every lane still waiting takes part in each round's subgroup operations, the others' with the operation's identity,
+/// and a lane leaves only after them: a compiler may sink a loop's body past its exit, where the lanes reconverge.
 /// The value before is each lane's own for `add` and `subtract`, and the round's for the rest, which the flattener
 /// writes so only where nothing reads it.
 @internal
 fun nonuniform_update_by_leader(a: mut atomic[uint], key: uint, op: int, v: uint) -> uint:
     const if has(.subgroups):
         loop:
-            if subgroup_broadcast_first(key) == key:
-                let mut total = v
-                let mut prefix = 0u
-                if op <= 1:
-                    total = subgroup_add(v)
-                    prefix = subgroup_exclusive_add(v)
-                else if op == 2 => total = subgroup_min(v)
-                else if op == 3 => total = subgroup_max(v)
-                else if op == 4 => total = subgroup_bit_and(v)
-                else if op == 5 => total = subgroup_bit_or(v)
-                else => total = subgroup_bit_xor(v)
-                let mut before = 0u
-                if subgroup_elect() => before = nonuniform_native(mut a, op, total)
-                before = subgroup_broadcast_first(before)
+            let is_round = subgroup_broadcast_first(key) == key
+            let mut identity = 0u
+            if op == 2 or op == 4 => identity = 0xFFFFFFFFu
+            let w = if is_round => v else identity
+            let mut total = w
+            let mut prefix = 0u
+            if op <= 1:
+                total = subgroup_add(w)
+                prefix = subgroup_exclusive_add(w)
+            else if op == 2 => total = subgroup_min(w)
+            else if op == 3 => total = subgroup_max(w)
+            else if op == 4 => total = subgroup_bit_and(w)
+            else if op == 5 => total = subgroup_bit_or(w)
+            else => total = subgroup_bit_xor(w)
+            let mut before = 0u
+            if subgroup_elect() => before = nonuniform_native(mut a, op, total)
+            before = subgroup_broadcast_first(before)
+            if is_round:
                 if op == 1 => return before - prefix
                 return before + prefix
     else:
@@ -501,26 +507,34 @@ fun nonuniform_native(a: mut atomic[int], op: int, v: int) -> int:
 
 /// `a` updated by `op` with `v`, one round for each `key` the subgroup's lanes hold, in which the first lane holding it
 /// updates `a` alone, natively, by what the round's lanes combine to.
+/// Every lane still waiting takes part in each round's subgroup operations, the others' with the operation's identity,
+/// and a lane leaves only after them: a compiler may sink a loop's body past its exit, where the lanes reconverge.
 /// The value before is each lane's own for `add` and `subtract`, and the round's for the rest, which the flattener
 /// writes so only where nothing reads it.
 @internal
 fun nonuniform_update_by_leader(a: mut atomic[int], key: uint, op: int, v: int) -> int:
     const if has(.subgroups):
         loop:
-            if subgroup_broadcast_first(key) == key:
-                let mut total = v
-                let mut prefix = 0
-                if op <= 1:
-                    total = subgroup_add(v)
-                    prefix = subgroup_exclusive_add(v)
-                else if op == 2 => total = subgroup_min(v)
-                else if op == 3 => total = subgroup_max(v)
-                else if op == 4 => total = subgroup_bit_and(v)
-                else if op == 5 => total = subgroup_bit_or(v)
-                else => total = subgroup_bit_xor(v)
-                let mut before = 0
-                if subgroup_elect() => before = nonuniform_native(mut a, op, total)
-                before = subgroup_broadcast_first(before)
+            let is_round = subgroup_broadcast_first(key) == key
+            let mut identity = 0
+            if op == 2 => identity = 2147483647
+            if op == 3 => identity = -2147483647 - 1
+            if op == 4 => identity = -1
+            let w = if is_round => v else identity
+            let mut total = w
+            let mut prefix = 0
+            if op <= 1:
+                total = subgroup_add(w)
+                prefix = subgroup_exclusive_add(w)
+            else if op == 2 => total = subgroup_min(w)
+            else if op == 3 => total = subgroup_max(w)
+            else if op == 4 => total = subgroup_bit_and(w)
+            else if op == 5 => total = subgroup_bit_or(w)
+            else => total = subgroup_bit_xor(w)
+            let mut before = 0
+            if subgroup_elect() => before = nonuniform_native(mut a, op, total)
+            before = subgroup_broadcast_first(before)
+            if is_round:
                 if op == 1 => return before - prefix
                 return before + prefix
     else:
@@ -686,6 +700,12 @@ enum pixel_format:
     bc6h_rgb_sfloat
     bc7_rgba_unorm
     bc7_rgba_unorm_srgb
+    r16_unorm
+    r16_snorm
+    rg16_unorm
+    rg16_snorm
+    rgba16_unorm
+    rgba16_snorm
 
 struct rasterization_state:
     fill: fill_mode

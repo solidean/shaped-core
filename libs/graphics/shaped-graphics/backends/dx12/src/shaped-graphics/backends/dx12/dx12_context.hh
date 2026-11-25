@@ -287,6 +287,10 @@ public:
             return true;
         case sg::feature::extended_image_formats:
             return _extended_image_formats;
+        case sg::feature::readwrite_norm16_image_formats:
+            return _readwrite_norm16_image_formats;
+        case sg::feature::norm16_filtering:
+            return _norm16_filtering;
         case sg::feature::opacity_micromap: // DXR 1.2, which only the Agility SDK carries
             return _opacity_micromap;
         case sg::feature::unaligned_block_compression:
@@ -787,12 +791,14 @@ public:
     // NOT_SUPPORTED until set.
     D3D12_RAYTRACING_TIER _raytracing_tier = D3D12_RAYTRACING_TIER_NOT_SUPPORTED;
     bool _unaligned_block_textures = false; // D3D12_OPTIONS8, cached at creation
-    bool _extended_image_formats = false;   // bgra8_unorm's typed UAV, cached at creation
-    bool _withhold_binding_arrays = false;  // dx12_config::withhold_binding_arrays
-    bool _withhold_primitive_index = false; // dx12_config::withhold_primitive_index
-    bool _native_16bit_shader_ops = false;  // D3D12_OPTIONS4, cached at creation
-    bool _wave_ops = false;                 // D3D12_OPTIONS1, cached at creation
-    bool _native_dxil = false;              // dx12_config::native_dxil
+    bool _extended_image_formats = false; // bgra8_unorm's typed UAV and the 16-bit normalized stores, cached at creation
+    bool _readwrite_norm16_image_formats = false; // the 16-bit normalized formats' typed UAV loads, cached at creation
+    bool _norm16_filtering = false;               // the 16-bit normalized formats' samples, cached at creation
+    bool _withhold_binding_arrays = false;        // dx12_config::withhold_binding_arrays
+    bool _withhold_primitive_index = false;       // dx12_config::withhold_primitive_index
+    bool _native_16bit_shader_ops = false;        // D3D12_OPTIONS4, cached at creation
+    bool _wave_ops = false;                       // D3D12_OPTIONS1, cached at creation
+    bool _native_dxil = false;                    // dx12_config::native_dxil
     sg::native_debug_info _native_debug_info
         = sg::native_debug_info::none;         // dx12_config::native_debug_info, or the environment
     bool _int64_shader_ops = false;            // D3D12_OPTIONS1, cached at creation

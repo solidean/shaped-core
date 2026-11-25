@@ -25,6 +25,8 @@ constexpr format_number k_formats[] = {
     {"rg8i", 27, true},       {"r16i", 28, true},     {"r8i", 29, true},      {"rgba32ui", 30, false},
     {"rgba16ui", 31, false},  {"rgba8ui", 32, false}, {"r32ui", 33, false},   {"rg32ui", 35, true},
     {"rg16ui", 36, true},     {"rg8ui", 37, true},    {"r16ui", 38, true},    {"r8ui", 39, true},
+    {"rgba16", 10, true},     {"rg16", 12, true},     {"r16", 14, true},      {"rgba16snorm", 16, true},
+    {"rg16snorm", 17, true},  {"r16snorm", 19, true},
 };
 
 /// SPIR-V's `BuiltIn` of each stage input.

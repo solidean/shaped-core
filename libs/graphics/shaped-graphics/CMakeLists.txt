@@ -449,6 +449,7 @@ if(SC_BUILD_TESTS)
             tests/compute/compute-diagnostic-routes-test.cc
             tests/compute/compute-diagnostics-test.cc
             tests/compute/compute-assert-billing-test.cc
+            tests/compute/compute-norm16-test.cc
             tests/compute/compute-sixteen-bit-test.cc
             tests/compute/compute-sixty-four-bit-test.cc
             tests/compute/compute-double-maths-test.cc
@@ -555,6 +556,7 @@ if(SC_BUILD_TESTS)
                 differentiable_buffers.sgl:*
                 splat_fitting.sgl:*
                 option_formats.sgl:*
+                norm16_images.sgl:*
         )
         sc_add_shader_package(
             TARGET     shaped-graphics-test

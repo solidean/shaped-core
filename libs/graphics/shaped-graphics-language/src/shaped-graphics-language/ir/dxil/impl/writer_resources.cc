@@ -84,6 +84,14 @@ struct resource_rule
     return 0;
 }
 
+/// DXIL's `ComponentType` of a storage image's texel: `UNormF32` or `SNormF32` for a 16-bit normalized format, as DXC
+/// records `unorm float2` and `snorm float4` (EMIT-280), and its element's own type for every other.
+[[nodiscard]] constexpr u32 texel_component_type(ir::type const& image, ir::type const& element)
+{
+    auto const qualifier = image.is_storage_image ? check::hlsl_texel_qualifier(image.format) : cc::string_view();
+    return qualifier == "unorm" ? 14u : qualifier == "snorm" ? 13u : component_type(element);
+}
+
 /// How many components a texture's or an image's view declares, which its format says of an image.
 [[nodiscard]] constexpr u32 components_of(ir::type const& t)
 {
@@ -174,7 +182,7 @@ void writer::declare_handles()
         case global_kind::texture:
         case global_kind::image:
             kind = texture_kind(held);
-            component = component_type(_p.at(held.element));
+            component = texel_component_type(held, _p.at(held.element));
             word1 = component | (components_of(held) << 8);
             break;
         case global_kind::file_sampler:

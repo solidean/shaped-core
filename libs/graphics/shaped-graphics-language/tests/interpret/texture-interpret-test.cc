@@ -118,6 +118,30 @@ TEST("sgl textures - an image store comes back to the driver, and a load after i
     CHECK(float_at(texels, 0) == 0.0f);
 }
 
+TEST("sgl textures - a 16-bit normalized image stores the value as given, where a GPU would clamp and round it")
+{
+    // EVAL-120: a texel is the float the shader stored, out of the format's range or between two of its codes alike
+    auto lean = floats(0.0f, 0.0f, 0.0f, 0.0f);
+    auto rough = floats(0.0f, 0.0f, 0.0f, 0.0f);
+    auto const source = "require extended_image_formats\n"
+                        "require readwrite_norm16_image_formats\n"
+                        "binding scene:\n"
+                        "    lean: mut image_2d[.rg16_unorm]\n"
+                        "    rough: out image_2d[.r16_snorm]\n"
+                        "test {scene}:\n"
+                        "    scene.lean[int2(1, 0)] = float2(1.5, 0.3)\n"
+                        "    scene.rough[int2(0, 1)] = -2.0\n"
+                        "    scene.lean[int2(1, 0)] == float2(1.5, 0.3)\n";
+    auto data = cc::vector<sgl::check::member_data>();
+    data.push_back({.name = "lean", .textures = {{.width = 2, .height = 1, .mutable_texels = lean}}});
+    data.push_back({.name = "rough", .textures = {{.width = 2, .height = 2, .mutable_texels = rough}}});
+    CHECK(driven_failures_of(source, bound(cc::move(data))) == "");
+    CHECK(float_at(lean, 2) == 1.5f);
+    CHECK(float_at(lean, 3) == 0.3f);
+    CHECK(float_at(lean, 0) == 0.0f);
+    CHECK(float_at(rough, 2) == -2.0f);
+}
+
 TEST("sgl textures - a dynamic sampler filters as its driver says, and as the default sampler where it says nothing")
 {
     auto const source = "binding scene:\n"

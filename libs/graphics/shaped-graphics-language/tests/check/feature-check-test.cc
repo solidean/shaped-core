@@ -49,6 +49,37 @@ cc::string lib_user(cc::string_view body = "")
 }
 } // namespace
 
+TEST("sgl check - an image of a 16-bit normalized format needs extended_image_formats, and a mut one "
+     "readwrite_norm16_image_formats")
+{
+    // CHK-201: core WebGPU has none of the six, so each is outside the portable image formats
+    for (auto const format : {"r16_unorm", "r16_snorm", "rg16_unorm", "rg16_snorm", "rgba16_unorm", "rgba16_snorm"})
+    {
+        auto const written = cc::format("    a: out image_2d[.{}]\n", format);
+        CHECK(reports_for(listing("", written))
+              == cc::format("needs-feature user:[image_2d[.{0}]] an image of .{0} needs extended_image_formats, "
+                            "which `require extended_image_formats` grants\n",
+                            format))
+            .dump("format", format);
+        CHECK(reports_for(listing("", cc::format("    a: image_2d[.{}]\n", format))).contains("extended_image_formats"))
+            .dump("format", format);
+        CHECK(reports_for(listing("require extended_image_formats\n\n", written)) == "").dump("format", format);
+
+        // a `mut` one asks for both, and each is named
+        auto const read_written = cc::format("    a: mut image_2d[.{}]\n", format);
+        CHECK(reports_for(listing("require extended_image_formats\n\n", read_written))
+                  .contains(cc::format("a `mut` image of .{} needs readwrite_norm16_image_formats", format)))
+            .dump("format", format);
+        // readwrite_image_formats does not grant it
+        CHECK(reports_for(listing("require extended_image_formats, readwrite_image_formats\n\n", read_written))
+                  .contains("readwrite_norm16_image_formats"))
+            .dump("format", format);
+        CHECK(reports_for(listing("require extended_image_formats, readwrite_norm16_image_formats\n\n", read_written))
+              == "")
+            .dump("format", format);
+    }
+}
+
 TEST("sgl check - a form some backend lacks is refused unless a require grants its feature")
 {
     constexpr auto r8 = "    a: out image_2d[.r8_unorm]\n";
@@ -85,7 +116,7 @@ TEST("sgl check - a require names a feature a shader can use, as sg names it")
              "shader_int64_atomics, "
              "unbounded_binding_arrays, shader_shared_int64_atomics, shader_int64_min_max_atomics, "
              "clustered_geometry, quad_control, multi_viewport, nonuniform_atomic_workaround, "
-             "nonuniform_length_workaround\n");
+             "nonuniform_length_workaround, readwrite_norm16_image_formats\n");
     CHECK(reports_for("require raytracing\n").contains("unknown-feature user:[raytracing]"));
     CHECK(reports_for("require ray_query, binding_arrays\n") == "");
 
@@ -188,6 +219,25 @@ TEST("sgl check - an entry point declares what it needs, by its file, a binding 
                                "    require extended_image_formats\n"
                                "    a: out image_2d[.r8_unorm]\n";
     CHECK(reports_with_library(requiring, lib_user()) == "");
+}
+
+TEST("sgl check - an entry point listing a used module's mut 16-bit normalized image declares "
+     "readwrite_norm16_image_formats")
+{
+    // CHK-264: the module grants its binding both features, which says nothing about the file that uses it
+    constexpr auto library = "require extended_image_formats, readwrite_norm16_image_formats\n"
+                             "\n"
+                             "binding lib:\n"
+                             "    a: mut image_2d[.rg16_unorm]\n";
+    auto const missing = reports_with_library(library, lib_user("    require extended_image_formats\n"));
+    CHECK(missing.contains("main_ps needs readwrite_norm16_image_formats")).dump("reports", missing);
+    CHECK(!missing.contains("needs readwrite_image_formats")).dump("reports", missing);
+    // readwrite_image_formats does not declare it
+    CHECK(reports_with_library(library, lib_user("    require extended_image_formats, readwrite_image_formats\n"))
+              .contains("main_ps needs readwrite_norm16_image_formats"));
+    CHECK(reports_with_library(library, lib_user("    require extended_image_formats, "
+                                                 "readwrite_norm16_image_formats\n"))
+          == "");
 }
 
 TEST("sgl check - an entry point needs what it uses, and a feature its file permits is no floor")

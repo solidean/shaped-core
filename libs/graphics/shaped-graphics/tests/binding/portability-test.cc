@@ -1,5 +1,6 @@
 #include <nexus/test.hh>
 #include <shaped-graphics/binding/binding.hh>
+#include <shaped-graphics/binding/binding_group.hh> // sg::named_view
 #include <shaped-graphics/binding/compiled_shader.hh>
 #include <shaped-graphics/binding/impl/portability.hh>
 #include <shaped-graphics/resource/pixel_format.hh>
@@ -41,10 +42,20 @@ sg::binding sampled_binding(cc::optional<sg::texture_sample_type> sample_type)
     return b;
 }
 
-/// Whether a device without float32_filtering refuses `view` bound to `b`.
-bool refused(sg::binding const& b, sg::raw_view const& view)
+/// Every feature but `lacking`: a device that lacks that one alone.
+sg::feature_set all_but(sg::feature lacking)
 {
-    return sg::impl::find_unsupported_view(false, b, cc::span<sg::raw_view const>(&view, 1)).has_value();
+    auto out = sg::feature_set();
+    for (auto const f : sg::k_all_features)
+        if (f != lacking)
+            out |= f;
+    return out;
+}
+
+/// Whether a device lacking `lacking` alone refuses `view` bound to `b`.
+bool refused(sg::binding const& b, sg::raw_view const& view, sg::feature lacking = sg::feature::float32_filtering)
+{
+    return sg::impl::find_unsupported_view(all_but(lacking), b, cc::span<sg::raw_view const>(&view, 1)).has_value();
 }
 } // namespace
 
@@ -64,11 +75,205 @@ TEST("sg::portability - an image format outside the portable set is refused with
     b.image_format = sg::pixel_format::r8_unorm;
     b.access = sg::access_mode::write;
     auto const bindings = cc::span<sg::binding const>(&b, 1);
-    CHECK(sg::impl::find_unsupported_binding(false, bindings).has_value());
-    CHECK(!sg::impl::find_unsupported_binding(true, bindings).has_value());
+    CHECK(sg::impl::find_unsupported_binding(all_but(sg::feature::extended_image_formats), bindings).has_value());
+    CHECK(!sg::impl::find_unsupported_binding(all_but(sg::feature::float32_filtering), bindings).has_value());
 
     b.image_format = sg::pixel_format::rgba8_unorm;
-    CHECK(!sg::impl::find_unsupported_binding(false, bindings).has_value());
+    CHECK(!sg::impl::find_unsupported_binding(sg::feature_set(), bindings).has_value());
+}
+
+TEST("sg::portability - a 16-bit normalized texture of any usage is refused without extended_image_formats")
+{
+    // core WebGPU has none of them, sampled, rendered to, copied or stored, so every usage asks
+    for (auto const f : {sg::pixel_format::r16_unorm, sg::pixel_format::r16_snorm, sg::pixel_format::rg16_unorm,
+                         sg::pixel_format::rg16_snorm, sg::pixel_format::rgba16_unorm, sg::pixel_format::rgba16_snorm})
+        for (auto const usage :
+             {sg::texture_usages(sg::texture_usage::texture), sg::texture_usages(sg::texture_usage::image),
+              sg::texture_usages(sg::texture_usage::render_target), sg::texture_usages(sg::texture_usage::copy_dst),
+              sg::texture_usage::texture | sg::texture_usage::copy_src})
+        {
+            auto const refusal = sg::impl::find_unsupported_texture(false, texture_of(f, usage));
+            CHECK(refusal.has_value()).dump("format", int(f));
+            CHECK(refusal.value_or(cc::string()).contains("texture-formats-tier1")).dump("format", int(f));
+            CHECK(!sg::impl::find_unsupported_texture(true, texture_of(f, usage)).has_value()).dump("format", int(f));
+        }
+
+    // a layout's image of one is refused as any format outside the portable set
+    auto b = sg::binding{.name = "normal", .type = sg::binding_type::image, .access = sg::access_mode::write};
+    b.texture_dimension = sg::texture_view_dimension::tex_2d;
+    b.image_format = sg::pixel_format::rg16_unorm;
+    auto const bindings = cc::span<sg::binding const>(&b, 1);
+    CHECK(sg::impl::find_unsupported_binding(all_but(sg::feature::extended_image_formats), bindings).has_value());
+    CHECK(!sg::impl::find_unsupported_binding(all_but(sg::feature::readwrite_norm16_image_formats), bindings).has_value());
+}
+
+TEST("sg::portability - a read-write image of a 16-bit normalized format is refused without "
+     "readwrite_norm16_image_formats, and readwrite_image_formats does not grant it")
+{
+    for (auto const f : {sg::pixel_format::r16_unorm, sg::pixel_format::r16_snorm, sg::pixel_format::rg16_unorm,
+                         sg::pixel_format::rg16_snorm, sg::pixel_format::rgba16_unorm, sg::pixel_format::rgba16_snorm})
+    {
+        auto b = sg::binding{.name = "normal", .type = sg::binding_type::image, .access = sg::access_mode::read_write};
+        b.texture_dimension = sg::texture_view_dimension::tex_2d;
+        b.image_format = f;
+        auto const bindings = cc::span<sg::binding const>(&b, 1);
+        auto const refusal
+            = sg::impl::find_unsupported_binding(all_but(sg::feature::readwrite_norm16_image_formats), bindings);
+        CHECK(refusal.has_value()).dump("format", int(f));
+        CHECK(refusal.value_or(cc::string()).contains("readwrite_norm16_image_formats")).dump("format", int(f));
+        CHECK(!sg::impl::find_unsupported_binding(all_but(sg::feature::readwrite_image_formats), bindings).has_value())
+            .dump("format", int(f));
+        // written or read alone, it needs the format and nothing more
+        b.access = sg::access_mode::write;
+        CHECK(
+            !sg::impl::find_unsupported_binding(all_but(sg::feature::readwrite_norm16_image_formats), bindings).has_value())
+            .dump("format", int(f));
+    }
+    // another format's read-write image never asks it
+    auto b = sg::binding{.name = "acc", .type = sg::binding_type::image, .access = sg::access_mode::read_write};
+    b.texture_dimension = sg::texture_view_dimension::tex_2d;
+    b.image_format = sg::pixel_format::rgba16_float;
+    CHECK(!sg::impl::find_unsupported_binding(all_but(sg::feature::readwrite_norm16_image_formats),
+                                              cc::span<sg::binding const>(&b, 1))
+               .has_value());
+}
+
+TEST("sg::portability - a 16-bit normalized view on a read-write image binding is refused without "
+     "readwrite_norm16_image_formats, whatever format the binding states")
+{
+    // the image view of a texture of `format`, read and written as its own format
+    auto const image_view_of = [](sg::pixel_format format)
+    {
+        auto const texture = std::make_shared<shape_only_texture const>(texture_of(format, sg::texture_usage::image));
+        return sg::raw_view(sg::raw_texture_view{.bound_as = sg::view_class::image,
+                                                 .texture = texture,
+                                                 .view_dimension = sg::texture_view_dimension::tex_2d,
+                                                 .format = sg::pixel_format::undefined});
+    };
+    // a layout reflected from HLSL states no format
+    auto b = sg::binding{.name = "normal", .type = sg::binding_type::image, .access = sg::access_mode::read_write};
+    b.texture_dimension = sg::texture_view_dimension::tex_2d;
+    auto const lacking = all_but(sg::feature::readwrite_norm16_image_formats);
+    for (auto const f : {sg::pixel_format::r16_unorm, sg::pixel_format::r16_snorm, sg::pixel_format::rg16_unorm,
+                         sg::pixel_format::rg16_snorm, sg::pixel_format::rgba16_unorm, sg::pixel_format::rgba16_snorm})
+    {
+        auto const view = image_view_of(f);
+        auto const views = cc::span<sg::raw_view const>(&view, 1);
+        b.access = sg::access_mode::read_write;
+        b.image_format = {};
+        auto const refusal = sg::impl::find_unsupported_view(lacking, b, views);
+        CHECK(refusal.has_value()).dump("format", int(f));
+        CHECK(refusal.value_or(cc::string()).contains("readwrite_norm16_image_formats")).dump("format", int(f));
+        CHECK(!sg::impl::find_unsupported_view(all_but(sg::feature::readwrite_image_formats), b, views).has_value())
+            .dump("format", int(f));
+        // a layout stating another format is judged by the view all the same
+        b.image_format = sg::pixel_format::rgba16_float;
+        CHECK(sg::impl::find_unsupported_view(lacking, b, views).has_value()).dump("format", int(f));
+        // written or read alone, it is not judged here
+        b.image_format = {};
+        b.access = sg::access_mode::write;
+        CHECK(!sg::impl::find_unsupported_view(lacking, b, views).has_value()).dump("format", int(f));
+        b.access = sg::access_mode::read;
+        CHECK(!sg::impl::find_unsupported_view(lacking, b, views).has_value()).dump("format", int(f));
+    }
+    // another format's read-write view never asks it
+    b.access = sg::access_mode::read_write;
+    auto const other = image_view_of(sg::pixel_format::rgba16_float);
+    CHECK(!sg::impl::find_unsupported_view(lacking, b, cc::span<sg::raw_view const>(&other, 1)).has_value());
+
+    // the overloads over a layout's bindings judge it too
+    auto bindings = cc::vector<sg::binding>();
+    bindings.push_back(b);
+    auto const named = sg::named_view{.name = "normal", .view = image_view_of(sg::pixel_format::rg16_unorm)};
+    CHECK(sg::impl::find_unsupported_view(lacking, bindings, cc::span<sg::named_view const>(&named, 1)).has_value());
+}
+
+TEST("sg::portability - a read-write image's 16-bit normalized view is judged by the format it is viewed as, in an "
+     "array and by slot")
+{
+    // the image view of a texture of `texture_format`, read and written as `view_format`
+    auto const image_view_of = [](sg::pixel_format texture_format, sg::pixel_format view_format)
+    {
+        auto const texture
+            = std::make_shared<shape_only_texture const>(texture_of(texture_format, sg::texture_usage::image));
+        return sg::raw_view(sg::raw_texture_view{.bound_as = sg::view_class::image,
+                                                 .texture = texture,
+                                                 .view_dimension = sg::texture_view_dimension::tex_2d,
+                                                 .format = view_format});
+    };
+    auto b = sg::binding{.name = "normals", .type = sg::binding_type::image, .access = sg::access_mode::read_write};
+    b.texture_dimension = sg::texture_view_dimension::tex_2d;
+    auto const lacking = all_but(sg::feature::readwrite_norm16_image_formats);
+    auto const judged = [&](sg::raw_view const& view)
+    { return sg::impl::find_unsupported_view(lacking, b, cc::span<sg::raw_view const>(&view, 1)).has_value(); };
+
+    // a view reinterpreting the texture's format is judged by the view's format, which is what the shader reads
+    CHECK(judged(image_view_of(sg::pixel_format::r16_float, sg::pixel_format::r16_unorm)));
+    CHECK(!judged(image_view_of(sg::pixel_format::r16_unorm, sg::pixel_format::r16_uint)));
+    CHECK(judged(image_view_of(sg::pixel_format::rgba16_snorm, sg::pixel_format::rgba16_snorm)));
+
+    // an array binding is refused when any of its views is one, not only its first
+    b.count = 3;
+    auto const array = cc::vector<sg::raw_view>{
+        image_view_of(sg::pixel_format::rgba16_float, sg::pixel_format::undefined),
+        image_view_of(sg::pixel_format::r32_float, sg::pixel_format::r32_float),
+        image_view_of(sg::pixel_format::rg16_snorm, sg::pixel_format::undefined),
+    };
+    CHECK(sg::impl::find_unsupported_view(lacking, b, array).has_value());
+    CHECK(!sg::impl::find_unsupported_view(lacking, b, cc::span<sg::raw_view const>(array.data(), 2)).has_value());
+
+    // the overload over slots, which a generated group's views take, judges it too
+    auto bindings = cc::vector<sg::binding>();
+    bindings.push_back(b);
+    auto const r16 = image_view_of(sg::pixel_format::r16_unorm, sg::pixel_format::undefined);
+    auto const slotted = sg::slotted_view{.slot = sg::binding_slot(0), .view = r16};
+    auto const by_slot = cc::span<sg::slotted_view const>(&slotted, 1);
+    CHECK(sg::impl::find_unsupported_view(lacking, bindings, by_slot).has_value());
+    CHECK(!sg::impl::find_unsupported_view(all_but(sg::feature::norm16_filtering), bindings, by_slot).has_value());
+}
+
+TEST("sg::portability - a 16-bit normalized view is refused on a filterable binding without norm16_filtering")
+{
+    auto const filterable = sampled_binding(sg::texture_sample_type::filterable_float);
+    for (auto const f : {sg::pixel_format::r16_unorm, sg::pixel_format::r16_snorm, sg::pixel_format::rg16_unorm,
+                         sg::pixel_format::rg16_snorm, sg::pixel_format::rgba16_unorm, sg::pixel_format::rgba16_snorm})
+    {
+        auto const view = view_of(f, f);
+        CHECK(refused(filterable, view, sg::feature::norm16_filtering)).dump("format", int(f));
+        CHECK(!refused(filterable, view, sg::feature::float32_filtering)).dump("format", int(f));
+        // judged by the texture's own format where the view says none
+        CHECK(refused(filterable, view_of(f, sg::pixel_format::undefined), sg::feature::norm16_filtering))
+            .dump("format", int(f));
+        CHECK(!refused(sampled_binding(sg::texture_sample_type::unfilterable_float), view, sg::feature::norm16_filtering))
+            .dump("format", int(f));
+        CHECK(!refused(sampled_binding({}), view, sg::feature::norm16_filtering)).dump("format", int(f));
+    }
+    // and a 32-bit float view does not ask it
+    auto const r32 = view_of(sg::pixel_format::r32_float, sg::pixel_format::r32_float);
+    CHECK(!refused(filterable, r32, sg::feature::norm16_filtering));
+
+    // the overloads over a layout's bindings judge each view as the single one does
+    auto bindings = cc::vector<sg::binding>();
+    bindings.push_back(filterable);
+    auto const norm = view_of(sg::pixel_format::rg16_snorm, sg::pixel_format::rg16_snorm);
+    auto const named = sg::named_view{.name = "source", .view = norm};
+    auto const views = cc::span<sg::named_view const>(&named, 1);
+    CHECK(sg::impl::find_unsupported_view(all_but(sg::feature::norm16_filtering), bindings, views).has_value());
+    CHECK(!sg::impl::find_unsupported_view(all_but(sg::feature::float32_filtering), bindings, views).has_value());
+
+    // and so does the one over slots, which a generated group's views take
+    auto const slotted = sg::slotted_view{.slot = sg::binding_slot(0), .view = norm};
+    auto const by_slot = cc::span<sg::slotted_view const>(&slotted, 1);
+    CHECK(sg::impl::find_unsupported_view(all_but(sg::feature::norm16_filtering), bindings, by_slot).has_value());
+    CHECK(!sg::impl::find_unsupported_view(all_but(sg::feature::float32_filtering), bindings, by_slot).has_value());
+
+    // a device lacking both refuses each format by its own feature
+    auto const neither = all_but(sg::feature::norm16_filtering).without(sg::feature_set(sg::feature::float32_filtering));
+    auto const r32_named = sg::named_view{.name = "source", .view = r32};
+    CHECK(sg::impl::find_unsupported_view(neither, bindings, views).value_or(cc::string()).contains("norm16_filtering"));
+    CHECK(sg::impl::find_unsupported_view(neither, bindings, cc::span<sg::named_view const>(&r32_named, 1))
+              .value_or(cc::string())
+              .contains("float32_filtering"));
 }
 
 TEST("sg::portability - an access a kind cannot carry is refused whatever the device")
@@ -77,8 +282,9 @@ TEST("sg::portability - an access a kind cannot carry is refused whatever the de
         = sg::binding{.name = "out", .type = sg::binding_type::buffer, .access = sg::access_mode::write};
     auto const read_write_texture
         = sg::binding{.name = "in", .type = sg::binding_type::texture, .access = sg::access_mode::read_write};
-    CHECK(sg::impl::find_unsupported_binding(true, cc::span<sg::binding const>(&write_only_buffer, 1)).has_value());
-    CHECK(sg::impl::find_unsupported_binding(true, cc::span<sg::binding const>(&read_write_texture, 1)).has_value());
+    auto const all = all_but(sg::feature::nonuniform_atomic_workaround);
+    CHECK(sg::impl::find_unsupported_binding(all, cc::span<sg::binding const>(&write_only_buffer, 1)).has_value());
+    CHECK(sg::impl::find_unsupported_binding(all, cc::span<sg::binding const>(&read_write_texture, 1)).has_value());
 }
 
 TEST("sg::portability - a 32-bit float view is refused on a filterable binding without float32_filtering")
@@ -89,7 +295,7 @@ TEST("sg::portability - a 32-bit float view is refused on a filterable binding w
     auto const filterable = sampled_binding(sg::texture_sample_type::filterable_float);
     CHECK(refused(filterable, r32));
     CHECK(!refused(filterable, rgba8));
-    CHECK(!sg::impl::find_unsupported_view(true, filterable, cc::span<sg::raw_view const>(&r32, 1)).has_value());
+    CHECK(!refused(filterable, r32, sg::feature::norm16_filtering));
 
     // Declared unfilterable, or declaring no sample type at all, the same view binds on every device.
     CHECK(!refused(sampled_binding(sg::texture_sample_type::unfilterable_float), r32));

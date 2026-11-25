@@ -4,11 +4,13 @@
 
 /// The texel formats sg textures speak in.
 /// Deliberately restrictive: every value has a direct equivalent in each realistic backend (DX12 / Vulkan / Metal / WebGPU).
-/// Formats that are backend-specific, mobile-only, or absent somewhere are left out until a concrete need plus a per-backend capability query justify them
+/// Formats that are backend-specific, mobile-only, or absent somewhere are left out until a concrete need plus a per-backend capability query justify them,
+/// which the 16-bit normalized ones have: `sg::feature::extended_image_formats` gates them on every backend
 /// (see libs/graphics/shaped-graphics/docs/concepts/textures.md).
 
 /// A GPU texel format.
 /// `undefined` is the null value (no format).
+/// New values go at the end: `binding/impl/shader_codec.cc` encodes a format by its ordinal, and a stored shader keeps it.
 /// Block-compressed (BC) formats are included but are a *runtime* capability everywhere (Vk `textureCompressionBC`, WGPU `texture-compression-bc`, Metal `supportsBCTextureCompression`) —
 /// the enumerant always maps, but a backend may still reject it on a given adapter until a capability query gates its use.
 enum class sg::pixel_format : sg::u16
@@ -32,7 +34,7 @@ enum class sg::pixel_format : sg::u16
     bgra8_unorm,      // DX12 B8G8R8A8_UNORM      / Vk B8G8R8A8_UNORM
     bgra8_unorm_srgb, // DX12 B8G8R8A8_UNORM_SRGB / Vk B8G8R8A8_SRGB
 
-    // 16-bit (float/int only — 16-bit *norm* is not WebGPU-core)
+    // 16-bit float and integer; the normalized ones are at the end of the enum
     r16_float,    // DX12 R16_FLOAT        / Vk R16_SFLOAT
     r16_uint,     // DX12 R16_UINT         / Vk R16_UINT
     r16_sint,     // DX12 R16_SINT         / Vk R16_SINT
@@ -78,6 +80,14 @@ enum class sg::pixel_format : sg::u16
     bc6h_rgb_sfloat,     // DX12 BC6H_SF16      / Vk BC6H_SFLOAT_BLOCK
     bc7_rgba_unorm,      // DX12 BC7_UNORM      / Vk BC7_UNORM_BLOCK
     bc7_rgba_unorm_srgb, // DX12 BC7_UNORM_SRGB / Vk BC7_SRGB_BLOCK
+
+    // 16-bit normalized: core WebGPU has none of them as a texture, texture-formats-tier1 all six (see is_norm16_format)
+    r16_unorm,    // DX12 R16_UNORM          / Vk R16_UNORM          / Mtl R16Unorm    / WGPU r16unorm
+    r16_snorm,    // DX12 R16_SNORM          / Vk R16_SNORM          / Mtl R16Snorm    / WGPU r16snorm
+    rg16_unorm,   // DX12 R16G16_UNORM       / Vk R16G16_UNORM       / Mtl RG16Unorm   / WGPU rg16unorm
+    rg16_snorm,   // DX12 R16G16_SNORM       / Vk R16G16_SNORM       / Mtl RG16Snorm   / WGPU rg16snorm
+    rgba16_unorm, // DX12 R16G16B16A16_UNORM / Vk R16G16B16A16_UNORM / Mtl RGBA16Unorm / WGPU rgba16unorm
+    rgba16_snorm, // DX12 R16G16B16A16_SNORM / Vk R16G16B16A16_SNORM / Mtl RGBA16Snorm / WGPU rgba16snorm
 };
 
 namespace sg
@@ -227,6 +237,27 @@ namespace sg
     }
 }
 
+/// True for the six 16-bit normalized formats, `r16_unorm` through `rgba16_snorm`.
+/// Core WebGPU has none of them as a texture of any usage, so a texture of one needs `sg::feature::extended_image_formats`
+/// (webgpu's texture-formats-tier1) whatever it is used as, where another format outside the portable set needs it for
+/// image usage alone.
+/// No WebGPU tier and no Metal tier reads and writes one as an image in one shader, and WebGPU never filters one.
+[[nodiscard]] constexpr bool is_norm16_format(pixel_format f)
+{
+    switch (f)
+    {
+    case pixel_format::r16_unorm:
+    case pixel_format::r16_snorm:
+    case pixel_format::rg16_unorm:
+    case pixel_format::rg16_snorm:
+    case pixel_format::rgba16_unorm:
+    case pixel_format::rgba16_snorm:
+        return true;
+    default:
+        return false;
+    }
+}
+
 /// True for the formats core WebGPU samples but never filters: `sg::feature::float32_filtering` lifts that.
 [[nodiscard]] constexpr bool is_float32_format(pixel_format f)
 {
@@ -261,6 +292,8 @@ namespace sg
     case pixel_format::r16_float:
     case pixel_format::r16_uint:
     case pixel_format::r16_sint:
+    case pixel_format::r16_unorm:
+    case pixel_format::r16_snorm:
     case pixel_format::depth16_unorm:
         return 2;
 
@@ -274,6 +307,8 @@ namespace sg
     case pixel_format::rg16_float:
     case pixel_format::rg16_uint:
     case pixel_format::rg16_sint:
+    case pixel_format::rg16_unorm:
+    case pixel_format::rg16_snorm:
     case pixel_format::r32_float:
     case pixel_format::r32_uint:
     case pixel_format::r32_sint:
@@ -285,6 +320,8 @@ namespace sg
     case pixel_format::rgba16_float:
     case pixel_format::rgba16_uint:
     case pixel_format::rgba16_sint:
+    case pixel_format::rgba16_unorm:
+    case pixel_format::rgba16_snorm:
     case pixel_format::rg32_float:
     case pixel_format::rg32_uint:
     case pixel_format::rg32_sint:

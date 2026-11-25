@@ -92,6 +92,8 @@ ctx.supports(sg::feature::ray_query)               // bool — THE capability qu
                                                    //   ray_query | raytracing_pipeline | timestamp_query | headless_present | geometry_shader | tessellation_shader | mesh_shader | binding_arrays
                                                    //   | readwrite_image_formats (false on core webgpu: read_write storage only in r32 formats)
                                                    //   | float32_filtering (filter r32/rg32/rgba32_float) | extended_image_formats (storage beyond is_portable_image_format)
+                                                   //   | readwrite_norm16_image_formats (read_write r16..rgba16 _unorm/_snorm; never webgpu/metal)
+                                                   //   | norm16_filtering (filter r16..rgba16 _unorm/_snorm; never webgpu)
                                                    //   | unaligned_block_compression (false on webgpu and metal: a BC texture needs whole 4x4 blocks,
                                                    //     and create_texture THROWS on one that has not; desc.unaligned_block_error(supports) asks first)
                                                    //   | texture_compression_bc (BC1-BC7 textures; vulkan enables textureCompressionBC, metal on Apple-silicon Macs, webgpu with the adapter's feature)
@@ -120,9 +122,9 @@ ctx.supports(sg::feature::ray_query)               // bool — THE capability qu
                                                    //   | vertex_layer_output (a vertex stage picks the layer of an array target,
                                                    //     SGL's @layer; dx12 and vulkan ask the device, true on metal, false on webgpu)
                                                    //   | quad_control (SGL's quad_any / quad_all, helpers included; dx12 with wave ops,
-                                                   //     vulkan with VK_KHR_shader_quad_control; false on metal until verified, and on webgpu)
+                                                   //     vulkan with VK_KHR_shader_quad_control, true on metal; false on webgpu)
                                                    //   | multi_viewport (set_viewports past one, SGL's @viewport_index; dx12 with the
-                                                   //     layer output, vulkan's multiViewport; false on metal until verified, and on webgpu)
+                                                   //     layer output, vulkan's multiViewport, true on metal; false on webgpu)
                                                    //   | view_instancing (one draw renders view_count views, view i into layer i;
                                                    //   | pixel_view_read_workaround (no capability: Intel dx12 needs a pixel stage to read the view; SGL's keep_view asks for it)
                                                    //   | nonuniform_atomic_workaround (no capability: Intel and AMD on dx12 and vulkan combine an atomic
@@ -555,7 +557,8 @@ buf.as_index_buffer() / (range)            // -> index_buffer_view  (only buffer
 #include <shaped-graphics/resource/pixel_format.hh>
 sg::pixel_format             // enum: undefined, r8/rg8/rgba8 (unorm/snorm/uint/sint) + rgba8/bgra8 _unorm & _unorm_srgb,
                              //   r/rg/rgba 16f & 32f & int, rgb10a2_unorm, rg11b10_float,
-                             //   depth16_unorm/depth32_float/depth32_float_stencil8, bc1..bc7 (feature-gated)
+                             //   depth16_unorm/depth32_float/depth32_float_stencil8, bc1..bc7 (feature-gated),
+                             //   r/rg/rgba 16 _unorm & _snorm (feature-gated: extended_image_formats, any usage)
 sg::is_depth_format(f)          // bool  — depth or depth-stencil
 sg::is_depth_stencil_format(f)  // bool  — depth AND stencil planes
 sg::has_stencil(f)              // bool  — carries a stencil plane
@@ -567,6 +570,9 @@ sg::supports_typed_uav(f)       // bool  — can carry a typed UAV, i.e. texture
 sg::is_portable_image_format(f) // bool — storage every device takes (core WebGPU's set); any other typed-UAV format needs
                                   //         feature::extended_image_formats, so gate compute writes on both
 sg::is_float32_format(f)        // bool  — r32/rg32/rgba32_float: filtering one needs feature::float32_filtering
+sg::is_norm16_format(f)         // bool  — r16..rgba16 _unorm/_snorm: a texture of one, of ANY usage, needs feature::extended_image_formats;
+                                //         read_write needs feature::readwrite_norm16_image_formats (never webgpu/metal), filtering
+                                //         feature::norm16_filtering (never webgpu); both refused on every backend without it
 sg::format_block_size(f)        // int   — bytes per texel, or per 4x4 block for BC (0 for undefined)
 sg::format_block_extent(f)      // int   — 1 (uncompressed) or 4 (BC)
 sg::format_aspect_count(f)      // int   — subresource planes (1, or 2 for depth+stencil)

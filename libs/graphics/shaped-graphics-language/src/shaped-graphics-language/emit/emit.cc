@@ -3,6 +3,7 @@
 #include <clean-core/string/format.hh>
 #include <shaped-graphics-language/check/check.hh>
 #include <shaped-graphics-language/check/reserved_bindings.hh>
+#include <shaped-graphics-language/check/resources.hh>
 #include <shaped-graphics-language/check/source_lines.hh>
 #include <shaped-graphics-language/emit/impl/dialect.hh>
 #include <shaped-graphics-language/emit/impl/payload_access.hh>
@@ -379,7 +380,8 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
             | check::feature::unbounded_binding_arrays | check::feature::shader_int64 | check::feature::shader_f64
             | check::feature::shader_int64_atomics | check::feature::shader_shared_int64_atomics
             | check::feature::shader_int64_min_max_atomics | check::feature::vertex_pipeline_stores
-            | check::feature::quad_control | check::feature::multi_viewport;
+            | check::feature::quad_control | check::feature::multi_viewport
+            | check::feature::readwrite_norm16_image_formats;
         for (auto i = isize(0); i < check::k_feature_count; ++i)
             if (e.features.has(check::feature(i)) && never.has(check::feature(i)))
                 result.errors.push_back({.kind = error_kind::target_lacks_feature,
@@ -438,9 +440,10 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
     }
 
     // EMIT-192: Metal has no double, and its 64-bit atomics are a ulong's min and max alone, in a buffer
+    // EMIT-109: nor a read-write image of a 16-bit normalized format, which its read-write tier 2 leaves out
     if (t == target::msl)
         for (auto const f : {check::feature::shader_f64, check::feature::shader_int64_atomics,
-                             check::feature::shader_shared_int64_atomics})
+                             check::feature::shader_shared_int64_atomics, check::feature::readwrite_norm16_image_formats})
             if (e.features.has(f))
             {
                 result.errors.push_back(

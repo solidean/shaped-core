@@ -165,7 +165,13 @@ bool metal_context::supports(sg::feature f) const
     case sg::feature::pixel_view_read_workaround:
     case sg::feature::nonuniform_atomic_workaround:
     case sg::feature::nonuniform_length_workaround:
+    // read-write tier 2 names no 16-bit normalized format
+    case sg::feature::readwrite_norm16_image_formats:
         return false;
+    case sg::feature::norm16_filtering:
+        // Apple's feature-set tables give the six the filter capability on every GPU this backend's floor admits, and
+        // Metal asks nothing of a format at run time
+        return true;
     case sg::feature::ray_tracing_motion_blur:
         // motion acceleration structures, which a pipeline's trace takes natively
         return true;
@@ -226,6 +232,12 @@ bool metal_context::supports(sg::feature f) const
         return true;
     case sg::feature::device_coherence:
         // Inferred from the floor rather than probed: `coherent(device)` is MSL 3.2, older than the macOS / iOS 26 floor.
+        return true;
+    case sg::feature::quad_control:
+        // Helper threads vote in `quad_any` and `quad_all`: measured on an M4, where CHK-533's derivative under a vote is exact.
+        return true;
+    case sg::feature::multi_viewport:
+        // `setViewports:count:` and a vertex function's `[[viewport_array_index]]` are on every Apple GPU, up to 16.
         return true;
     case sg::feature::helper_lane_query:
         // `simd_is_helper_thread()` is in every MSL the macOS / iOS 26 floor compiles, so nothing is probed.

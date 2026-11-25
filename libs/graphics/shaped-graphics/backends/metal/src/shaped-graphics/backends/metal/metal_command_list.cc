@@ -1436,16 +1436,35 @@ void metal_command_list::open_render_encoder(bool force_load)
         auto const vp = info.viewport.has_value()
                           ? info.viewport.value()
                           : sg::viewport{.offset = tg::pos2f(0.0f, 0.0f), .size = tg::vec2f(float(width), float(height))};
-        _scope_viewport = MTL::Viewport{vp.offset[0], vp.offset[1], vp.size[0], vp.size[1], vp.min_depth, vp.max_depth};
+        _scope_viewports[0]
+            = MTL::Viewport{vp.offset[0], vp.offset[1], vp.size[0], vp.size[1], vp.min_depth, vp.max_depth};
+        _scope_viewport_count = 1;
 
         _scope_size = tg::vec2i(width, height);
-        _scope_scissor = scissor_within(
+        _scope_scissors[0] = scissor_within(
             info.scissor.has_value() ? info.scissor.value() : tg::aabb2i(tg::pos2i(0, 0), tg::pos2i(width, height)),
             _scope_size);
+        _scope_scissor_count = 1;
     }
 
-    _render_encoder->setViewport(_scope_viewport);
-    _render_encoder->setScissorRect(_scope_scissor);
+    apply_scope_viewports();
+    apply_scope_scissors();
+}
+
+void metal_command_list::apply_scope_viewports()
+{
+    if (_scope_viewport_count == 1)
+        _render_encoder->setViewport(_scope_viewports[0]);
+    else
+        _render_encoder->setViewports(_scope_viewports, NS::UInteger(_scope_viewport_count));
+}
+
+void metal_command_list::apply_scope_scissors()
+{
+    if (_scope_scissor_count == 1)
+        _render_encoder->setScissorRect(_scope_scissors[0]);
+    else
+        _render_encoder->setScissorRects(_scope_scissors, NS::UInteger(_scope_scissor_count));
 }
 
 void metal_command_list::suspend_render_encoder(cc::string_view cause, split_remedy remedy)
@@ -1582,17 +1601,63 @@ void metal_command_list::raster_bind_group(int group_index, binding_group const&
 void metal_command_list::raster_set_viewport(viewport const& vp)
 {
     CC_ASSERT(in_rendering_scope(), "setting the viewport needs an open rendering scope");
-    _scope_viewport = MTL::Viewport{vp.offset[0], vp.offset[1], vp.size[0], vp.size[1], vp.min_depth, vp.max_depth};
-    if (_render_encoder != nullptr)
-        _render_encoder->setViewport(_scope_viewport);
+    raster_set_viewports(cc::span<viewport const>(&vp, 1));
 }
 
 void metal_command_list::raster_set_scissor(tg::aabb2i const& rect)
 {
-    CC_ASSERT(in_rendering_scope(), "setting the scissor needs an open rendering scope");
-    _scope_scissor = scissor_within(rect, _scope_size);
+    raster_set_scissors(cc::span<tg::aabb2i const>(&rect, 1));
+}
+
+void metal_command_list::raster_set_viewports(cc::span<viewport const> viewports)
+{
+    CC_ASSERT(in_rendering_scope(), "setting the viewport needs an open rendering scope");
+    CC_ASSERT(!viewports.empty() && viewports.size() <= sg::max_viewports, "set_viewports takes 1 to max_viewports "
+                                                                           "viewports");
+    for (auto i = isize(0); i < viewports.size(); ++i)
+    {
+        auto const& vp = viewports[i];
+        _scope_viewports[i]
+            = MTL::Viewport{vp.offset[0], vp.offset[1], vp.size[0], vp.size[1], vp.min_depth, vp.max_depth};
+    }
+    _scope_viewport_count = viewports.size();
+
+    // Several viewports take a scissor each, which Metal requires to match their count; each starts as its viewport.
+    if (viewports.size() > 1)
+    {
+        for (auto i = isize(0); i < viewports.size(); ++i)
+        {
+            auto const& vp = viewports[i];
+            _scope_scissors[i]
+                = scissor_within(tg::aabb2i(tg::pos2i(int(vp.offset[0]), int(vp.offset[1])),
+                                            tg::pos2i(int(vp.offset[0] + vp.size[0]), int(vp.offset[1] + vp.size[1]))),
+                                 _scope_size);
+        }
+        _scope_scissor_count = viewports.size();
+    }
+    else if (_scope_scissor_count > 1)
+    {
+        _scope_scissors[0]
+            = scissor_within(tg::aabb2i(tg::pos2i(0, 0), tg::pos2i(_scope_size[0], _scope_size[1])), _scope_size);
+        _scope_scissor_count = 1;
+    }
+
     if (_render_encoder != nullptr)
-        _render_encoder->setScissorRect(_scope_scissor);
+    {
+        apply_scope_viewports();
+        apply_scope_scissors();
+    }
+}
+
+void metal_command_list::raster_set_scissors(cc::span<tg::aabb2i const> rects)
+{
+    CC_ASSERT(in_rendering_scope(), "setting the scissor needs an open rendering scope");
+    CC_ASSERT(!rects.empty() && rects.size() <= sg::max_viewports, "set_scissors takes 1 to max_viewports rects");
+    for (auto i = isize(0); i < rects.size(); ++i)
+        _scope_scissors[i] = scissor_within(rects[i], _scope_size);
+    _scope_scissor_count = rects.size();
+    if (_render_encoder != nullptr)
+        apply_scope_scissors();
 }
 
 void metal_command_list::raster_set_stencil_reference(u32 reference)

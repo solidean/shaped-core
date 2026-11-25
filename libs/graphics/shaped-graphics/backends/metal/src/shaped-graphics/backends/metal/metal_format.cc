@@ -126,6 +126,19 @@ MTL::PixelFormat pixel_format_of(sg::pixel_format format)
         return MTL::PixelFormatBC7_RGBAUnorm;
     case sg::pixel_format::bc7_rgba_unorm_srgb:
         return MTL::PixelFormatBC7_RGBAUnorm_sRGB;
+
+    case sg::pixel_format::r16_unorm:
+        return MTL::PixelFormatR16Unorm;
+    case sg::pixel_format::r16_snorm:
+        return MTL::PixelFormatR16Snorm;
+    case sg::pixel_format::rg16_unorm:
+        return MTL::PixelFormatRG16Unorm;
+    case sg::pixel_format::rg16_snorm:
+        return MTL::PixelFormatRG16Snorm;
+    case sg::pixel_format::rgba16_unorm:
+        return MTL::PixelFormatRGBA16Unorm;
+    case sg::pixel_format::rgba16_snorm:
+        return MTL::PixelFormatRGBA16Snorm;
     }
 
     return MTL::PixelFormatInvalid;

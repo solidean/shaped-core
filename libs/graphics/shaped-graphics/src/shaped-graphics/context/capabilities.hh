@@ -73,6 +73,7 @@ enum class sg::feature
 
     /// An image may be `read_write` in any image format, not only r32float / r32uint / r32sint.
     /// WebGPU core allows read-write on those three alone, and its `texture-formats-tier2` lifts that; write-only and read-only work everywhere.
+    /// A 16-bit normalized format is the exception: its read-write image is `readwrite_norm16_image_formats`'s.
     readwrite_image_formats,
 
     /// A sampled texture of `r32_float`, `rg32_float` or `rgba32_float` may be filtered.
@@ -82,9 +83,12 @@ enum class sg::feature
 
     /// An image may use a format outside `sg::is_portable_image_format`, such as `r8_unorm` or `rgb10a2_unorm`.
     /// `bgra8_unorm` is among them, and it is the one each API asks for on its own.
+    /// A texture of a 16-bit normalized format, `r16_unorm` through `rgba16_snorm`, needs it whatever its usage, since core WebGPU has none of them.
     /// WebGPU grants them with `texture-formats-tier1` and `bgra8unorm-storage`.
-    /// Vulkan grants them with `shaderStorageImageExtendedFormats` plus `VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT` on `B8G8R8A8_UNORM`.
-    /// D3D12 grants them with a typed UAV on `DXGI_FORMAT_B8G8R8A8_UNORM`, the rest being required at feature level 11_0.
+    /// Vulkan grants them with `shaderStorageImageExtendedFormats` plus `VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT` on `B8G8R8A8_UNORM`
+    /// and on each 16-bit normalized format, which must also be sampled and a color attachment.
+    /// D3D12 grants them with a typed UAV on `DXGI_FORMAT_B8G8R8A8_UNORM` and a typed UAV store on each 16-bit normalized
+    /// format, the rest being required at feature level 11_0.
     extended_image_formats,
 
     /// A block-compressed texture may have a width or height that is no multiple of its block (4 for BC).
@@ -269,13 +273,15 @@ enum class sg::feature
     /// stand under a branch on one (SGL's CHK-533).
     /// D3D12 grants it with wave operations, on the Shader Model 6.8 every device here runs; vulkan with
     /// `VK_KHR_shader_quad_control` and `VK_KHR_shader_maximal_reconvergence`.
-    /// WebGPU has none, since its helpers may sit out a quad operation; metal waits on a run on Apple hardware.
+    /// Metal grants it on every device, its helper threads voting in a fragment function's `quad_any`: measured on an M4.
+    /// WebGPU has none, since its helpers may sit out a quad operation.
     quad_control,
 
     /// `set_viewports` takes up to `max_viewports` viewports, and a vertex stage picks one per primitive with SGL's `@viewport_index`.
     /// D3D12 grants it with the option that lets a vertex stage write the layer, which the viewport shares.
     /// Vulkan grants it with `multiViewport` and `shaderOutputViewportIndex`.
-    /// WebGPU has one viewport alone; metal waits on a run on Apple hardware.
+    /// Metal grants it on every device, with `setViewports:count:` and `[[viewport_array_index]]`.
+    /// WebGPU has one viewport alone.
     multi_viewport,
 
     /// Not a capability: this device's driver combines an atomic at a non-uniform index into a binding array across
@@ -289,6 +295,22 @@ enum class sg::feature
     /// vulkan sets it on AMD hardware; every other device asks the length as it is.
     /// See docs/bugs-external/amd-vulkan-nonuniform-array-length-reads-first-lane.
     nonuniform_length_workaround,
+
+    /// An image of a 16-bit normalized format, `r16_unorm` through `rgba16_snorm`, may be `read_write`; `extended_image_formats` grants the format.
+    /// It is apart from `readwrite_image_formats` because no WebGPU or Metal device has it, where both grant that one on some devices.
+    /// D3D12 grants it where each of the six has a typed UAV load, beside the typed UAV store `extended_image_formats` asks.
+    /// Vulkan grants it where each of the six has `VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT`, the format being named in the shader.
+    /// Metal's read-write tier 2 and WebGPU's `texture-formats-tier2` list none of them, so neither ever grants it.
+    /// Without it, a read-write image layout of one is refused on every backend, and SGL needs it for a `mut` image of one.
+    /// So is a view of one bound to any read-write image binding, whatever format the binding states.
+    readwrite_norm16_image_formats,
+
+    /// A sampled texture of a 16-bit normalized format, `r16_unorm` through `rgba16_snorm`, may be filtered.
+    /// WebGPU makes the six unfilterable whatever the device has, so it never grants it.
+    /// D3D12 grants it where each of the six can be sampled (`D3D12_FORMAT_SUPPORT1_SHADER_SAMPLE`), Vulkan where each has
+    /// `VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT`, and Metal on every GPU, which filters all six.
+    /// Without it, binding such a view to a `filterable_float` binding is refused on every backend, as `float32_filtering` refuses its formats.
+    norm16_filtering,
 };
 
 CC_FLAG_ENUM_INDEXED(sg, feature, cc::u64);
@@ -348,9 +370,10 @@ inline constexpr feature k_all_features[] = {
     feature::multi_viewport,
     feature::nonuniform_atomic_workaround,
     feature::nonuniform_length_workaround,
+    feature::readwrite_norm16_image_formats,
+    feature::norm16_filtering,
 };
-static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0]))
-                  == isize(feature::nonuniform_length_workaround) + 1,
+static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize(feature::norm16_filtering) + 1,
               "k_all_features lists every feature");
 
 /// The enumerator's name, `ray_query`, which is also what SGL's `require` spells it as.
@@ -454,6 +477,10 @@ static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0]))
         return "nonuniform_atomic_workaround";
     case feature::nonuniform_length_workaround:
         return "nonuniform_length_workaround";
+    case feature::readwrite_norm16_image_formats:
+        return "readwrite_norm16_image_formats";
+    case feature::norm16_filtering:
+        return "norm16_filtering";
     }
     return "";
 }

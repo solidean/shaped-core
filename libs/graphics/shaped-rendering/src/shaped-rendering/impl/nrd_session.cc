@@ -57,6 +57,10 @@ namespace
     case nrd::Format::RGBA8_SRGB:
         return sg::pixel_format::rgba8_unorm_srgb;
 
+    case nrd::Format::R16_UNORM:
+        return sg::pixel_format::r16_unorm;
+    case nrd::Format::R16_SNORM:
+        return sg::pixel_format::r16_snorm;
     case nrd::Format::R16_SFLOAT:
         return sg::pixel_format::r16_float;
     case nrd::Format::R16_UINT:
@@ -64,6 +68,10 @@ namespace
     case nrd::Format::R16_SINT:
         return sg::pixel_format::r16_sint;
 
+    case nrd::Format::RG16_UNORM:
+        return sg::pixel_format::rg16_unorm;
+    case nrd::Format::RG16_SNORM:
+        return sg::pixel_format::rg16_snorm;
     case nrd::Format::RG16_SFLOAT:
         return sg::pixel_format::rg16_float;
     case nrd::Format::RG16_UINT:
@@ -71,6 +79,10 @@ namespace
     case nrd::Format::RG16_SINT:
         return sg::pixel_format::rg16_sint;
 
+    case nrd::Format::RGBA16_UNORM:
+        return sg::pixel_format::rgba16_unorm;
+    case nrd::Format::RGBA16_SNORM:
+        return sg::pixel_format::rgba16_snorm;
     case nrd::Format::RGBA16_SFLOAT:
         return sg::pixel_format::rgba16_float;
     case nrd::Format::RGBA16_UINT:
@@ -105,8 +117,8 @@ namespace
         return sg::pixel_format::rg11b10_float;
 
     default:
-        // The normalized 16-bit formats and the shared-exponent one have no sg spelling, and the 3-channel 32-bit ones
-        // are not a thing dx12 storage textures do.
+        // The shared-exponent format has no sg spelling, and the 3-channel 32-bit ones are not a thing dx12 storage
+        // textures do.
         // Refusing names the format rather than guessing a near neighbour, because a pool texture in the wrong format
         // is a wrong denoise rather than an error.
         return {};

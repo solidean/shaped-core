@@ -2,6 +2,7 @@
 #include <shaped-graphics/binding/binding.hh>
 #include <shaped-graphics/binding/binding_group.hh>
 #include <shaped-graphics/binding/pipeline_layout.hh>
+#include <shaped-graphics/binding/staging_binding_group.hh>
 #include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/exceptions.hh>
 #include <shaped-graphics/resource/pixel_format.hh>
@@ -56,6 +57,135 @@ INVOCABLE_TEST("sg - an image format outside the portable set needs extended_ima
     bindings[0].access = sg::access_mode::write;
     sg::apply_stage_visibility(bindings, sg::shader_stage::compute);
     CHECK(ctx->uncached.try_create_binding_group_layout(bindings).has_value() == extended);
+}
+
+INVOCABLE_TEST("sg - a 16-bit normalized texture needs extended_image_formats whatever its usage",
+               (sg::context_handle const& ctx))
+{
+    auto const extended = ctx->supports(sg::feature::extended_image_formats);
+    for (auto const f : {sg::pixel_format::r16_unorm, sg::pixel_format::r16_snorm, sg::pixel_format::rg16_unorm,
+                         sg::pixel_format::rg16_snorm, sg::pixel_format::rgba16_unorm, sg::pixel_format::rgba16_snorm})
+    {
+        for (auto const usage :
+             {sg::texture_usages(sg::texture_usage::texture), sg::texture_usages(sg::texture_usage::image),
+              sg::texture_usages(sg::texture_usage::render_target)})
+        {
+            CHECK(creates(
+                      [&]
+                      { return ctx->persistent.create_raw_texture(texture_of(f, usage | sg::texture_usage::copy_src)); })
+                  == extended)
+                .dump("format", int(f));
+            CHECK(creates([&] { return ctx->transient.create_raw_texture(texture_of(f, usage)); }) == extended)
+                .dump("format", int(f));
+        }
+    }
+}
+
+INVOCABLE_TEST("sg - a read-write 16-bit normalized image layout needs readwrite_norm16_image_formats",
+               (sg::context_handle const& ctx))
+{
+    auto const granted = ctx->supports(sg::feature::readwrite_norm16_image_formats);
+    // the read-write image of a format it needs first, and never on webgpu or metal
+    if (granted)
+        CHECK(ctx->supports(sg::feature::extended_image_formats));
+    if (ctx->backend() == sg::backend_kind::webgpu || ctx->backend() == sg::backend_kind::metal)
+        CHECK(!granted);
+
+    auto bindings = cc::vector<sg::binding>();
+    bindings.push_back({.name = "normal", .type = sg::binding_type::image, .access = sg::access_mode::read_write});
+    bindings[0].texture_dimension = sg::texture_view_dimension::tex_2d;
+    bindings[0].image_format = sg::pixel_format::rg16_unorm;
+    sg::apply_stage_visibility(bindings, sg::shader_stage::compute);
+    CHECK(ctx->uncached.try_create_binding_group_layout(bindings).has_value() == granted);
+}
+
+INVOCABLE_TEST("sg - a 16-bit normalized view on a read-write image binding that states no format needs "
+               "readwrite_norm16_image_formats",
+               (sg::context_handle const& ctx))
+{
+    if (!ctx->supports(sg::feature::extended_image_formats))
+        return; // no texture of one to view
+    // a layout as HLSL reflects one, which webgpu refuses before any view exists
+    auto bindings = cc::vector<sg::binding>();
+    bindings.push_back({.name = "normal", .type = sg::binding_type::image, .access = sg::access_mode::read_write});
+    bindings[0].texture_dimension = sg::texture_view_dimension::tex_2d;
+    sg::apply_stage_visibility(bindings, sg::shader_stage::compute);
+    auto const layout = ctx->uncached.try_create_binding_group_layout(bindings);
+    // dx12 and vulkan take a layout with no format, so there the group's judgement is reached, never skipped
+    if (ctx->backend() == sg::backend_kind::dx12 || ctx->backend() == sg::backend_kind::vulkan)
+        CHECK(layout.has_value());
+    if (!layout.has_value())
+        return;
+    auto const texture = sg::texture_2d::from_raw(
+        ctx->persistent.create_raw_texture(texture_of(sg::pixel_format::rg16_unorm, sg::texture_usage::image)));
+    auto const view = texture.as_image_view<sg::pixel_format::rg16_unorm>();
+    auto const granted = ctx->supports(sg::feature::readwrite_norm16_image_formats);
+    auto const views = cc::vector<sg::named_view>{{.name = "normal", .view = view}};
+    CHECK(creates([&] { return ctx->persistent.create_binding_group(layout.value(), views, {}); }) == granted);
+    CHECK(creates([&] { return ctx->transient.create_binding_group(layout.value(), views, {}); }) == granted);
+    auto const slotted = cc::vector<sg::slotted_view>{{.slot = sg::binding_slot(0), .view = view}};
+    CHECK(creates([&] { return ctx->persistent.create_binding_group(layout.value(), slotted, {}); }) == granted);
+
+    // a staging group judges its set alike, and reports the refusal where the group is minted
+    auto const staging = ctx->persistent.create_staging_binding_group(layout.value());
+    staging->set_binding("normal", view);
+    CHECK(staging->try_snapshot().has_value() == granted);
+}
+
+INVOCABLE_TEST("sg - a 16-bit normalized view on a filterable binding needs norm16_filtering",
+               (sg::context_handle const& ctx))
+{
+    if (!ctx->supports(sg::feature::extended_image_formats))
+        return; // no texture of one to view
+    auto const granted = ctx->supports(sg::feature::norm16_filtering);
+    if (ctx->backend() == sg::backend_kind::webgpu)
+        CHECK(!granted);
+
+    auto const layout_of = [&](sg::texture_sample_type sample_type)
+    {
+        auto bindings = cc::vector<sg::binding>();
+        bindings.push_back({.name = "source", .type = sg::binding_type::texture});
+        bindings[0].texture_dimension = sg::texture_view_dimension::tex_2d;
+        bindings[0].sample_type = sample_type;
+        sg::apply_stage_visibility(bindings, sg::shader_stage::compute);
+        return ctx->uncached.create_binding_group_layout(bindings);
+    };
+    auto const filterable = layout_of(sg::texture_sample_type::filterable_float);
+    auto const unfilterable = layout_of(sg::texture_sample_type::unfilterable_float);
+    auto const texture = sg::texture_2d::from_raw(
+        ctx->persistent.create_raw_texture(texture_of(sg::pixel_format::rgba16_snorm, sg::texture_usage::texture)));
+    auto const group_of = [&](sg::binding_group_layout_handle const& layout)
+    {
+        auto const views = cc::vector<sg::named_view>{{.name = "source", .view = texture.as_texture_view()}};
+        return creates([&] { return ctx->persistent.create_binding_group(layout, views, {}); });
+    };
+    CHECK(group_of(filterable) == granted);
+    CHECK(group_of(unfilterable));
+}
+
+INVOCABLE_TEST("sg - a staging binding group refuses a view on a filterable binding its device cannot filter",
+               (sg::context_handle const& ctx))
+{
+    auto bindings = cc::vector<sg::binding>();
+    bindings.push_back({.name = "source", .type = sg::binding_type::texture});
+    bindings[0].texture_dimension = sg::texture_view_dimension::tex_2d;
+    bindings[0].sample_type = sg::texture_sample_type::filterable_float;
+    sg::apply_stage_visibility(bindings, sg::shader_stage::compute);
+    auto const filterable = ctx->uncached.create_binding_group_layout(bindings);
+
+    // set refuses no view itself: the refusal is written down and reported where the group is minted
+    auto const snapshots = [&](sg::pixel_format format)
+    {
+        auto const texture = sg::texture_2d::from_raw(
+            ctx->persistent.create_raw_texture(texture_of(format, sg::texture_usage::texture)));
+        auto const staging = ctx->persistent.create_staging_binding_group(filterable);
+        staging->set_binding("source", texture.as_texture_view());
+        return staging->try_snapshot().has_value();
+    };
+    CHECK(snapshots(sg::pixel_format::r32_float) == ctx->supports(sg::feature::float32_filtering));
+    CHECK(snapshots(sg::pixel_format::rgba8_unorm));
+    if (ctx->supports(sg::feature::extended_image_formats))
+        CHECK(snapshots(sg::pixel_format::rg16_unorm) == ctx->supports(sg::feature::norm16_filtering));
 }
 
 INVOCABLE_TEST("sg - a 32-bit float view on a filterable binding needs float32_filtering",

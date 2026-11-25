@@ -1,0 +1,23 @@
+// The 16-bit normalized image formats: a store clamps to the format's range and rounds to 16 bits, and a `mut` image
+// reads back what it stored.
+
+require extended_image_formats
+require readwrite_norm16_image_formats
+
+binding normals:
+    lean: out image_2d[.rg16_unorm]
+    rough: out image_2d[.rgba16_snorm]
+
+// 1.5 clamps to 1 and -2 to -1; no value falls halfway between two codes, so every rounding gives one answer
+@compute(8, 8) fun store_norm16(@thread_id id: int3){normals}:
+    normals.lean[id.xy] = float2(0.25, 1.5)
+    normals.rough[id.xy] = float4(-0.25, 0.75, -2.0, 1.0)
+
+binding flipped:
+    lean: mut image_2d[.rg16_unorm]
+    rough: mut image_2d[.rgba16_snorm]
+
+// what a texel holds reads back as the float its code stands for, which no WebGPU or Metal device does (EMIT-109)
+@compute(8, 8) fun flip_norm16(@thread_id id: int3){flipped}:
+    flipped.lean[id.xy] = flipped.lean[id.xy].yx
+    flipped.rough[id.xy] = -flipped.rough[id.xy]

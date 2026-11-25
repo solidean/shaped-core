@@ -10,6 +10,7 @@
 #include <shaped-graphics/binding/binding_group.hh> // sg::impl::buffer_use
 #include <shaped-graphics/binding/binding_group_layout.hh>
 #include <shaped-graphics/binding/sampler.hh>
+#include <shaped-graphics/context/capabilities.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/views.hh>
 
@@ -227,9 +228,10 @@ private:
     void record_use(binding_slot slot, int first_element, cc::span<raw_view const> views);
 
     // Stamped by the persistent scope right after the backend creates the group: the device's
-    // feature::float32_filtering, and whether the context's portability and hit-record checks are on.
+    // features, which a view's filtering is judged by, and whether the context's portability and hit-record checks are on.
     friend class sg::context_persistent_scope;
-    bool _float32_filtering = true;
+    feature_set _supported
+        = feature_set(feature::float32_filtering) | feature::norm16_filtering | feature::readwrite_norm16_image_formats;
     bool _records_buffer_uses = false;
     bool _records_tlases = false;
 };

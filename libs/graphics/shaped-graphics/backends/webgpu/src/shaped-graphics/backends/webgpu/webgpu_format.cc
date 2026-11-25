@@ -113,6 +113,18 @@ WGPUTextureFormat to_wgpu_format(sg::pixel_format f)
         return WGPUTextureFormat_BC7RGBAUnorm;
     case sg::pixel_format::bc7_rgba_unorm_srgb:
         return WGPUTextureFormat_BC7RGBAUnormSrgb;
+    case sg::pixel_format::r16_unorm:
+        return WGPUTextureFormat_R16Unorm;
+    case sg::pixel_format::r16_snorm:
+        return WGPUTextureFormat_R16Snorm;
+    case sg::pixel_format::rg16_unorm:
+        return WGPUTextureFormat_RG16Unorm;
+    case sg::pixel_format::rg16_snorm:
+        return WGPUTextureFormat_RG16Snorm;
+    case sg::pixel_format::rgba16_unorm:
+        return WGPUTextureFormat_RGBA16Unorm;
+    case sg::pixel_format::rgba16_snorm:
+        return WGPUTextureFormat_RGBA16Snorm;
     }
     CC_UNREACHABLE("unhandled pixel_format in to_wgpu_format");
 }
@@ -246,6 +258,13 @@ WGPUTextureSampleType default_sample_type(sg::pixel_format format)
     case sg::pixel_format::r32_float:
     case sg::pixel_format::rg32_float:
     case sg::pixel_format::rgba32_float:
+    // texture-formats-tier1 adds them as unfilterable, and no feature makes them filterable
+    case sg::pixel_format::r16_unorm:
+    case sg::pixel_format::r16_snorm:
+    case sg::pixel_format::rg16_unorm:
+    case sg::pixel_format::rg16_snorm:
+    case sg::pixel_format::rgba16_unorm:
+    case sg::pixel_format::rgba16_snorm:
         return WGPUTextureSampleType_UnfilterableFloat;
     case sg::pixel_format::depth16_unorm:
     case sg::pixel_format::depth32_float:

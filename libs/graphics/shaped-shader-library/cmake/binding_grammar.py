@@ -390,7 +390,8 @@ IMAGE_FORMATS = (
     "r8_unorm", "r8_snorm", "r8_uint", "r8_sint", "rg8_unorm", "rg8_snorm", "rg8_uint", "rg8_sint",
     "rgba8_unorm", "rgba8_snorm", "rgba8_uint", "rgba8_sint", "bgra8_unorm",
     "r16_float", "r16_uint", "r16_sint", "rg16_float", "rg16_uint", "rg16_sint", "rgba16_float", "rgba16_uint",
-    "rgba16_sint", "r32_float", "r32_uint", "r32_sint", "rg32_float", "rg32_uint", "rg32_sint", "rgba32_float",
+    "rgba16_sint", "r16_unorm", "r16_snorm", "rg16_unorm", "rg16_snorm", "rgba16_unorm", "rgba16_snorm",
+    "r32_float", "r32_uint", "r32_sint", "rg32_float", "rg32_uint", "rg32_sint", "rgba32_float",
     "rgba32_uint", "rgba32_sint", "rgb10a2_unorm", "rg11b10_float",
 )
 

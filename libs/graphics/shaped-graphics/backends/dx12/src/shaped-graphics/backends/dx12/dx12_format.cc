@@ -118,6 +118,19 @@ DXGI_FORMAT to_dxgi_format(sg::pixel_format format)
         return DXGI_FORMAT_BC7_UNORM;
     case sg::pixel_format::bc7_rgba_unorm_srgb:
         return DXGI_FORMAT_BC7_UNORM_SRGB;
+
+    case sg::pixel_format::r16_unorm:
+        return DXGI_FORMAT_R16_UNORM;
+    case sg::pixel_format::r16_snorm:
+        return DXGI_FORMAT_R16_SNORM;
+    case sg::pixel_format::rg16_unorm:
+        return DXGI_FORMAT_R16G16_UNORM;
+    case sg::pixel_format::rg16_snorm:
+        return DXGI_FORMAT_R16G16_SNORM;
+    case sg::pixel_format::rgba16_unorm:
+        return DXGI_FORMAT_R16G16B16A16_UNORM;
+    case sg::pixel_format::rgba16_snorm:
+        return DXGI_FORMAT_R16G16B16A16_SNORM;
     }
 
     CC_ASSERT(false, "unhandled pixel_format in to_dxgi_format");

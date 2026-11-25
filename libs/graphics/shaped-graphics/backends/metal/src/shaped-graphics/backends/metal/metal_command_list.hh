@@ -184,6 +184,8 @@ private:
                                                           cc::span<array_texture_access const> elements) override;
     void raster_set_viewport(viewport const& vp) override;
     void raster_set_scissor(tg::aabb2i const& rect) override;
+    void raster_set_viewports(cc::span<viewport const> viewports) override;
+    void raster_set_scissors(cc::span<tg::aabb2i const> rects) override;
     void raster_set_stencil_reference(u32 reference) override;
     void raster_set_blend_constants(tg::vec4f constants) override;
     void raster_set_inline_constants(cc::span<byte const> data, cc::optional<isize> offset) override;
@@ -462,8 +464,14 @@ private:
     ///
     /// **The current values rather than the scope's initial ones**: a caller that moved the viewport mid-pass has to
     /// find it where it left it, and a new encoder starts at Metal's defaults rather than at the old one's state.
-    MTL::Viewport _scope_viewport = {};
-    MTL::ScissorRect _scope_scissor = {};
+    /// The first `_scope_viewport_count` and `_scope_scissor_count` entries are live; one viewport is a count of 1.
+    MTL::Viewport _scope_viewports[sg::max_viewports] = {};
+    MTL::ScissorRect _scope_scissors[sg::max_viewports] = {};
+    isize _scope_viewport_count = 1;
+    isize _scope_scissor_count = 1;
+
+    void apply_scope_viewports();
+    void apply_scope_scissors();
 
     /// The open rendering scope's pixel extent, which every scissor is clamped to.
     tg::vec2i _scope_size = {};

@@ -32,12 +32,14 @@ Back to the [semantics](_index.md); the reasons are in [why/emitting.md](why/emi
 * **EMIT-10** A module that reported an error is the error `module-has-errors`, whichever entry point is asked for.
 * **EMIT-11** An entry point the module does not hold is `unknown-entry-point`.
 * **EMIT-12** A construct that no emitter carries yet is `unsupported`, and its detail names the construct; an emitter never guesses an address.
-* **EMIT-13** No error depends on the target but EMIT-109's, EMIT-122's, EMIT-128's, EMIT-261's and EMIT-265's: an entry point is written for every target or for none ([why](why/emitting.md#emit-13)).
+* **EMIT-13** An entry point is written for every target or for none ([why](why/emitting.md#emit-13)).
+  No error depends on the target but EMIT-109's, EMIT-122's, EMIT-128's, EMIT-261's and EMIT-265's.
 * **EMIT-109** An entry point that needs a feature no device of the target has is `target-lacks-feature`, and its detail names the feature.
   Today that is `wgsl` against `binding_arrays`, `multisampled_array_textures`, `raytracing_pipeline`, `geometry_shader` and `tessellation_shader`.
   It is also `wgsl` against `shader_int16`, `device_coherence`, `image_atomics`, `first_instance` and `helper_lane_query`, which core WebGPU has none of.
   And it is `wgsl` against `shader_int64`, `shader_f64` and `shader_int64_atomics`, which no WebGPU has.
   It is `wgsl` against `vertex_pipeline_stores` too, which only a native vertex stage needs there, since WebGPU draws the others as compute (CHK-531).
+  It is `wgsl` and `msl` against `readwrite_norm16_image_formats`, a `mut` image of a 16-bit normalized format, whose read-write tiers 2 both leave the six out.
   `ray_query` is none of them: WGSL writes a trace's emulated form (EMIT-135).
   The shader chose it by `require`, so a portable shader still meets EMIT-13's promise.
 * **EMIT-66** A tree that is not core is the error `not-core`, and its detail names the first node that offends.
@@ -299,6 +301,9 @@ A binding that is not `@inline` is a group.
 * **EMIT-97** A texture, an image and a sampler member are each one global minted as a buffer's is, by EMIT-85, and each has its target's own type by the table below.
 * **EMIT-98** `hlsl-vulkan` states an image's format as `[[vk::image_format]]`, in DXC's spelling, which DXC makes a typed image of.
   `hlsl-dx12` states none, since dx12 takes the format from the view, and neither does `bgra8_unorm` on vulkan, which SPIR-V has no name for.
+* **EMIT-280** HLSL's texel of a 16-bit normalized image says its normalization, `RWTexture2D<unorm float2>` and `RWTexture2D<snorm float4>`, on both HLSL targets ([why](why/emitting.md#emit-280)).
+  SGL's own DXIL states the view's component type as DXC does of that text, `UNormF32` or `SNormF32`, and its own SPIR-V names the format as `[[vk::image_format]]` does.
+  Every other format's texel is its plain type.
 * **EMIT-99** A static sampler of a group is its `SamplerState`, or `SamplerComparisonState` where it has a `compare`, with its address and nothing else.
   Its settings reach the layout from `sgl describe`, never from the text, so every target writes it as it writes a sampler the host binds.
 * **EMIT-100** WGSL and MSL write a 1D texture or image as a 2D one and a 1D array as a 2D array, since sg's webgpu and metal backends create every 1D texture that way (the bindings file, "Shapes").
@@ -340,6 +345,7 @@ A binding that is not `@inline` is a group.
 | `texture_2d_depth` | `Texture2D<float>` | `texture_depth_2d` | `depth2d<float>` |
 | `image_2d[.rgba8_unorm]` | `RWTexture2D<float4>` | `texture_storage_2d<rgba8unorm, read>` | `texture2d<float, access::read>` |
 | `out image_2d[.r32_float]` | `RWTexture2D<float>` | `texture_storage_2d<r32float, write>` | `texture2d<float, access::write>` |
+| `out image_2d[.rg16_unorm]` | `RWTexture2D<unorm float2>` | `texture_storage_2d<rg16unorm, write>` | `texture2d<float, access::write>` |
 | `sampler`, `comparison_sampler` | `SamplerState`, `SamplerComparisonState` | `sampler`, `sampler_comparison` | `sampler`, `sampler` |
 
 The other shapes follow the same pattern: HLSL's `Texture2DArray`, `TextureCube`, `Texture2DMS`, and WGSL's `texture_2d_array`, `texture_cube`, `texture_multisampled_2d`.

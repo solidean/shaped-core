@@ -47,6 +47,36 @@ TEST("sg - pixel_format classification")
     CHECK(!sg::is_render_target_format(pf::bc1_rgba_unorm)); // compressed is not renderable
 }
 
+TEST("sg - the 16-bit normalized formats are float formats of 2, 4 and 8 bytes outside the portable image formats")
+{
+    using pf = sg::pixel_format;
+    // appended, so every format a stored shader names keeps its ordinal
+    CHECK(int(pf::r16_unorm) == int(pf::bc7_rgba_unorm_srgb) + 1);
+    for (auto const f :
+         {pf::r16_unorm, pf::r16_snorm, pf::rg16_unorm, pf::rg16_snorm, pf::rgba16_unorm, pf::rgba16_snorm})
+    {
+        CHECK(sg::is_norm16_format(f));
+        CHECK(!sg::is_integer_format(f));
+        CHECK(!sg::is_srgb_format(f));
+        CHECK(!sg::is_depth_format(f));
+        CHECK(!sg::is_compressed_format(f));
+        CHECK(!sg::is_float32_format(f));
+        CHECK(sg::is_render_target_format(f));
+        CHECK(sg::supports_typed_uav(f));
+        CHECK(!sg::is_portable_image_format(f));
+        CHECK(sg::format_block_extent(f) == 1);
+    }
+    CHECK(sg::format_block_size(pf::r16_unorm) == 2);
+    CHECK(sg::format_block_size(pf::r16_snorm) == 2);
+    CHECK(sg::format_block_size(pf::rg16_unorm) == 4);
+    CHECK(sg::format_block_size(pf::rg16_snorm) == 4);
+    CHECK(sg::format_block_size(pf::rgba16_unorm) == 8);
+    CHECK(sg::format_block_size(pf::rgba16_snorm) == 8);
+    CHECK(!sg::is_norm16_format(pf::rg16_float));
+    CHECK(!sg::is_norm16_format(pf::rgba8_unorm));
+    CHECK(!sg::is_norm16_format(pf::depth16_unorm));
+}
+
 TEST("sg - pixel_format block size")
 {
     using pf = sg::pixel_format;

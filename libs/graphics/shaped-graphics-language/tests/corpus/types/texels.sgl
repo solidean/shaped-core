@@ -10,7 +10,11 @@ test:
     let offsets: texel[.rgba16_sint] = int4(-1, 0, 1, 2)
     let packed: texel[.rg11b10_float] = float3(1.0, 2.0, 3.0)
     let swapped: texel[.bgra8_unorm] = color
+    let normal: texel[.rg16_unorm] = float2(0.5, 1.0)
+    let pair: texel[.rgba16_snorm] = float4(-1.0, 0.0, 0.5, 1.0)
+    let single: texel[.r16_snorm] = -0.5
     color.y == 0.5 and depth == 0.5 and ids.y == 4u and offsets.x == -1 and packed.z == 3.0 and swapped.x == 1.0
+    normal.y == 1.0 and pair.x == -1.0 and single == -0.5
 
 // a format may name an option, so the type is the one the compile gave it
 test:
@@ -23,6 +27,8 @@ test:
     v as texel[.rg16_float] == float2(1.0, 2.0)
     v as texel[.r32_float] == 1.0
     v as texel[.rg11b10_float] == float3(1.0, 2.0, 3.0)
+    v as texel[.rg16_snorm] == float2(1.0, 2.0)
+    v as texel[.r16_unorm] == 1.0
     v as texel[target_format] == 1.0
     int4(-1, -2, -3, -4) as texel[.rg8_sint] == int2(-1, -2)
 

@@ -278,7 +278,7 @@ void staging_binding_group::write_run(binding_slot slot, int first_element, cc::
     }
 
     // Refused rather than written, so no backend ever sees the view; the snapshot reports it.
-    if (auto refusal = impl::find_unsupported_view(_float32_filtering, b, views); refusal.has_value())
+    if (auto refusal = impl::find_unsupported_view(_supported, b, views); refusal.has_value())
     {
         _slots[isize(u32(slot))].refusal = cc::move(refusal);
         _dirty = true;

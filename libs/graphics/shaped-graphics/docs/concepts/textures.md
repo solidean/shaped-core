@@ -41,8 +41,12 @@ That keeps the enum backend-neutral, with no value one API can represent and ano
 
 Consequences of that rule:
 
-- **16-bit *norm*** formats are excluded — not WebGPU-core, since they need `texture-formats-tier1`.
-  16-bit float and int are in.
+- **16-bit *norm*** formats (`r16_unorm` through `rgba16_snorm`) are in, mapping in all four APIs, but they are a **runtime capability** on WebGPU.
+  Core WebGPU has none of them as a texture of any usage, and `texture-formats-tier1` adds all six.
+  `sg::feature::extended_image_formats` gates them: creating a texture of one without it is a refusal, sampled or not, on every backend alike.
+  The dx12 and vulkan backends ask each of the six of the device before they report the feature.
+  Each backend-specific use is a feature of its own: a read-write image of one is `sg::feature::readwrite_norm16_image_formats`,
+  which no WebGPU or Metal device has, and filtering one is `sg::feature::norm16_filtering`, which WebGPU never has.
 - **`D24_UNORM_S8`** is excluded, being absent on Apple-Silicon Metal.
   `depth32_float_stencil8` is the portable depth-stencil format.
 - **BC** (BC1–BC7) *is* included, mapping in all four APIs, but it is a **runtime capability** every backend gates.

@@ -67,6 +67,34 @@ constexpr cc::string_view k_picked = "@option const out_format: pixel_format = .
                                      "    let c = io.source.load(id.xy)\n"
                                      "    io.picked[id.xy] = c.xy as texel[out_format]\n";
 
+/// An `out` image of each 16-bit normalized format, a read-only one, and a `mut` one in an entry point of its own.
+constexpr cc::string_view k_norm16 = "require extended_image_formats\n"
+                                     "require readwrite_norm16_image_formats\n"
+                                     "\n"
+                                     "binding outs:\n"
+                                     "    a: out image_2d[.r16_unorm]\n"
+                                     "    b: out image_2d[.r16_snorm]\n"
+                                     "    c: out image_2d[.rg16_unorm]\n"
+                                     "    d: out image_2d[.rg16_snorm]\n"
+                                     "    e: out image_2d[.rgba16_unorm]\n"
+                                     "    f: out image_2d[.rgba16_snorm]\n"
+                                     "    source: image_2d[.rg16_snorm]\n"
+                                     "\n"
+                                     "binding muts:\n"
+                                     "    plain: mut image_2d[.r32_float]\n"
+                                     "    normal: mut image_2d[.rg16_unorm]\n"
+                                     "\n"
+                                     "@compute(8, 8) fun store(@thread_id id: int3){outs}:\n"
+                                     "    outs.a[id.xy] = 0.25\n"
+                                     "    outs.b[id.xy] = -0.25\n"
+                                     "    outs.c[id.xy] = float2(0.25, 0.5)\n"
+                                     "    outs.d[id.xy] = outs.source[id.xy]\n"
+                                     "    outs.e[id.xy] = float4(1.0)\n"
+                                     "    outs.f[id.xy] = float4(-1.0)\n"
+                                     "\n"
+                                     "@compute(8, 8) fun flip(@thread_id id: int3){muts}:\n"
+                                     "    muts.normal[id.xy] = muts.normal[id.xy].yx\n";
+
 cc::string text_of(cc::string_view source, target t)
 {
     auto const e = emit_source(source, 0, t);
@@ -82,6 +110,195 @@ cc::string picked_text(cc::string_view format, target t)
     return r.value().text;
 }
 } // namespace
+
+TEST("sgl emit - a 16-bit normalized image's HLSL texel says unorm or snorm, and vulkan names its format")
+{
+    // EMIT-280 and EMIT-98: the texel names the normalization, and `[[vk::image_format]]` is DXC's spelling
+    auto const dx12 = text_of(k_norm16, target::hlsl_dx12);
+    CHECK(dx12.contains("RWTexture2D<unorm float> outs_a : register(u0, space0);\n"));
+    CHECK(dx12.contains("RWTexture2D<snorm float> outs_b : register(u1, space0);\n"));
+    CHECK(dx12.contains("RWTexture2D<unorm float2> outs_c : register(u2, space0);\n"));
+    CHECK(dx12.contains("RWTexture2D<snorm float2> outs_d : register(u3, space0);\n"));
+    CHECK(dx12.contains("RWTexture2D<unorm float4> outs_e : register(u4, space0);\n"));
+    CHECK(dx12.contains("RWTexture2D<snorm float4> outs_f : register(u5, space0);\n"));
+    CHECK(dx12.contains("RWTexture2D<snorm float2> outs_source : register(u6, space0);\n"));
+
+    auto const vulkan = text_of(k_norm16, target::hlsl_vulkan);
+    CHECK(vulkan.contains("[[vk::binding(0, 0)]] [[vk::image_format(\"r16\")]] RWTexture2D<unorm float> outs_a;\n"));
+    CHECK(vulkan.contains("[[vk::binding(1, 0)]] [[vk::image_format(\"r16snorm\")]] RWTexture2D<snorm float> "
+                          "outs_b;\n"));
+    CHECK(vulkan.contains("[[vk::binding(2, 0)]] [[vk::image_format(\"rg16\")]] RWTexture2D<unorm float2> outs_c;\n"));
+    CHECK(vulkan.contains("[[vk::binding(3, 0)]] [[vk::image_format(\"rg16snorm\")]] RWTexture2D<snorm float2> "
+                          "outs_d;\n"));
+    CHECK(vulkan.contains("[[vk::binding(4, 0)]] [[vk::image_format(\"rgba16\")]] RWTexture2D<unorm float4> "
+                          "outs_e;\n"));
+    CHECK(vulkan.contains("[[vk::binding(5, 0)]] [[vk::image_format(\"rgba16snorm\")]] RWTexture2D<snorm float4> "
+                          "outs_f;\n"));
+
+    // a `mut` one is the same type, and no other format's texel takes a qualifier
+    auto const flipped = emit_source(k_norm16, 1, target::hlsl_dx12);
+    CHECK(sgl::emit::dump_errors(flipped) == "");
+    CHECK(flipped.text.contains("RWTexture2D<float> muts_plain : register(u0, space0);\n"));
+    CHECK(flipped.text.contains("RWTexture2D<unorm float2> muts_normal : register(u1, space0);\n"));
+    CHECK(!text_of(k_copy, target::hlsl_dx12).contains("norm "));
+}
+
+TEST("sgl emit - WGSL and MSL write an out or read-only 16-bit normalized image, and refuse a mut one")
+{
+    // the texel format of texture-formats-tier1, which WGSL has as a language extension and so enables nothing
+    auto const wgsl = text_of(k_norm16, target::wgsl);
+    CHECK(wgsl.contains("var outs_a: texture_storage_2d<r16unorm, write>;\n"));
+    CHECK(wgsl.contains("var outs_b: texture_storage_2d<r16snorm, write>;\n"));
+    CHECK(wgsl.contains("var outs_c: texture_storage_2d<rg16unorm, write>;\n"));
+    CHECK(wgsl.contains("var outs_d: texture_storage_2d<rg16snorm, write>;\n"));
+    CHECK(wgsl.contains("var outs_e: texture_storage_2d<rgba16unorm, write>;\n"));
+    CHECK(wgsl.contains("var outs_f: texture_storage_2d<rgba16snorm, write>;\n"));
+    CHECK(wgsl.contains("var outs_source: texture_storage_2d<rg16snorm, read>;\n"));
+    CHECK(!wgsl.contains("enable"));
+
+    auto const msl = text_of(k_norm16, target::msl);
+    CHECK(msl.contains("    texture2d<float, access::write> outs_c [[id(2)]];\n"));
+    CHECK(msl.contains("    texture2d<float, access::read> outs_source [[id(6)]];\n"));
+
+    // EMIT-109: neither has a device with readwrite_norm16_image_formats, so the entry point that needs it has no text
+    CHECK(sgl::emit::dump_errors(emit_source(k_norm16, 1, target::wgsl))
+          == "target-lacks-feature flip needs readwrite_norm16_image_formats, which WebGPU does not have\n");
+    CHECK(sgl::emit::dump_errors(emit_source(k_norm16, 1, target::msl))
+          == "target-lacks-feature flip needs readwrite_norm16_image_formats, which Metal does not have\n");
+    // the entry point that only writes or reads them needs no such feature
+    CHECK(sgl::emit::dump_errors(emit_source(k_norm16, 0, target::wgsl)) == "");
+    // the native targets write it
+    CHECK(sgl::emit::dump_errors(emit_source(k_norm16, 1, target::hlsl_vulkan)) == "");
+}
+
+TEST("sgl emit - a mut 16-bit normalized image in a binding array, a generic or an option's format is refused and "
+     "qualified as a plain one is")
+{
+    // EMIT-109 looks through a binding array to its element, and HLSL's array keeps the element's qualifier
+    constexpr auto arrayed = "require extended_image_formats, readwrite_norm16_image_formats, binding_arrays\n"
+                             "\n"
+                             "binding many:\n"
+                             "    normals: mut image_2d[.rg16_snorm][4]\n"
+                             "\n"
+                             "@compute(8, 8) fun spread(@thread_id id: int3){many}:\n"
+                             "    many.normals[1].store(id.xy, -many.normals[0].load(id.xy))\n";
+    CHECK(text_of(arrayed, target::hlsl_dx12)
+              .contains("RWTexture2D<snorm float2> many_normals[4] : register(u0, space0);\n"));
+    CHECK(sgl::emit::dump_errors(emit_source(arrayed, 0, target::msl))
+              .contains("needs readwrite_norm16_image_formats, which Metal does not have"));
+
+    // a generic over the format takes the binding's image, and no text of it drops the qualifier
+    constexpr auto generic = "require extended_image_formats, readwrite_image_formats, readwrite_norm16_image_formats\n"
+                             "\n"
+                             "binding frames:\n"
+                             "    color: mut image_2d[.rgba16_unorm]\n"
+                             "\n"
+                             "fun copy_texel[f: pixel_format](img: mut image_2d[f], from: int2, to: int2):\n"
+                             "    img.store(to, img.load(from))\n"
+                             "\n"
+                             "@compute(8, 8) fun shuffle(@thread_id id: int3){frames}:\n"
+                             "    copy_texel(frames.color, id.xy, id.yx)\n";
+    auto const generic_dx12 = text_of(generic, target::hlsl_dx12);
+    CHECK(generic_dx12.contains("RWTexture2D<unorm float4> frames_color : register(u0, space0);\n"));
+    CHECK(!generic_dx12.contains("RWTexture2D<float4>"));
+    CHECK(sgl::emit::dump_errors(emit_source(generic, 0, target::wgsl))
+              .contains("needs readwrite_norm16_image_formats, which WebGPU does not have"));
+
+    // an option's format is the format the compile gave, judged and spelled as a written one
+    constexpr auto picked = "require extended_image_formats, readwrite_image_formats, readwrite_norm16_image_formats\n"
+                            "\n"
+                            "@option const out_format: pixel_format = .r32_float\n"
+                            "\n"
+                            "binding io:\n"
+                            "    picked: mut image_2d[out_format]\n"
+                            "\n"
+                            "@compute(8, 8) fun pick(@thread_id id: int3){io}:\n"
+                            "    io.picked[id.xy] = io.picked[id.xy]\n";
+    sgl::check::option_value const given[] = {{.name = "out_format", .value = cc::string(".rg16_unorm")}};
+    auto const native
+        = sgl::compile_to_text({.source = picked, .entry_point = "pick", .target = target::hlsl_dx12, .options = given});
+    REQUIRE(native.has_value()).dump("error", native.has_error() ? native.error() : cc::string());
+    CHECK(native.value().text.contains("RWTexture2D<unorm float2> io_picked : register(u0, space0);\n"));
+    for (auto const t : {target::wgsl, target::msl})
+    {
+        auto const refused
+            = sgl::compile_to_text({.source = picked, .entry_point = "pick", .target = t, .options = given});
+        REQUIRE(refused.has_error());
+        CHECK(refused.error().contains("needs readwrite_norm16_image_formats")).dump("error", refused.error());
+        // the default format reads and writes everywhere
+        CHECK(sgl::compile_to_text({.source = picked, .entry_point = "pick", .target = t}).has_value());
+    }
+}
+
+TEST("sgl emit - a mut 16-bit normalized image through a binding array, a generic or an option needs "
+     "readwrite_norm16_image_formats, and readwrite_image_formats neither grants it nor is needed beside it")
+{
+    struct shape
+    {
+        cc::string_view name;
+        cc::string_view body; // follows the `require` line
+        cc::string_view entry_point;
+        cc::string_view extra_feature;
+    };
+    shape const shapes[] = {
+        {.name = "arrayed",
+         .body = "binding many:\n"
+                 "    normals: mut image_2d[.rg16_snorm][4]\n"
+                 "\n"
+                 "@compute(8, 8) fun spread(@thread_id id: int3){many}:\n"
+                 "    many.normals[1].store(id.xy, -many.normals[0].load(id.xy))\n",
+         .entry_point = "spread",
+         .extra_feature = ", binding_arrays"},
+        {.name = "generic",
+         .body = "binding frames:\n"
+                 "    color: mut image_2d[.rgba16_unorm]\n"
+                 "\n"
+                 "fun copy_texel[f: pixel_format](img: mut image_2d[f], from: int2, to: int2):\n"
+                 "    img.store(to, img.load(from))\n"
+                 "\n"
+                 "@compute(8, 8) fun shuffle(@thread_id id: int3){frames}:\n"
+                 "    copy_texel(frames.color, id.xy, id.yx)\n",
+         .entry_point = "shuffle",
+         .extra_feature = ""},
+        {.name = "picked",
+         .body = "@option const out_format: pixel_format = .r32_float\n"
+                 "\n"
+                 "binding io:\n"
+                 "    picked: mut image_2d[out_format]\n"
+                 "\n"
+                 "@compute(8, 8) fun pick(@thread_id id: int3){io}:\n"
+                 "    io.picked[id.xy] = io.picked[id.xy]\n",
+         .entry_point = "pick",
+         .extra_feature = ""},
+    };
+    sgl::check::option_value const given[] = {{.name = "out_format", .value = cc::string(".rg16_unorm")}};
+    for (auto const& s : shapes)
+    {
+        auto const compile = [&](cc::string_view readwrite)
+        {
+            auto const source
+                = cc::format("require extended_image_formats, {}{}\n\n{}", readwrite, s.extra_feature, s.body);
+            return sgl::compile_to_text({.source = source,
+                                         .entry_point = s.entry_point,
+                                         .target = target::hlsl_dx12,
+                                         .options = s.name == "picked" ? cc::span<sgl::check::option_value const>(given)
+                                                                       : cc::span<sgl::check::option_value const>()});
+        };
+        // the norm16 feature alone grants it, and the entry point states it and not readwrite_image_formats
+        auto const granted = compile("readwrite_norm16_image_formats");
+        REQUIRE(granted.has_value())
+            .dump("shape", s.name)
+            .dump("error", granted.has_error() ? granted.error() : cc::string());
+        CHECK(granted.value().features.has(sgl::check::feature::readwrite_norm16_image_formats)).dump("shape", s.name);
+        CHECK(!granted.value().features.has(sgl::check::feature::readwrite_image_formats)).dump("shape", s.name);
+        // readwrite_image_formats does not stand in for it
+        auto const refused = compile("readwrite_image_formats");
+        REQUIRE(refused.has_error()).dump("shape", s.name);
+        CHECK(refused.error().contains("readwrite_norm16_image_formats"))
+            .dump("shape", s.name)
+            .dump("error", refused.error());
+    }
+}
 
 TEST("sgl emit - a coherent member is globallycoherent in HLSL, and device-coherent memory or a device-coherent "
      "texture in MSL")
