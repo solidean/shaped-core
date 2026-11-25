@@ -191,9 +191,12 @@ constexpr cc::string_view k_metadata_kinds[] = {
     "dx.dbg.varlayout",
     "dx.break.br",
     "dx.nonuniform",
+    "dx.precise",
 };
 /// The number of "dx.nonuniform" in `k_metadata_kinds`.
 constexpr u32 k_kind_nonuniform = 17;
+/// The number of "dx.precise" in `k_metadata_kinds`.
+constexpr u32 k_kind_precise = 18;
 constexpr u32 k_block_metadata_attachment = 16;
 constexpr u32 k_md_attachment = 11;
 
@@ -510,6 +513,7 @@ cc::vector<byte> module_builder::write(cc::string_view triple, cc::string_view l
         auto const relative = [&](u32 raw) -> u64 { return u64(next - local_number(raw)); };
         auto const signed_relative = [&](u32 raw) -> u64 { return signed_vbr(i64(next) - i64(local_number(raw))); };
         auto const block_number = [&](u32 raw) -> u64 { return u64(raw - first_block); };
+        // each attachment as its instruction's position, then its kind
         auto marked = cc::vector<u32>();
         auto position = u32(0);
         auto last_location = u32(0);
@@ -552,7 +556,15 @@ cc::vector<byte> module_builder::write(cc::string_view triple, cc::string_view l
                     continue;
                 }
                 if (inst.code == inst_code::element_pointer && inst.sub == k_ll_nonuniform)
+                {
                     marked.push_back(position);
+                    marked.push_back(k_kind_nonuniform);
+                }
+                if (inst.code == inst_code::call && inst.sub == k_ll_precise)
+                {
+                    marked.push_back(position);
+                    marked.push_back(k_kind_precise);
+                }
                 auto const args = cc::span<u32 const>(_args.data() + inst.first, isize(inst.count));
                 switch (inst.code)
                 {
@@ -707,8 +719,8 @@ cc::vector<byte> module_builder::write(cc::string_view triple, cc::string_view l
         if (!marked.empty())
         {
             out.enter_block(k_block_metadata_attachment, 3);
-            for (auto const at : marked)
-                out.record(k_md_attachment, {u64(at), u64(k_kind_nonuniform), u64(_nonuniform_node - 1)});
+            for (auto k = isize(0); k < marked.size(); k += 2)
+                out.record(k_md_attachment, {u64(marked[k]), u64(marked[k + 1]), u64(_one_node - 1)});
             out.exit_block();
         }
         out.exit_block();

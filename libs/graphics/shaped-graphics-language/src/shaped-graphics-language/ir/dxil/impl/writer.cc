@@ -422,13 +422,16 @@ void writer::lower_block(block_ref b)
             continue;
         }
         locate(_p.instructions[i]);
+        _guarantee = _p.instructions[i].guarantee;
         operation(i);
     }
     if (_failure.empty())
     {
         locate(_p.instructions[block.first + block.count - 1]);
+        _guarantee = _p.instructions[block.first + block.count - 1].guarantee;
         terminator(_p.instructions[block.first + block.count - 1]);
     }
+    _guarantee = check::float_level::fast;
 }
 
 void writer::terminator(instruction const& i)

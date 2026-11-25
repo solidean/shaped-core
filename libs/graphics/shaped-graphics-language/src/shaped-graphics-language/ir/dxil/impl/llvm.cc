@@ -675,14 +675,30 @@ ll_value module_builder::extract_value(ll_value aggregate, u32 index)
     return push(inst_code::extract_value, ll_type(_type_args[t.first + index]), args);
 }
 
-ll_value module_builder::call(ll_value callee, ll_type type, cc::span<ll_value const> args, bool is_stable)
+ll_value module_builder::call(
+    ll_value callee, ll_type type, cc::span<ll_value const> args, bool is_stable, bool is_precise)
 {
     auto raw = cc::vector<u32>::create_with_capacity(args.size() + 1);
     raw.push_back(u32(callee));
     for (auto const a : args)
         raw.push_back(u32(a));
     ++_call_count;
-    return push(inst_code::call, ll_type(_type_args[_types[isize(type)].first]), raw, 0, is_stable ? 1 : 0);
+    auto const result = ll_type(_type_args[_types[isize(type)].first]);
+    // DXC marks a call that gives a float, and none that gives an integer, a struct or nothing
+    auto const is_marked = is_precise && is_float(result);
+    if (is_marked)
+        (void)one_node();
+    return push(inst_code::call, result, raw, is_marked ? k_ll_precise : u8(0), is_stable ? 1 : 0);
+}
+
+u32 module_builder::one_node()
+{
+    if (_one_node == 0)
+    {
+        u32 const one[] = {md_i32(1)};
+        _one_node = md_node(one);
+    }
+    return _one_node;
 }
 
 ll_value module_builder::alloca_of(ll_type allocated, u32 alignment)
@@ -723,11 +739,8 @@ ll_value module_builder::element_pointer(ll_type source, ll_value base, cc::span
                     : element_of(element);
     }
     auto const space = u32(_types[isize(type_of(base))].number);
-    if (is_nonuniform && _nonuniform_node == 0)
-    {
-        u32 const one[] = {md_i32(1)};
-        _nonuniform_node = md_node(one);
-    }
+    if (is_nonuniform)
+        (void)one_node();
     return push(inst_code::element_pointer, pointer(element, space), raw, is_nonuniform ? k_ll_nonuniform : u8(0));
 }
 

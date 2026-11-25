@@ -509,6 +509,116 @@ TEST("slib - DXIL's float flags stand on each operation, and only `fast` lets a 
     CHECK(!compiler.value().validate(floored.value().dxil).has_value());
 }
 
+namespace
+{
+/// Calls of DXIL's operations that give a float, beside others, in an entry point of each guarantee.
+/// `beside` states nothing and calls nothing strict, though the module holds a strict function.
+constexpr cc::string_view k_calls = "binding work:\n"
+                                    "    values: mut buffer[float]\n"
+                                    "\n"
+                                    "fun shaped(a: float, b: float) -> float:\n"
+                                    "    return sqrt(abs(a)) + exp2(log2(abs(b)) * a) + saturate(a) * fract(b)\n"
+                                    "\n"
+                                    "@float(.precise) fun strict(a: float, b: float) -> float:\n"
+                                    "    return shaped(a, b)\n"
+                                    "\n"
+                                    "@compute(64) fun beside(@thread_id id: int3){work}:\n"
+                                    "    work.values[id.x] = shaped(work.values[0], work.values[1])\n"
+                                    "\n"
+                                    "@float(.precise) @compute(64) fun stated(@thread_id id: int3){work}:\n"
+                                    "    work.values[id.x] = shaped(work.values[0], work.values[1])\n"
+                                    "\n"
+                                    "@compute(64) fun inlined(@thread_id id: int3){work}:\n"
+                                    "    let a = work.values[0]\n"
+                                    "    work.values[id.x] = strict(a, work.values[1]) + sqrt(a)\n";
+
+struct call_marks
+{
+    /// Calls that give a float, and those of them `!dx.precise` marks.
+    int float_calls = 0;
+    int marked = 0;
+    /// Marks on a call that gives no float, which DXC never writes.
+    int stray = 0;
+};
+
+[[nodiscard]] call_marks marks_of(cc::string_view text)
+{
+    auto result = call_marks();
+    auto at = isize(0);
+    while (at < text.size())
+    {
+        auto end = text.find('\n', at);
+        if (end < 0)
+            end = text.size();
+        auto const line = text.subview({.start = at, .end = end});
+        at = end + 1;
+        if (!line.contains("@dx.op."))
+            continue;
+        auto const is_marked = line.contains("!dx.precise");
+        if (line.contains("call float @dx.op.") || line.contains("call half @dx.op.")
+            || line.contains("call double @dx.op."))
+        {
+            ++result.float_calls;
+            result.marked += is_marked ? 1 : 0;
+        }
+        else
+            result.stray += is_marked ? 1 : 0;
+    }
+    return result;
+}
+} // namespace
+
+TEST("slib - SGL's DXIL marks each float call of a strict entry point `!dx.precise`, as DXC does, and no other "
+     "(EMIT-NEW)")
+{
+    auto compiler = ssc::dxc::compiler::create();
+    if (compiler.has_error())
+        SKIP("no DXC");
+    auto const text_of = [&](cc::string_view entry, sgl::check::float_level floor = sgl::check::float_level::fast)
+    {
+        auto const e = sgl::compile_to_text({.source = k_calls,
+                                             .entry_point = entry,
+                                             .target = sgl::emit::target::hlsl_dx12,
+                                             .float_floor = floor,
+                                             .native = sgl::emit::native_route::require});
+        REQUIRE(e.has_value()).dump("entry", entry).dump("error", e.has_error() ? e.error() : cc::string());
+        CHECK(!compiler.value().validate(e.value().dxil).has_value()).dump("entry", entry);
+        auto const text = compiler.value().disassemble(e.value().dxil);
+        REQUIRE(text.has_value());
+        return text.value();
+    };
+
+    // at .fast no call carries the mark, and the arithmetic keeps its flags
+    auto const beside = text_of("beside");
+    auto const loose = marks_of(beside);
+    CHECK(loose.float_calls >= 5).dump("text", beside);
+    CHECK(loose.marked == 0).dump("text", beside);
+    CHECK(loose.stray == 0);
+    CHECK(beside.contains("fast float"));
+
+    // a guarantee the entry point states marks every call that gives a float, a thread id or a store none
+    auto const stated = text_of("stated");
+    auto const strict = marks_of(stated);
+    CHECK(strict.float_calls == loose.float_calls).dump("text", stated);
+    CHECK(strict.marked == strict.float_calls).dump("text", stated);
+    CHECK(strict.stray == 0).dump("text", stated);
+    CHECK(!stated.contains("fast float"));
+    // DXC's one node, which `dx.nonuniform` names too
+    CHECK(stated.contains("= !{i32 1}"));
+
+    // CHK-435: an entry point that inlines a strict function keeps that function's level, so its calls are marked too
+    auto const inlined = text_of("inlined");
+    auto const reached = marks_of(inlined);
+    CHECK(reached.float_calls > 0);
+    CHECK(reached.marked == reached.float_calls).dump("text", inlined);
+    CHECK(reached.stray == 0);
+
+    // and a request's floor marks them as if the entry point stated it
+    auto const floored = marks_of(text_of("beside", sgl::check::float_level::precise));
+    CHECK(floored.marked == floored.float_calls);
+    CHECK(floored.float_calls == loose.float_calls);
+}
+
 // AMD's DXIL compiler crashes on a module without it, though LLVM leaves it optional.
 // docs/bugs-external/amd-d3d12-dxil-without-llvm-ident-crashes has the reproduction.
 TEST("slib - every module SGL's DXIL writes names its producer in llvm.ident, a library's too")

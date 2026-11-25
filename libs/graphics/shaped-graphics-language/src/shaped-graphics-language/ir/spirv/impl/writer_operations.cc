@@ -408,6 +408,9 @@ void writer::frag_coord(instruction const& i, u32 id)
     emit(_code, spv::Load, {id_of(i.type), loaded, _elements + element});
     emit(_code, spv::CompositeExtract, {scalar, w, loaded, 3u});
     emit(_code, spv::FDiv, {scalar, reciprocal, one, w});
+    // the division is the operation's own, so it keeps its guarantee as the table's arithmetic does
+    if (i.guarantee != check::float_level::fast)
+        emit(_annotations, spv::Decorate, {reciprocal, spv::NoContraction});
     emit(_code, spv::CompositeInsert, {id_of(i.type), id, reciprocal, loaded, 3u});
 }
 

@@ -320,6 +320,25 @@ TEST("sgl spirv - an entry point's guarantee stands on each float operation it k
     CHECK(decorated(floored.value().spirv, 42) == 2);
 }
 
+TEST("sgl spirv - a pixel stage's position keeps its guarantee on the reciprocal it writes of w (EMIT-NEW)")
+{
+    // FragCoord's w is 1/w where the program reads w, so its one division is the program's own arithmetic
+    constexpr cc::string_view source = "struct link:\n"
+                                       "    @position position: hpos4\n"
+                                       "\n"
+                                       "@pixel fun loose_ps(l: link) -> float4 => float4(l.position.w)\n"
+                                       "\n"
+                                       "@float(.precise) @pixel fun strict_ps(l: link) -> float4 => float4(l.position.w)\n";
+    auto const loose = written(source, "loose_ps", sgl::emit::native_route::require);
+    auto const strict = written(source, "strict_ps", sgl::emit::native_route::require);
+    REQUIRE(loose.has_value()).dump("error", loose.has_error() ? loose.error() : cc::string());
+    REQUIRE(strict.has_value()).dump("error", strict.has_error() ? strict.error() : cc::string());
+    CHECK(counted(loose.value().spirv, 136) == 1); // OpFDiv
+    CHECK(counted(strict.value().spirv, 136) == 1);
+    CHECK(decorated(loose.value().spirv, 42) == 0);
+    CHECK(decorated(strict.value().spirv, 42) == 1);
+}
+
 TEST("sgl spirv - a vector scaled by a scalar builds no splat, and an if around little is a select")
 {
     auto const e = written("binding work:\n"

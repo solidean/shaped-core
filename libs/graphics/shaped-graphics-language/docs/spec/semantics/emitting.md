@@ -831,6 +831,12 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
   Each mode needs its device property, so a vulkan entry point needs the feature `float_specials` from `.specials` on, and `float_denormals` at `.ieee`.
   `wgsl` keeps `.fast` alone.
   A host may weaken a guarantee on WGSL alone, which compiles at `.fast` with the warning `float-guarantee-weakened`.
+* **EMIT-NEW** A native route keeps each operation's float guarantee (CHK-435) on the operation itself, as DXC marks what it compiles with `-Gis`.
+  Above `.fast`, DXIL writes no fast-math flag on a float instruction, and marks each call of a DXIL operation that gives a float `!dx.precise`, naming one `!{i32 1}`.
+  A driver may fold a call without the mark, `Exp` of `Log` of `x` to `x` among them, which the level forbids (measured on NVIDIA).
+  SPIR-V decorates each float arithmetic instruction `NoContraction`, the products and dot products among them, and writes an extended instruction undecorated, as DXC does.
+  At `.fast` neither route marks anything, and DXIL's float instructions carry `fast`.
+  What no single operation states, the denormals and SPIR-V's float execution modes, stays the entry point's.
 * **EMIT-186** HLSL writes `!=` of float or half lanes as `!(a == b)`, and a whole vector's as `any(!(a == b))`, which is true where either is a NaN.
   DXC lowers HLSL's own float `!=` to SPIR-V as `OpFOrdNotEqual`, false for a NaN, where DXIL's is unordered; the negated `==` is unordered on both.
   WGSL and MSL write `!=`, which is unordered in both.
