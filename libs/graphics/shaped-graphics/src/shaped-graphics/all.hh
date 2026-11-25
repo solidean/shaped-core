@@ -22,6 +22,7 @@
 #include <shaped-graphics/compute/compute_pipeline.hh>
 #include <shaped-graphics/context/cached.hh>
 #include <shaped-graphics/context/context.hh>
+#include <shaped-graphics/context/known_issues.hh>
 #include <shaped-graphics/context/persistent.hh>
 #include <shaped-graphics/context/pipeline_cache.hh>
 #include <shaped-graphics/context/transient.hh>

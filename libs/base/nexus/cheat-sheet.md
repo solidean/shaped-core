@@ -100,6 +100,12 @@ TEST("corpus soak", thorough_only,                  // `dev.py check` runs this 
 ```
 
 A flag, not a bucket: the test runs either way, and `manual` is not where a thorough test goes.
+
+```cpp
+nx::skip_known_issue(id, symptom);      // SKIP for the external bug docs/bugs-external/<id>, reason `known issue <id>: …`;
+                                        //   under --known-issues / `dev.py test --known-issues` it returns and the test runs on
+nx::runs_known_issues()                 // true under --known-issues; sg::known_issue_affecting decides whether a context has the bug
+```
 [docs/test-runtime.md](docs/test-runtime.md) has the rules.
 
 ## The source tree (`nx::source_root`)

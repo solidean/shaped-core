@@ -70,6 +70,10 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
                    help="Let a heavy test narrow to its smallest case, as `check` asks of every preset but its default "
                         "one: tests read it through nx::is_smoke(). Forwarded to the runner as --smoke; "
                         "--thorough wins over it.")
+    p.add_argument("--known-issues", action="store_true",
+                   help="Run the tests a known external bug would skip (nx::skip_known_issue), to see whether each "
+                        "still reproduces: a pass says its docs/bugs-external entry may retire. "
+                        "Forwarded to the runner as --known-issues.")
     p.add_argument("--shard", metavar="K/N",
                    help="Run only shard K of N, 0-based: each test lands in one shard by a hash of its name, the "
                         "same on every run, and an aliased driver's children (a backend's context, say) are placed "
@@ -139,6 +143,8 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
         runner_args = ["--thorough", *runner_args]
     if args.smoke:
         runner_args = ["--smoke", *runner_args]
+    if args.known_issues:
+        runner_args = ["--known-issues", *runner_args]
 
     # An explicit --timeout always wins, 0 included; only the default scales with --thorough.
     timeout = args.timeout

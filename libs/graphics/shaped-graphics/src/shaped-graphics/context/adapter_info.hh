@@ -24,6 +24,13 @@ struct sg::adapter_info
     /// and a vendor is free to change its own encoding.
     /// Empty where the backend cannot report one, which must read as "unknown" rather than as a version.
     cc::string driver_version;
+    /// Which driver this is, where the backend can tell: vulkan's `driverName`, such as "radv" or "NVIDIA".
+    /// Empty elsewhere; on dx12 the vendor id is what tells the drivers apart.
+    cc::string driver_name;
+    /// The driver's own description of its build, where the backend reports one: vulkan's `driverInfo`, such as
+    /// "Mesa 26.2.0-devel (git-5c65d4fc31)".
+    /// Free text: match the prefix a known issue names, never parse it.
+    cc::string driver_info;
 
     /// Memory physically on the card, as the adapter reports it.
     ///

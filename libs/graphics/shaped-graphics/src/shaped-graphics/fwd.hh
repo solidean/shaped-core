@@ -42,6 +42,7 @@ class stream_source;                  // the lazy chunk sequence feeding a strea
 
 class context;
 struct adapter_info;               // which GPU a context runs on (see context/adapter_info.hh)
+struct known_issue;                // a driver bug docs/bugs-external reproduces (see context/known_issues.hh)
 struct cold_caches;                // which persistent caches a process runs cold (see context/cold_caches.hh)
 enum class feature;                // a capability a context has or has not (see context/capabilities.hh)
 enum class feature_implementation; // whether a context has a feature natively, emulated or not at all (see context/capabilities.hh)
@@ -148,6 +149,7 @@ struct gpu_buffer_ref;               // value type — SGL's accel.buffer_ref, a
 struct gpu_clas_triangles;           // value type — SGL's accel.clas_triangles, opaque on the host
 
 struct reserved_binding_address;
+struct known_issue;
 } // namespace sg
 
 /// Index-buffer element width — shared by draw index buffers (index_buffer_view) and raytracing BLAS

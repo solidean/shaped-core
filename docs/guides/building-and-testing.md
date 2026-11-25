@@ -960,6 +960,7 @@ A low load under a low `serial` is waiting on something no test declared.
 A test marked `thorough_only` runs only then, and the per-binary timeout grows tenfold to 600 s unless `--timeout` is given.
 `uv run dev.py test --smoke` is the other direction: a heavy test narrows to its smallest case under `nx::is_smoke()`, and `check --all-presets` runs every preset but its default one so.
 [nexus' test-runtime](../../libs/base/nexus/docs/test-runtime.md) is the concept.
+`uv run dev.py test --known-issues` runs the tests a known driver bug would skip, so a pass says its [bugs-external](../bugs-external/_index.md) entry may retire.
 
 `uv run dev.py test "<filter>" --sample` profiles what it runs.
 Each binary samples its threads until the run ends and prints where the busy time went, by self and by total, keeping the recording as `<binary>.ccrec` beside it.

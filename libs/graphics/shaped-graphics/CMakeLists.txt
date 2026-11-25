@@ -46,6 +46,7 @@ add_library(shaped-graphics
     src/shaped-graphics/context/cold_caches.cc
     src/shaped-graphics/context/native_debug_info.cc
     src/shaped-graphics/context/gpu_selector.cc
+    src/shaped-graphics/context/known_issues.cc
     src/shaped-graphics/present/swapchain.cc
     src/shaped-graphics/routine/reload_generation.cc
     src/shaped-graphics/routine/render_routine.cc
@@ -149,6 +150,7 @@ target_sources(shaped-graphics
     src/shaped-graphics/binding/binding_group_layout.hh
     src/shaped-graphics/binding/pipeline_layout.hh
     src/shaped-graphics/context/adapter_info.hh
+    src/shaped-graphics/context/known_issues.hh
     src/shaped-graphics/context/gpu_metrics.hh
     src/shaped-graphics/context/metrics.hh
     src/shaped-graphics/binding/compiled_shader.hh
@@ -326,6 +328,7 @@ if(SC_BUILD_TESTS)
         target_sources(shaped-graphics-test PRIVATE
             tests/backends/backends.cc
             tests/context/context-test.cc
+            tests/context/known-issues-test.cc
             tests/context/metrics-test.cc
             tests/context/cold-caches-test.cc
             tests/context/native-debug-info-test.cc

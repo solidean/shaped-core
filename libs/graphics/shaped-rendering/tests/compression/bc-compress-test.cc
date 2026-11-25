@@ -473,6 +473,8 @@ ASYNC_INVOCABLE_TEST("sr - BC7 compression reproduces every two-subset partition
     auto constexpr bc7 = sg::pixel_format::bc7_rgba_unorm;
     if (!sr::bc_compress_routine::can_compress(ctx, sg::pixel_format::rgba8_unorm, bc7))
         SKIP("this device has no BC textures");
+    if (auto const* issue = sg::known_issue_affecting(ctx, "radv-aco-scheduler-wrong-bc7-indices"))
+        nx::skip_known_issue(issue->id, issue->symptom);
     co_await prewarm(ctx, {bc7});
 
     // Two ramps per block that only partition p fits: a mode 3 endpoint holds 8 bits with its p-bit, so at most that
