@@ -26,7 +26,10 @@ What would make SGL keep its word:
 - Or EVAL-96 states the conversion's rounding as nearest or toward zero, the target's, as it does a builtin's precision.
   The interpreter's bounding run would then give a conversion both, and `half_math.sgl` would hold every conforming GPU, AMD's included.
 
-Sources: [Direct3D data conversion rules](https://learn.microsoft.com/en-us/windows/win32/direct3d10/d3d10-graphics-programming-guide-resources-data-conversion), [f32tof16](https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/f32tof16--sm5---asm-), [VkPhysicalDeviceFloatControlsProperties](https://docs.vulkan.org/refpages/latest/refpages/source/VkPhysicalDeviceFloatControlsProperties.html).
+Sources:
+- [Direct3D data conversion rules](https://learn.microsoft.com/en-us/windows/win32/direct3d10/d3d10-graphics-programming-guide-resources-data-conversion)
+- [f32tof16](https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/f32tof16--sm5---asm-)
+- [VkPhysicalDeviceFloatControlsProperties](https://docs.vulkan.org/refpages/latest/refpages/source/VkPhysicalDeviceFloatControlsProperties.html)
 
 Until then `half_math.sgl`'s `known amd dx12` and `known amd vulkan` lines log the divergence rather than fail it, and fail once AMD agrees.
 No refresh is to remove the finding.
