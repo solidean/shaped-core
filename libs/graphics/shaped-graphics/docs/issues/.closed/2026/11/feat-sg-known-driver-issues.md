@@ -8,8 +8,8 @@ refs:
   - file: libs/graphics/shaped-rendering/tests/debug-output-test.cc
   - file: libs/graphics/shaped-graphics/tests/pipeline/pixel-semantics-test.cc
   - file: libs/graphics/shaped-graphics/tests/pipeline/raytracing-pipeline-test.cc
-claimed-by: Claude (for Philip Trettner)
-claimed-at: 2026-11-25T04:50Z
+closed: 2026-11-25
+resolution: fixed
 ---
 
 # Known driver bugs as one registry that tests skip by, and that a run can still try
