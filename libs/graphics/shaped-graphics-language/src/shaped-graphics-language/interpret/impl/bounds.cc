@@ -85,6 +85,8 @@ struct call_shape
 {
     bool is_conversion = false;
     bool is_product = false;
+    /// An elementwise `/`, which a target may compute through a reciprocal.
+    bool is_quotient = false;
     /// 1 for an elementwise `+`, -1 for an elementwise `-` of two operands, 0 for anything else.
     i32 sum_sign = 0;
     /// A sum of products a GPU may round step by step and in any order: a `dot`, a matrix product.
@@ -101,6 +103,7 @@ struct call_shape
     for (auto const& p : record.parameters)
         has_matrix = has_matrix || cc::string_view(p).starts_with("mat");
     shape.is_product = is_times && !has_matrix;
+    shape.is_quotient = signature.contains("@operator(\"/\")") && !has_matrix;
     shape.is_dot = record.name == "dot" || (is_times && has_matrix);
     if (record.parameters.size() == 2)
         shape.sum_sign = signature.contains("@operator(\"+\")") ? 1 : signature.contains("@operator(\"-\")") ? -1 : 0;
@@ -132,6 +135,19 @@ struct call_shape
     if (!operands_of(record, in.size(), j, lanes, a, b))
         return cc::bit_cast<f64>(0x7ff8'0000'0000'0000ull);
     return f64(in[a].as_float()) * f64(in[b].as_float());
+}
+
+/// Result `j` of a `/` computed as its left operand times its right one's reciprocal, each rounded to a float, as a
+/// compiler folds a constant divisor; NaN where `record` has no such operands.
+/// A GPU's own reciprocal may be less precise than this rounded one, which is its builtin's precision and not modeled.
+[[nodiscard]] f32 through_reciprocal(builtins::function_record const& record, cc::span<scalar const> in, isize j, isize lanes)
+{
+    auto a = isize(0);
+    auto b = isize(0);
+    if (!operands_of(record, in.size(), j, lanes, a, b))
+        return cc::bit_cast<f32>(0x7fc0'0000u);
+    auto const reciprocal = 1.0f / in[b].as_float();
+    return in[a].as_float() * reciprocal;
 }
 
 /// A sum a reassociating target may add in any order, as `scalar::terms` and its neighbors keep it, in doubles.
@@ -202,15 +218,23 @@ struct sum_chain
     return builtins::impl::float_of_half_bits((bits & 0x8000u) | ((bits & 0x7fffu) - 1));
 }
 
-void add_result(hull& h, f32 wide, f64 product, value_kind kind, call_shape shape, impl::float_licenses licenses)
+void add_result(hull& h, f32 wide, f64 product, f32 reciprocal, value_kind kind, call_shape shape, impl::float_licenses licenses)
 {
     auto const rounded = kind == value_kind::scalar_half
                            ? builtins::impl::float_of_half_bits(builtins::impl::half_bits_of(wide))
                            : wide;
     h.add(rounded);
-    if (kind == value_kind::scalar_half && licenses.keeps_half_at_float && !shape.is_conversion)
+    if (kind == value_kind::scalar_half && licenses.keeps_half_at_float)
         h.add(wide);
-    // EVAL-96: a conversion to a half rounds to nearest or toward zero, as its target does, at every level
+    if (licenses.divides_through_reciprocal && reciprocal == reciprocal && is_finite(reciprocal))
+    {
+        h.add(kind == value_kind::scalar_half
+                  ? builtins::impl::float_of_half_bits(builtins::impl::half_bits_of(reciprocal))
+                  : reciprocal);
+        if (kind == value_kind::scalar_half && licenses.keeps_half_at_float)
+            h.add(reciprocal);
+    }
+    // EVAL-96: a conversion to a half rounds to nearest or toward zero, as its target does
     if (kind == value_kind::scalar_half && shape.is_conversion && is_finite(wide))
         h.add(half_toward_zero(wide));
     if (kind == value_kind::scalar_float && licenses.contracts && product == product && is_finite(wide))
@@ -255,8 +279,9 @@ struct varied
 
 impl::float_licenses impl::licenses_of(float_level level)
 {
-    return {.keeps_half_at_float = level == float_level::fast,
+    return {.keeps_half_at_float = level == float_level::fast || level == float_level::specials,
             .contracts = level == float_level::fast || level == float_level::specials,
+            .divides_through_reciprocal = level == float_level::fast || level == float_level::specials,
             .flushes_denormals = level != float_level::ieee,
             .reassociates = level == float_level::fast || level == float_level::specials};
 }
@@ -360,7 +385,9 @@ void impl::bound_call(builtins::function_record const& record,
             {
                 auto const product = shape.is_product ? exact_product(record, in, j, results.size())
                                                       : cc::bit_cast<f64>(0x7ff8'0000'0000'0000ull);
-                add_result(into[j], out[j].as_float(), product, results[j].kind, shape, licenses);
+                auto const reciprocal = shape.is_quotient ? through_reciprocal(record, in, j, results.size())
+                                                          : cc::bit_cast<f32>(0x7fc0'0000u);
+                add_result(into[j], out[j].as_float(), product, reciprocal, results[j].kind, shape, licenses);
             }
             else if (out[j].narrowed_to(results[j].kind) != results[j])
                 is_undecided[j] = true;

@@ -207,7 +207,7 @@ struct sgl::check::run_limits
     cc::atomic<bool> const* stop = nullptr;
     /// A bounding run: each float and half leaf also carries the range a GPU may give for it under the entry point's
     /// `@float` level (EVAL-6), `scalar::is_ranged`; the exact values are those of a run without it.
-    /// Modeled are a half operation kept at a float's precision, contraction, reassociation, a sum of products rounded
+    /// Modeled are a half kept at a float's precision, contraction, a quotient through its divisor's reciprocal, reassociation, a sum of products rounded
     /// step by step, and flushed denormals.
     /// A builtin's own precision is not, nor what a texture read, a subgroup operation, a derivative or an atomic does
     /// to a range: each takes its arguments' exact values and gives exact results.

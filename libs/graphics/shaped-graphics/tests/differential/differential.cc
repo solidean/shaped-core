@@ -93,13 +93,13 @@ constexpr isize k_named_elements = 4;
 }
 
 /// Whether `b` is within `t` of the range `least` to `most`; a range with an infinite end bounds nothing.
-/// Held `exact`, `b` must be one of the ends, bit for bit: a file held exact ranges only its alternatives, a
-/// conversion's two roundings above all, and a value between those is no rounding of the conversion.
-[[nodiscard]] bool within_range(f32 least, f32 most, u32 b, sg_diff::tolerance t)
+/// Held `exact` where the range is no hull, `b` must be one of the ends, bit for bit: the range is then a conversion's
+/// two roundings, and a value between those is no rounding of the conversion.
+[[nodiscard]] bool within_range(f32 least, f32 most, u32 b, sg_diff::tolerance t, bool is_hull)
 {
     if (least - least != 0.0f || most - most != 0.0f)
         return true;
-    if (t.kind == sg_diff::tolerance::measure::exact)
+    if (t.kind == sg_diff::tolerance::measure::exact && !is_hull)
         return b == cc::bit_cast<u32>(least) || b == cc::bit_cast<u32>(most);
     if (is_nan_bits(b))
         return false;
@@ -454,7 +454,7 @@ cc::vector<cc::string> sg_diff::differences(run_result const& a, run_result cons
             auto const least = is_bounded ? x.bounds[2 * e] : 0.0f;
             auto const most = is_bounded ? x.bounds[2 * e + 1] : 0.0f;
             auto const is_ranged = is_bounded && least == least && most == most;
-            if (is_ranged ? within_range(least, most, ys[e], kept) : within(xs[e], ys[e], kept))
+            if (is_ranged ? within_range(least, most, ys[e], kept, a.ranges_are_hulls) : within(xs[e], ys[e], kept))
                 continue;
             if (differing < k_named_elements)
                 named.appendf("{}[{}] {} against {}{}", named.empty() ? "" : ", ", e, text_of(ys[e], kept),

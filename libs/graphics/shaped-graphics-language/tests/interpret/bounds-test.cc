@@ -52,26 +52,32 @@ constexpr cc::string_view k_cancelling = "    let a = io.input[0] as half\n"
                                          "    io.output[1] = (a * b) as float\n";
 } // namespace
 
-TEST("sgl interpret bounds - at fast a half operation may keep a float's precision, and its range holds both")
+TEST("sgl interpret bounds - a half operation may keep a float's precision where its level may contract")
 {
     // half_arithmetic.sgl's element 115, which Intel's Arc computes at a float's precision
-    auto const r = run_bounded(k_cancelling, floats(30.984375f, 0.99560546875f), 2);
-    CHECK(r.value(0) == -0.140625f);
-    CHECK(r.holds(0, -0.140625f));
-    // the product kept at a float's precision, then the subtraction too, and that rounded to a half at the end
-    CHECK(r.holds(0, 30.984375f * 0.99560546875f - 30.984375f));
-    CHECK(r.holds(0, -0.1361083984375f));
-    CHECK(r.most(0) - r.least(0) < 0.01f);
-    // a product of two halves is exact in a float, which its range reaches
-    CHECK(r.holds(1, 30.984375f * 0.99560546875f));
+    for (auto const level : {sgl::check::float_level::fast, sgl::check::float_level::specials})
+    {
+        auto const r = run_bounded(k_cancelling, floats(30.984375f, 0.99560546875f), 2, level);
+        CHECK(r.value(0) == -0.140625f);
+        CHECK(r.holds(0, -0.140625f));
+        // the product kept at a float's precision, then the subtraction too, and that rounded to a half at the end
+        CHECK(r.holds(0, 30.984375f * 0.99560546875f - 30.984375f));
+        CHECK(r.holds(0, -0.1361083984375f));
+        CHECK(r.most(0) - r.least(0) < 0.01f);
+        // a product of two halves is exact in a float, which its range reaches
+        CHECK(r.holds(1, 30.984375f * 0.99560546875f));
+    }
 }
 
-TEST("sgl interpret bounds - above fast a half operation rounds, so its range is its value")
+TEST("sgl interpret bounds - at precise and above a half operation rounds, so its range is its value")
 {
-    auto const r = run_bounded(k_cancelling, floats(30.984375f, 0.99560546875f), 2, sgl::check::float_level::precise);
-    CHECK(r.value(0) == -0.140625f);
-    CHECK(r.is_exact(0));
-    CHECK(r.is_exact(1));
+    for (auto const level : {sgl::check::float_level::precise, sgl::check::float_level::ieee})
+    {
+        auto const r = run_bounded(k_cancelling, floats(30.984375f, 0.99560546875f), 2, level);
+        CHECK(r.value(0) == -0.140625f);
+        CHECK(r.is_exact(0));
+        CHECK(r.is_exact(1));
+    }
 }
 
 TEST("sgl interpret bounds - the level a test reaches is the one a bounding run takes")
@@ -97,6 +103,20 @@ TEST("sgl interpret bounds - a conversion to a half rounds to nearest or toward 
     CHECK(exact.is_exact(0));
 }
 
+TEST("sgl interpret bounds - a conversion to a half may keep a float's precision where its level may contract")
+{
+    // 0.2999 rounds to 0.2998046875 either way, so only the unrounded float lies beyond the halves' range
+    for (auto const level : {sgl::check::float_level::fast, sgl::check::float_level::specials})
+    {
+        auto const r = run_bounded("    io.output[0] = (io.input[0] as half) as float\n", floats(0.2999f), 1, level);
+        CHECK(r.value(0) == 0.2998046875f);
+        CHECK(r.least(0) == 0.2998046875f);
+        CHECK(r.most(0) == 0.2999f);
+    }
+    for (auto const level : {sgl::check::float_level::precise, sgl::check::float_level::ieee})
+        CHECK(run_bounded("    io.output[0] = (io.input[0] as half) as float\n", floats(0.2999f), 1, level).is_exact(0));
+}
+
 TEST("sgl interpret bounds - a float product may be left unrounded, as a contraction keeps it, above precise alone")
 {
     auto const body = "    io.output[0] = io.input[0] * io.input[1]\n"
@@ -115,6 +135,22 @@ TEST("sgl interpret bounds - a float product may be left unrounded, as a contrac
 
     auto const precise = run_bounded(body, floats(1.1f, 3.3f, 2.0f, 3.0f), 3, sgl::check::float_level::precise);
     CHECK(precise.is_exact(0));
+}
+
+TEST("sgl interpret bounds - a quotient may be computed through its divisor's reciprocal, above precise alone")
+{
+    // half_math.sgl's x / 3.0 on RADV, which multiplies by the float nearest a third
+    auto const x = cc::bit_cast<f32>(0xbf1f'5056u);
+    auto const through = x * (1.0f / 3.0f);
+    REQUIRE(through != x / 3.0f);
+    for (auto const level : {sgl::check::float_level::fast, sgl::check::float_level::specials})
+    {
+        auto const r = run_bounded("    io.output[0] = io.input[0] / 3.0\n", floats(x), 1, level);
+        CHECK(r.value(0) == x / 3.0f);
+        CHECK(r.holds(0, through));
+    }
+    CHECK(
+        run_bounded("    io.output[0] = io.input[0] / 3.0\n", floats(x), 1, sgl::check::float_level::precise).is_exact(0));
 }
 
 TEST("sgl interpret bounds - a denormal may flush to zero, except at ieee")

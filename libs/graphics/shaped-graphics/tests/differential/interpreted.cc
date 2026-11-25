@@ -67,6 +67,14 @@ f32 const k_nan = cc::bit_cast<f32>(0x7fc0'0000u);
     return count;
 }
 
+/// Whether `e`'s ranges hold every value between their ends at the level it reaches under `floor`.
+/// That is where a half may keep a float's precision (EVAL-96), at `fast` and `specials`.
+[[nodiscard]] bool ranges_are_hulls(sgl::check::flat_entry_point const& e, sgl::check::float_level floor)
+{
+    auto const level = u8(floor) > u8(e.float_guarantee) ? floor : e.float_guarantee;
+    return u8(level) <= u8(sgl::check::float_level::specials);
+}
+
 /// Sets `v`'s first `parts.size()` scalars, each of the kind its type gives it.
 void fill_value(sgl::check::value& v, cc::span<i64 const> parts)
 {
@@ -132,7 +140,7 @@ cc::result<sg_diff::run_result> pixels_interpreted(sg_diff::workload const& w,
             }
         }
 
-    auto result = sg_diff::run_result();
+    auto result = sg_diff::run_result{.ranges_are_hulls = ranges_are_hulls(e, floor)};
     result.unbounded = unbounded_in(bounds);
     result.outputs.push_back({.name = half.outputs.empty() ? cc::string("color") : half.outputs[0].name,
                               .bytes = cc::vector<byte>::create_copy_of(cc::span<u32 const>(texels).as_bytes()),
@@ -222,7 +230,7 @@ cc::result<sg_diff::run_result> sg_diff::interpreted(workload const& w, sg::cont
         write_back(m, o, half.bindings);
     }
 
-    auto result = run_result();
+    auto result = run_result{.ranges_are_hulls = ranges_are_hulls(*e, floor)};
     for (auto const& out : half.outputs)
     {
         auto made = sg_diff::output{.name = out.name, .bytes = cc::vector<byte>::create_copy_of(out.bytes)};

@@ -19,7 +19,7 @@ The ladder, from loosest to strictest; each level licenses what is listed and ev
 | level | the target may, beyond the exact meaning |
 |---|---|
 | `fast` | assume no NaN or infinity arises, ignore the sign of zero, reassociate, contract into a fused multiply-add, divide through a reciprocal, flush denormals, keep a half's result at a float's precision |
-| `specials` | reassociate, contract, divide through a reciprocal, flush denormals |
+| `specials` | reassociate, contract, divide through a reciprocal, flush denormals, keep a half's result at a float's precision |
 | `precise` | flush denormals |
 | `ieee` | nothing, but the builtins' own stated precision |
 

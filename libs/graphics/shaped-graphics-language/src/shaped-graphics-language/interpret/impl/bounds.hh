@@ -11,17 +11,22 @@ namespace sgl::check::impl
 /// What a level licenses that a bounding run models; a builtin's own precision is not among them.
 struct float_licenses
 {
-    /// A half operation's result kept at a float's precision rather than rounded to a half (EVAL-96); a conversion
-    /// still rounds.
+    /// A half's result, an operation's or a conversion's, kept at a float's precision rather than rounded to a half
+    /// (EVAL-96).
     bool keeps_half_at_float = false;
     /// A float product left unrounded, as a fused multiply-add keeps it.
     bool contracts = false;
+    /// A quotient computed as a product with the divisor's reciprocal.
+    bool divides_through_reciprocal = false;
     /// A denormal argument or result taken as zero.
     bool flushes_denormals = false;
     /// A sum added in any order: what `+` and `-` chain together, `scalar::terms`.
     bool reassociates = false;
 
-    [[nodiscard]] bool is_any() const { return keeps_half_at_float || contracts || flushes_denormals || reassociates; }
+    [[nodiscard]] bool is_any() const
+    {
+        return keeps_half_at_float || contracts || divides_through_reciprocal || flushes_denormals || reassociates;
+    }
 };
 
 [[nodiscard]] float_licenses licenses_of(float_level level);

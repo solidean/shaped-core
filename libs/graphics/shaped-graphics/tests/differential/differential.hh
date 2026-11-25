@@ -154,6 +154,10 @@ struct sg_diff::run_result
     /// The interpreter's alone: how many output elements it bounds by nothing, after a branch or an index it could not
     /// decide, which any GPU result passes.
     isize unbounded = 0;
+    /// The interpreter's alone: whether a range holds every value between its ends, as it does at a level where a half
+    /// may keep a float's precision (EVAL-96).
+    /// Elsewhere a file held `exact` ranges only a conversion's two roundings, and an element must be one of the ends.
+    bool ranges_are_hulls = false;
 };
 
 /// What a setup binds for SGL's interpreter, which runs a dispatch one invocation after another.

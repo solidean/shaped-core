@@ -143,8 +143,9 @@ Every configuration is held to that range, and the file's `across` bound applies
 a builtin's own precision, and a texture read, a subgroup operation, a derivative or an atomic, each of which takes its arguments exactly.
 The test says at info how much of `across` each file used against the interpreter, beyond its ranges, over every configuration it holds no known divergence for.
 That number is how far a file's tolerance carries what the ranges leave out, and 0 says the ranges hold everything.
-A file held `exact` passes a ranged element only where it equals one end of its range, bit for bit.
-Its ranges are alternatives, a conversion's two roundings above all, and a value between them is no rounding of it: Intel's dx12 returns one.
+A file held `exact` passes a ranged element anywhere in its range at `fast` and `specials`, where a half may keep a float's precision and the range is a hull.
+At `precise` and `ieee` it passes only where it equals one end, bit for bit.
+The range there is a conversion's two roundings, and a value between them is no rounding of it: Intel's dx12, NVIDIA's vulkan on an RTX 4090 and RADV return one.
 So does a construct a device runs natively, the trace above all: its emulated form is the interpreter's stand-in for the hardware, whose precision is its own.
 
 ### The strict-floor twin

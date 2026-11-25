@@ -2,11 +2,13 @@
 // differential: across exact
 // differential: known amd dx12 debt-sg-diff-gpu-comparisons-hold-a-conversion-to-one-rounding across
 // differential: known amd vulkan debt-sg-diff-gpu-comparisons-hold-a-conversion-to-one-rounding across
-// differential: known intel dx12 bug-sg-diff-half-corpus-fails-on-intel
+// differential: known intel dx12 bug-sg-diff-half-corpus-fails-on-intel across
 // differential: known intel dx12 bug-sg-diff-half-corpus-fails-on-intel precise
-// differential: known nvidia vulkan bug-sg-diff-half-math-unrounded-on-nvidia-vulkan
-// EVAL-96 rounds a float converted to a half once, to nearest or toward zero as the target does, at every level: one of two halves.
-// AMD converts toward zero, as D3D and Vulkan allow, and Intel's dx12 and NVIDIA's vulkan fold the round trip away, which neither allows.
+// differential: known nvidia vulkan bug-sg-diff-half-math-unrounded-on-nvidia-vulkan across
+// differential: known nvidia vulkan bug-sg-diff-half-math-unrounded-on-nvidia-vulkan precise
+// EVAL-96 rounds a float converted to a half once, to nearest or toward zero as the target does: one of two halves.
+// At `fast` and `specials` it may keep a float's precision instead, as Intel's dx12, NVIDIA's vulkan and RADV do by folding the round trip.
+// AMD's own drivers convert toward zero, as D3D and Vulkan allow.
 // Half-precision math as a bandwidth-bound or mobile shader writes it starts here: floats converted to halves, read and computed.
 // The operations on halves are half_arithmetic.sgl's, since `.fast` lets them keep a float's precision.
 require shader_f16
