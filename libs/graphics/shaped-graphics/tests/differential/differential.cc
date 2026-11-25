@@ -69,6 +69,28 @@ constexpr isize k_named_elements = 4;
     return (delta < 0 ? -delta : delta) <= t.amount * scale;
 }
 
+/// How much of a tolerance of `measure` holding `b` to `a` takes: 0 where they are equal, infinity where none does.
+[[nodiscard]] double needed(u32 a, u32 b, sg_diff::tolerance::measure measure)
+{
+    if (a == b)
+        return 0;
+    auto const never = cc::bit_cast<f64>(0x7ff0'0000'0000'0000ull);
+    if (measure == sg_diff::tolerance::measure::exact || is_nan_bits(a) || is_nan_bits(b))
+        return is_nan_bits(a) && is_nan_bits(b) ? 0 : never;
+    if (measure == sg_diff::tolerance::measure::ulps)
+    {
+        auto const apart = ordered(a) - ordered(b);
+        return double(apart < 0 ? -apart : apart);
+    }
+    auto const fa = double(cc::bit_cast<f32>(a));
+    auto const fb = double(cc::bit_cast<f32>(b));
+    if (fa - fa != 0.0 || fb - fb != 0.0)
+        return never;
+    auto const scale = cc::max(1.0, cc::max(fa < 0 ? -fa : fa, fb < 0 ? -fb : fb));
+    auto const delta = fa - fb;
+    return (delta < 0 ? -delta : delta) / scale;
+}
+
 /// Whether `b` is within `t` of the range `least` to `most`; a range with an infinite end bounds nothing.
 [[nodiscard]] bool within_range(f32 least, f32 most, u32 b, sg_diff::tolerance t)
 {
@@ -417,6 +439,41 @@ cc::vector<cc::string> sg_diff::differences(run_result const& a, run_result cons
                                        kept.to_string(), named, differing > k_named_elements ? ", ..." : ""));
     }
     return lines;
+}
+
+double sg_diff::tolerance_used(run_result const& a, run_result const& b, tolerance t)
+{
+    auto most = 0.0;
+    for (auto i = isize(0); i < a.outputs.size() && i < b.outputs.size(); ++i)
+    {
+        auto const& x = a.outputs[i];
+        auto const& y = b.outputs[i];
+        if (x.is_exact || y.is_exact || x.bytes.size() != y.bytes.size())
+            continue;
+        auto const count = x.bytes.size() / 4;
+        auto const* const xs = reinterpret_cast<u32 const*>(x.bytes.data());
+        auto const* const ys = reinterpret_cast<u32 const*>(y.bytes.data());
+        auto const is_bounded = x.bounds.size() == 2 * count;
+        for (auto e = isize(0); e < count; ++e)
+        {
+            auto const least = is_bounded ? x.bounds[2 * e] : 0.0f;
+            auto const end = is_bounded ? x.bounds[2 * e + 1] : 0.0f;
+            auto used = 0.0;
+            if (!is_bounded || least != least)
+                used = needed(xs[e], ys[e], t.kind);
+            else if (least - least != 0.0f || end - end != 0.0f)
+                used = 0;
+            else
+            {
+                auto const fy = cc::bit_cast<f32>(ys[e]);
+                used = is_nan_bits(ys[e])       ? needed(cc::bit_cast<u32>(least), ys[e], t.kind)
+                     : fy >= least && fy <= end ? 0.0
+                                                : needed(cc::bit_cast<u32>(fy < least ? least : end), ys[e], t.kind);
+            }
+            most = used > most ? used : most;
+        }
+    }
+    return most;
 }
 
 namespace

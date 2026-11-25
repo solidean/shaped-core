@@ -197,6 +197,11 @@ bool register_setup(setup s);
 /// An element `a` bounds is held to its range, `t` measured from the nearer end.
 [[nodiscard]] cc::vector<cc::string> differences(run_result const& a, run_result const& b, tolerance t);
 
+/// The most of `t`'s measure any element of `b` takes to be held to `a`, from the nearer end of a range `a` bounds;
+/// 0 where `b` is `a`, or inside its ranges, everywhere.
+/// It is how much of a file's tolerance a comparison really uses, which says how far that tolerance could tighten.
+[[nodiscard]] double tolerance_used(run_result const& a, run_result const& b, tolerance t);
+
 /// `w` run on SGL's interpreter: the outputs, `skipped` where it cannot model the run, an error where the run fails.
 /// A bounding run, so each float output carries the range its entry point's float level allows a GPU (EVAL-6).
 /// A builtin's own precision and reassociation are not in those ranges, so a GPU is held to them at `across`.

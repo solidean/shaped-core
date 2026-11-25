@@ -222,3 +222,37 @@ TEST("sgl interpret bounds - a run that does not bound gives no range")
     CHECK(float_at(output, 0) == 1.1f * 3.3f);
     CHECK(bounds[0] != bounds[0]);
 }
+
+TEST("sgl interpret bounds - a sum of three terms may be added in any order, above precise alone")
+{
+    // in a float, 1e8 + 1 is 1e8, so the order written gives 0 and the order 1 + (1e8 - 1e8) gives 1
+    auto const body = "    let x = io.input[0]\n"
+                      "    let y = io.input[1]\n"
+                      "    let s = x + y\n"
+                      "    io.output[0] = s - x\n"
+                      "    io.output[1] = x + y\n";
+    auto const fast = run_bounded(body, floats(1e8f, 1.0f), 2);
+    CHECK(fast.value(0) == 0.0f);
+    CHECK(fast.holds(0, 0.0f));
+    CHECK(fast.holds(0, 1.0f));
+    // two terms add in one order alone
+    CHECK(fast.is_exact(1));
+
+    auto const precise = run_bounded(body, floats(1e8f, 1.0f), 2, sgl::check::float_level::precise);
+    CHECK(precise.is_exact(0));
+}
+
+TEST("sgl interpret bounds - a dot product may round each step in any order, at every level")
+{
+    // 1e8 * 1 + 1 * 1 - 1e8 * 1: the order written cancels to 0, rounding after the first sum; exactly it is 1
+    auto const body = "    let p = float3(io.input[0], io.input[1], -io.input[0])\n"
+                      "    io.output[0] = dot(p, float3(1.0, 1.0, 1.0))\n";
+    for (auto const level : {sgl::check::float_level::fast, sgl::check::float_level::ieee})
+    {
+        auto const r = run_bounded(body, floats(1e8f, 1.0f), 1, level);
+        CHECK(r.holds(0, 0.0f));
+        CHECK(r.holds(0, 1.0f));
+        // the exact sum within γ(3) of the order the evaluator took, and every order within γ(3) of it: 2 γ(3) Σ|terms| either way
+        CHECK(r.most(0) - r.least(0) < 4.0f * 3.0f * 2e8f / 16777216.0f * 1.01f);
+    }
+}

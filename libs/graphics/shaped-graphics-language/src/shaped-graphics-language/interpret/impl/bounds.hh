@@ -8,7 +8,7 @@
 
 namespace sgl::check::impl
 {
-/// What a level licenses that a bounding run models; reassociation and a builtin's own precision are not among them.
+/// What a level licenses that a bounding run models; a builtin's own precision is not among them.
 struct float_licenses
 {
     /// A half operation's result kept at a float's precision rather than rounded to a half (EVAL-96); a conversion
@@ -18,8 +18,10 @@ struct float_licenses
     bool contracts = false;
     /// A denormal argument or result taken as zero.
     bool flushes_denormals = false;
+    /// A sum added in any order: what `+` and `-` chain together, `scalar::terms`.
+    bool reassociates = false;
 
-    [[nodiscard]] bool is_any() const { return keeps_half_at_float || contracts || flushes_denormals; }
+    [[nodiscard]] bool is_any() const { return keeps_half_at_float || contracts || flushes_denormals || reassociates; }
 };
 
 [[nodiscard]] float_licenses licenses_of(float_level level);

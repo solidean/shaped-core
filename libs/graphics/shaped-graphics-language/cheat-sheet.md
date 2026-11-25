@@ -487,6 +487,7 @@ o.sites                                    // site_tally { passed, failed } para
 {.bounds_floats = true}                    // a bounding run: each float leaf's .least / .most is what a GPU may give under
                                            // the entry point's @float level (EVAL-6); .float_floor raises that level
 leaf.is_ranged  leaf.is_unbounded()        // a range beside the exact bits; -inf..inf is any value; points stay unranged
+leaf.terms  leaf.sum_least  leaf.sum_most  // a sum's chain: its terms, which reassociation may add in any order
 o.explored  o.undecided                    // open conditions run both ways and joined; ones past that, after which stores
                                            // are unbounded
 member_data{.mutable_bytes = b, .bounds = r}  // r: two floats per word, NaN NaN is exact; write_back fills, resolve reads

@@ -38,6 +38,15 @@ struct sgl::check::scalar
     /// Two ranged leaves of one nonzero origin are one value, which a GPU computes once, so a bounding run varies them
     /// together: `x < x` is decided even where `x` is not.
     u32 origin = 0;
+    /// A bounding run's sum chain, for a leaf a `+`, a `-` or a sum of products gave: how many terms it sums, which a
+    /// reassociating target may add in any order; 0 for a leaf that is no sum.
+    /// `sum_least` to `sum_most` holds the exact sum, `magnitude` is the sum of the terms' magnitudes, and
+    /// `has_products` says some terms are products rounded inside the sum, as a `dot`'s are.
+    u16 terms = 0;
+    bool has_products = false;
+    f32 magnitude = 0;
+    f32 sum_least = 0;
+    f32 sum_most = 0;
 
     [[nodiscard]] static scalar of(f32 v);
     [[nodiscard]] static scalar of(i32 v);
