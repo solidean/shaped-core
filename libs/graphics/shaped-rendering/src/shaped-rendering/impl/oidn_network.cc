@@ -2,6 +2,7 @@
 #include <clean-core/common/endian.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/error/optional.hh>
+#include <clean-core/platform/environment.hh>
 #include <clean-core/record/log.hh>
 #include <clean-core/streams/file_stream.hh>
 #include <clean-core/string/format.hh>
@@ -15,9 +16,14 @@ namespace sr::impl
 {
 namespace
 {
-/// Where the weights blob sits, baked in at configure time.
-/// TEMPORARY(debt-oidn-weights-source-tree-path): a shipped binary wants the weights staged beside it instead.
-constexpr char const* k_weights_dir = SR_OIDN_WEIGHTS_DIR;
+/// Where the weights blob sits: `SR_OIDN_WEIGHTS_DIR` from the environment, which a binary copied to another machine
+/// is started with, else the directory baked in at configure time.
+/// TEMPORARY(debt-oidn-weights-source-tree-path): the baked-in default is an absolute path into the source tree.
+cc::string const& weights_dir()
+{
+    static auto const dir = cc::environment_variable("SR_OIDN_WEIGHTS_DIR").value_or(cc::string(SR_OIDN_WEIGHTS_DIR));
+    return dir;
+}
 
 /// The tensors the network runs through, in the order they are produced.
 ///
@@ -129,7 +135,7 @@ constexpr int k_conv_texels = 8;
 {
     return tg::vec2i(extent[0] >> level, extent[1] >> level);
 }
-/// The file each network is fetched as, in `k_weights_dir`.
+/// The file each network is fetched as, in `weights_dir()`.
 [[nodiscard]] char const* weights_file(oidn_network_size size)
 {
     return size == oidn_network_size::small ? "rt_hdr_alb_nrm_small.tza" : "rt_hdr_alb_nrm.tza";
@@ -146,7 +152,7 @@ bool oidn_weights_present()
     // then has to answer `false`.
     static auto const present = []
     {
-        auto const dir = cc::string_view(k_weights_dir);
+        auto const dir = cc::string_view(weights_dir());
         if (dir.empty())
             return false;
         for (auto const size : {oidn_network_size::small, oidn_network_size::base})
@@ -172,7 +178,7 @@ cc::optional<oidn_weights> load_weights_from_disk(oidn_network_size size)
 {
     auto out = oidn_weights();
 
-    auto const path = cc::string(k_weights_dir) + "/" + weights_file(size);
+    auto const path = weights_dir() + "/" + weights_file(size);
     auto adapter = cc::file_read_stream_adapter::open(path);
     if (adapter.has_error())
     {

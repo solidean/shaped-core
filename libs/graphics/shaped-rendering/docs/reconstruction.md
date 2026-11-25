@@ -247,6 +247,8 @@ The base one is what OIDN's balanced quality runs, and the small one what its fa
   A weights bump then fails to find a tensor, or fails the shape test in `tza-test.cc`, rather than drifting.
 - **The weights are read once per process** and packed into one buffer as `[ky][kx][i][o]`.
   The output channel is innermost because it is what varies across a wave, so one weight load touches one or two cache lines.
+- **The weights are found in `SR_OIDN_WEIGHTS_DIR`** when the environment names it, else in the directory configure fetched them to.
+  A binary copied to another machine carries the two `.tza` files beside it and is started with the variable set.
 - **Every channel count is padded to a multiple of four**, so a convolution reads its source four channels per `float4`.
   Only three shapes need it: the nine input channels, the three output ones, and the seventy-three `dec_conv1a` concatenates.
   A padding channel holds a hard zero under a weight of zero, since a NaN left in memory survives a multiply by nothing.
