@@ -6,6 +6,8 @@ refs:
   - test: "sg - an SGL affine3 in GPU memory is its three rows*"
   - file: libs/graphics/shaped-graphics/backends/webgpu/src/shaped-graphics/backends/webgpu/webgpu_command_list.compute.cc
   - symbol: webgpu_command_list::compute_dispatch
+claimed-by: Claude (for Philip Trettner)
+claimed-at: 2026-11-25T20:15Z
 ---
 
 # A bare SGL @compute on webgpu reads a grid of zero, so every thread returns
