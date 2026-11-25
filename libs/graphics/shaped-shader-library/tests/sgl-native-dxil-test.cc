@@ -646,6 +646,36 @@ constexpr cc::string_view k_products
         ++count;
     return count;
 }
+
+/// The disassembly of SGL's own DXIL of `entry`, which the validator takes.
+[[nodiscard]] cc::string native_dxil_of(ssc::dxc::compiler& compiler, cc::string_view source, cc::string_view entry)
+{
+    auto const e = written(source, entry);
+    REQUIRE(e.has_value()).dump("error", e.has_error() ? e.error() : cc::string());
+    CHECK(!compiler.validate(e.value().dxil).has_value()).dump("entry", entry);
+    auto const text = compiler.disassemble(e.value().dxil);
+    REQUIRE(text.has_value());
+    return text.value();
+}
+
+/// The disassembly of DXC's DXIL of SGL's HLSL of `entry`, with the compile's own arguments and `-Gis` from `.specials`
+/// on, as slib hands it (EMIT-185).
+[[nodiscard]] cc::string text_dxil_of(ssc::dxc::compiler& compiler, cc::string_view source, cc::string_view entry)
+{
+    auto const e = sgl::compile_to_text({.source = source, .entry_point = entry, .target = sgl::emit::target::hlsl_dx12});
+    REQUIRE(e.has_value()).dump("error", e.has_error() ? e.error() : cc::string());
+    auto options = ssc::dxc::compile_options();
+    for (auto const& arg : e.value().dxc_args)
+        options.extra_args.push_back(arg);
+    if (e.value().float_guarantee != sgl::check::float_level::fast)
+        options.extra_args.push_back(cc::string("-Gis"));
+    auto const built = compiler.compile(
+        {.source = e.value().text, .entry_point = e.value().entry_point, .stage = sg::shader_stage::compute}, options);
+    REQUIRE(built.has_value()).dump("dxc", built.has_error() ? built.error().to_string() : cc::string());
+    auto const text = compiler.disassemble(built.value().bytecode);
+    REQUIRE(text.has_value());
+    return text.value();
+}
 } // namespace
 
 TEST("slib - at .precise both DXIL routes write a product as its scalar sums, and neither fuses one (EMIT-NEW)")
@@ -653,35 +683,8 @@ TEST("slib - at .precise both DXIL routes write a product as its scalar sums, an
     auto compiler = ssc::dxc::compiler::create();
     if (compiler.has_error())
         SKIP("no DXC");
-    // SGL's own DXIL, and DXC's of SGL's HLSL with the compile's own arguments, `-Gis` at .precise
-    auto const native_of = [&](cc::string_view entry)
-    {
-        auto const e = written(k_products, entry);
-        REQUIRE(e.has_value()).dump("error", e.has_error() ? e.error() : cc::string());
-        CHECK(!compiler.value().validate(e.value().dxil).has_value()).dump("entry", entry);
-        auto const text = compiler.value().disassemble(e.value().dxil);
-        REQUIRE(text.has_value());
-        return text.value();
-    };
-    auto const text_of = [&](cc::string_view entry)
-    {
-        auto const e
-            = sgl::compile_to_text({.source = k_products, .entry_point = entry, .target = sgl::emit::target::hlsl_dx12});
-        REQUIRE(e.has_value()).dump("error", e.has_error() ? e.error() : cc::string());
-        // slib hands DXC `-Gis` from `.specials` on (EMIT-185), as a host does
-        auto options = ssc::dxc::compile_options();
-        for (auto const& arg : e.value().dxc_args)
-            options.extra_args.push_back(arg);
-        if (e.value().float_guarantee != sgl::check::float_level::fast)
-            options.extra_args.push_back(cc::string("-Gis"));
-        auto const built = compiler.value().compile(
-            {.source = e.value().text, .entry_point = e.value().entry_point, .stage = sg::shader_stage::compute},
-            options);
-        REQUIRE(built.has_value()).dump("dxc", built.has_error() ? built.error().to_string() : cc::string());
-        auto const text = compiler.value().disassemble(built.value().bytecode);
-        REQUIRE(text.has_value());
-        return text.value();
-    };
+    auto const native_of = [&](cc::string_view entry) { return native_dxil_of(compiler.value(), k_products, entry); };
+    auto const text_of = [&](cc::string_view entry) { return text_dxil_of(compiler.value(), k_products, entry); };
     constexpr cc::string_view fmad = "@dx.op.tertiary.f32(i32 46,";
     constexpr cc::string_view dot = "@dx.op.dot";
 
@@ -700,6 +703,58 @@ TEST("slib - at .precise both DXIL routes write a product as its scalar sums, an
         CHECK(lines_with(strict, "fast float") == 0).dump("dxil", strict);
         CHECK(lines_with(strict, " = fmul float ") >= 64 - 6 + 16 + 4 + 3).dump("dxil", strict);
     }
+}
+
+TEST("slib - at .precise both DXIL routes write the geometry and mix as one form, with no rsqrt or dot (EMIT-NEW)")
+{
+    auto compiler = ssc::dxc::compiler::create();
+    if (compiler.has_error())
+        SKIP("no DXC");
+    constexpr cc::string_view source
+        = "binding work:\n"
+          "    values: mut buffer[float4]\n"
+          "\n"
+          "fun shaped(id: int3){work} -> float4:\n"
+          "    let v = work.values[id.x]\n"
+          "    let w = work.values[0]\n"
+          "    let n = vec3(w.x, w.y, w.z)\n"
+          "    let i = vec3(v.x, v.y, v.z)\n"
+          "    let r = reflect(i, n) + refract(i, n, w.w)\n"
+          "    let m = mix(v, w, v.x)\n"
+          "    return m + normalize(v) + float4(r.x, r.y, r.z, length(v) + distance(v, w))\n"
+          "\n"
+          "@compute(64) fun loose(@thread_id id: int3){work}:\n"
+          "    work.values[id.x] = shaped(id)\n"
+          "\n"
+          "@float(.precise) @compute(64) fun strict(@thread_id id: int3){work}:\n"
+          "    work.values[id.x] = shaped(id)\n";
+    constexpr cc::string_view rsqrt = "@dx.op.unary.f32(i32 25,";
+    constexpr cc::string_view sqrt = "@dx.op.unary.f32(i32 24,";
+    constexpr cc::string_view dot = "@dx.op.dot";
+
+    // .fast keeps the targets' own: DXIL's dot, and DXC's `rsqrt` of `normalize`
+    CHECK(lines_with(native_dxil_of(compiler.value(), source, "loose"), dot) > 0);
+    auto const loose_text = text_dxil_of(compiler.value(), source, "loose");
+    CHECK(lines_with(loose_text, dot) > 0).dump("dxil", loose_text);
+    CHECK(lines_with(loose_text, rsqrt) > 0).dump("dxil", loose_text);
+
+    // .precise: 1 / sqrt on both routes, the one division, and the same count of each operation
+    auto const native = native_dxil_of(compiler.value(), source, "strict");
+    auto const text = text_dxil_of(compiler.value(), source, "strict");
+    for (auto const& strict : {native, text})
+    {
+        CHECK(lines_with(strict, rsqrt) == 0).dump("dxil", strict);
+        CHECK(lines_with(strict, dot) == 0).dump("dxil", strict);
+        CHECK(lines_with(strict, "@dx.op.tertiary.f32(i32 46,") == 0).dump("dxil", strict);
+        CHECK(lines_with(strict, "fast float") == 0).dump("dxil", strict);
+        CHECK(lines_with(strict, " = fdiv float 1.000000e+00, ") == 1).dump("dxil", strict);
+    }
+    for (auto const what :
+         {cc::string_view(" = fmul float "), cc::string_view(" = fadd float "), cc::string_view(" = fsub float "), sqrt})
+        CHECK(lines_with(native, what) == lines_with(text, what))
+            .dump("operation", what)
+            .dump("native", native)
+            .dump("text", text);
 }
 
 // AMD's DXIL compiler crashes on a module without it, though LLVM leaves it optional.

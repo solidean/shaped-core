@@ -52,6 +52,8 @@ private:
     /// EMIT-NEW: a dot or matrix product, or a smoothstep, at `.precise` or stricter, as the scalar operations of its
     /// fixed order, which no target may then reorder; `none` for any other operation, which `add` writes as it is.
     [[nodiscard]] value_ref strict_form(op code, type_ref type, cc::span<u32 const> operands, u8 sub);
+    /// `strict_form` of a `math`: smoothstep, and the geometry and blend that hide a dot or a sum.
+    [[nodiscard]] value_ref strict_math(math fn, type_ref type, cc::span<u32 const> operands);
     /// `((a0*b0 + a1*b1) + a2*b2) + a3*b3` of two vectors' lanes, left to right, each operation its own.
     [[nodiscard]] value_ref ordered_dot(value_ref a, value_ref b, type_ref scalar, u32 lanes);
     void branch(block_ref to);

@@ -169,6 +169,18 @@ cc::string_view spread_check(cc::span<check::scalar const> in)
 [[nodiscard]] cc::string ordered_dot_helper(helper_context const& c);
 [[nodiscard]] written write_ordered_smoothstep(call_context const& c);
 [[nodiscard]] cc::string ordered_smoothstep_helper(helper_context const& c);
+/// The geometry and blend whose targets' forms hide a dot or a sum: written in the fixed order at `.precise` as the
+/// smoothstep is, as `sgl_ordered_<name>` helpers, and as the target's own call elsewhere.
+enum class ordered_call : u32
+{
+    length,
+    distance,
+    normalize,
+    reflect,
+    refract,
+    mix,
+};
+[[nodiscard]] spelling ordered_spelling(ordered_call which);
 /// The names those writers and helpers write in HLSL and MSL, which a program's names must not hide.
 [[nodiscard]] cc::span<cc::string_view const> ordered_product_names(language l);
 [[nodiscard]] cc::span<cc::string_view const> ordered_dot_names();

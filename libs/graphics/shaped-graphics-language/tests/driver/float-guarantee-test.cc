@@ -434,3 +434,71 @@ TEST("sgl float - a text at .precise writes its products and smoothstep as helpe
             .dump("text", strict);
     }
 }
+
+namespace
+{
+/// The geometry and the blend that hide a dot or a sum, at `.fast` and at `.precise`.
+constexpr cc::string_view k_geometry
+    = "binding work:\n"
+      "    values: mut buffer[float4]\n"
+      "\n"
+      "fun shaped(id: int3){work} -> float4:\n"
+      "    let v = work.values[id.x]\n"
+      "    let w = work.values[0]\n"
+      "    let n = vec3(w.x, w.y, w.z)\n"
+      "    let i = vec3(v.x, v.y, v.z)\n"
+      "    let r = reflect(i, n) + refract(i, n, w.w)\n"
+      "    let m = mix(v, w, v.x)\n"
+      "    return m + normalize(v) + float4(r.x, r.y, r.z, length(v) + distance(v, w))\n"
+      "\n"
+      "@compute(64) fun loose(@thread_id id: int3){work}:\n"
+      "    work.values[id.x] = shaped(id)\n"
+      "\n"
+      "@float(.precise) @compute(64) fun strict(@thread_id id: int3){work}:\n"
+      "    work.values[id.x] = shaped(id)\n";
+} // namespace
+
+TEST("sgl float - a text at .precise writes the geometry and mix as helpers of their fixed forms (EMIT-NEW)")
+{
+    for (auto const t : {target::hlsl_dx12, target::hlsl_vulkan, target::msl})
+    {
+        auto const of = [&](cc::string_view entry)
+        {
+            auto const e = sgl::compile_to_text(
+                {.source = k_geometry, .source_name = "geometry.sgl", .entry_point = entry, .target = t});
+            REQUIRE(e.has_value())
+                .dump("target", sgl::emit::to_string(t))
+                .dump("error", e.has_error() ? e.error() : cc::string());
+            return e.value().text;
+        };
+        auto const loose = of("loose");
+        auto const strict = of("strict");
+        auto const blend = t == target::msl ? cc::string_view("mix") : cc::string_view("lerp");
+        for (auto const name : {cc::string_view("length"), cc::string_view("distance"), cc::string_view("normalize"),
+                                cc::string_view("reflect"), cc::string_view("refract"), blend})
+        {
+            CHECK(bare_calls(loose, name) == 1).dump("call", name).dump("text", loose);
+            CHECK(bare_calls(strict, name) == 0).dump("call", name).dump("text", strict);
+            CHECK(bare_calls(strict, cc::format("sgl_ordered_{}", name == blend ? cc::string_view("mix") : name)) == 2)
+                .dump("call", name)
+                .dump("text", strict);
+        }
+        CHECK(!loose.contains("sgl_ordered_"));
+
+        // each form as EMIT-NEW states it
+        CHECK(strict.contains("    return a + t * (b - a);\n")).dump("text", strict);
+        CHECK(strict.contains("    float s = (float)1.0 / sqrt((((v[0] * v[0] + v[1] * v[1]) + v[2] * v[2]) + v[3] * "
+                              "v[3]));\n    return v * s;\n"))
+            .dump("text", strict);
+        CHECK(strict.contains("    float k = (float)2.0 * ((n[0] * i[0] + n[1] * i[1]) + n[2] * i[2]);\n"
+                              "    return i - n * k;\n"))
+            .dump("text", strict);
+        CHECK(strict.contains("    float k = (float)1.0 - (eta * eta) * ((float)1.0 - d * d);\n"
+                              "    return k >= (float)0.0 ? eta * i - (eta * d + sqrt(k)) * n : "))
+            .dump("text", strict);
+        CHECK(strict.contains("    float4 d = a - b;\n    return sqrt((((d[0] * d[0] + d[1] * d[1]) + d[2] * d[2]) + "
+                              "d[3] * "
+                              "d[3]));\n"))
+            .dump("text", strict);
+    }
+}

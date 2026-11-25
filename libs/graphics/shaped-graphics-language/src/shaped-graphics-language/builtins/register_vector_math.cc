@@ -417,12 +417,12 @@ void sgl::builtins::register_vector_math(registry& r)
         add_function(r, "min", {"a", type, "b", type}, type, min_of);
         add_function(r, "max", {"a", type, "b", type}, type, max_of);
         add_function(r, "clamp", {"x", type, "low", type, "high", type}, type, clamp, {}, {}, clamp_undefined);
-        add_function(r, "mix", {"a", type, "b", type, "t", element}, type, mix, {.hlsl = "lerp"},
+        add_function(r, "mix", {"a", type, "b", type, "t", element}, type, mix, ordered_spelling(ordered_call::mix),
                      "/// `a` where `t` is 0 and `b` where it is 1.");
         if (type != element)
         {
-            add_function(r, "mix", {"a", type, "b", type, "t", type}, type, mix_componentwise, {.hlsl = "lerp"},
-                         "/// `mix` of each component by its own `t` (CHK-398).");
+            add_function(r, "mix", {"a", type, "b", type, "t", type}, type, mix_componentwise,
+                         ordered_spelling(ordered_call::mix), "/// `mix` of each component by its own `t` (CHK-398).");
         }
     }
 
@@ -658,7 +658,7 @@ void sgl::builtins::register_vector_math(registry& r)
                       .hlsl_names = impl::ordered_dot_names(),
                       .wgsl_names = impl::ordered_dot_names(),
                       .msl_names = impl::ordered_dot_names()});
-        add_function(r, "length", {"v", type}, element_of(type), length);
-        add_function(r, "normalize", {"v", type}, type, normalize);
+        add_function(r, "length", {"v", type}, element_of(type), length, ordered_spelling(ordered_call::length));
+        add_function(r, "normalize", {"v", type}, type, normalize, ordered_spelling(ordered_call::normalize));
     }
 }

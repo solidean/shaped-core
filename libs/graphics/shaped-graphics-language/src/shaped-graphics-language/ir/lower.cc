@@ -145,9 +145,25 @@ value_ref lowering::strict_form(op code, type_ref type, cc::span<u32 const> oper
         return add(op::construct, type, cc::span<u32 const>(columns, isize(result.count)));
     }
     case op::math:
+        return strict_math(math(sub), type, operands);
+    default:
+        return value_ref::none;
+    }
+}
+
+value_ref lowering::strict_math(math fn, type_ref type, cc::span<u32 const> operands)
+{
+    auto const scalar = scalar_of(type);
+    auto const constant = [&](f64 value, type_ref of) { return splat(float_constant(scalar, value), of); };
+    auto const length_of = [&](value_ref v)
     {
-        if (math(sub) != math::smooth_step)
-            return value_ref::none;
+        auto const s = scalar_of(_out.type_of(v));
+        return add(op::math, s, {ordered_dot(v, v, s, lanes_of(_out.type_of(v)))}, u8(math::sqrt));
+    };
+    switch (fn)
+    {
+    case math::smooth_step:
+    {
         // t = saturate((x - e0) / (e1 - e0)), then t * (t * (3 - 2t)): DXC's grouping, so every route computes one value.
         // It and the written definition's (t * t) * (3 - 2t) each round three times with no cancellation, since 2t is
         // exact and 3 - 2t is at least 1, so both are within about 3 * 2^-24 of it, and both are exact at 0 and 1.
@@ -156,14 +172,64 @@ value_ref lowering::strict_form(op code, type_ref type, cc::span<u32 const> oper
         auto const low = value_ref(operands[0]);
         auto const high = value_ref(operands[1]);
         auto const x = value_ref(operands[2]);
-        auto const scalar = scalar_of(type);
         auto const raw = add(op::fdiv, type, {add(op::fsub, type, {x, low}), add(op::fsub, type, {high, low})});
-        auto const t = add(op::math, type,
-                           {raw, splat(float_constant(scalar, 0.0), type), splat(float_constant(scalar, 1.0), type)},
-                           u8(math::fclamp));
-        auto const twice = add(op::fmul, type, {splat(float_constant(scalar, 2.0), type), t});
-        auto const shaped = add(op::fsub, type, {splat(float_constant(scalar, 3.0), type), twice});
+        auto const t = add(op::math, type, {raw, constant(0.0, type), constant(1.0, type)}, u8(math::fclamp));
+        auto const twice = add(op::fmul, type, {constant(2.0, type), t});
+        auto const shaped = add(op::fsub, type, {constant(3.0, type), twice});
         return add(op::fmul, type, {t, add(op::fmul, type, {t, shaped})});
+    }
+    case math::fmix:
+        // a + t * (b - a), DXC's lowering of `lerp`, rather than a * (1 - t) + b * t: one product, and exact at t = 0
+        return add(
+            op::fadd, type,
+            {value_ref(operands[0]),
+             add(op::fmul, type,
+                 {value_ref(operands[2]), add(op::fsub, type, {value_ref(operands[1]), value_ref(operands[0])})})});
+    case math::length:
+        // sqrt of the ordered dot of v with itself, as DXC writes `length`
+        return length_of(value_ref(operands[0]));
+    case math::distance:
+        // the length of a - b
+        return length_of(
+            add(op::fsub, _out.type_of(value_ref(operands[0])), {value_ref(operands[0]), value_ref(operands[1])}));
+    case math::normalize:
+    {
+        // v times 1 / length(v): DXC's `normalize` multiplies by `rsqrt` instead, but `rsqrt` is no operation SPIR-V and
+        // DXIL compute alike, and a division of a square root is, on every route; so all three write this one
+        auto const v = value_ref(operands[0]);
+        auto const inverse = add(op::fdiv, scalar, {float_constant(scalar, 1.0), length_of(v)});
+        return add(op::vector_times_scalar, type, {v, inverse});
+    }
+    case math::reflect:
+    {
+        // i - n * (2 * dot(n, i)): the scalar factor first, as DXC writes it, then multiplied into n, then subtracted
+        auto const i = value_ref(operands[0]);
+        auto const n = value_ref(operands[1]);
+        auto const k = add(op::fmul, scalar, {float_constant(scalar, 2.0), ordered_dot(n, i, scalar, lanes_of(type))});
+        return add(op::fsub, type, {i, add(op::vector_times_scalar, type, {n, k})});
+    }
+    case math::refract:
+    {
+        // k = 1 - eta * eta * (1 - d * d) of d = dot(n, i), then eta * i - (eta * d + sqrt(k)) * n where k >= 0 and zero
+        // elsewhere, each step as DXC writes `refract`; a NaN k gives zero, as DXC's ordered compare does
+        auto const i = value_ref(operands[0]);
+        auto const n = value_ref(operands[1]);
+        auto const eta = value_ref(operands[2]);
+        auto const one = float_constant(scalar, 1.0);
+        auto const zero = float_constant(scalar, 0.0);
+        auto const d = ordered_dot(n, i, scalar, lanes_of(type));
+        auto const sine = add(op::fsub, scalar, {one, add(op::fmul, scalar, {d, d})});
+        auto const k = add(op::fsub, scalar, {one, add(op::fmul, scalar, {add(op::fmul, scalar, {eta, eta}), sine})});
+        auto const term
+            = add(op::fadd, scalar, {add(op::fmul, scalar, {eta, d}), add(op::math, scalar, {k}, u8(math::sqrt))});
+        auto const bent
+            = add(op::fsub, type,
+                  {add(op::vector_times_scalar, type, {i, eta}), add(op::vector_times_scalar, type, {n, term})});
+        auto const is_bent = add(op::fge, _bool, {k, zero});
+        u32 lanes[4];
+        for (auto l = u32(0); l < lanes_of(type); ++l)
+            lanes[l] = u32(add(op::select, scalar, {is_bent, extracted(bent, scalar, l), zero}));
+        return add(op::construct, type, cc::span<u32 const>(lanes, isize(lanes_of(type))));
     }
     default:
         return value_ref::none;

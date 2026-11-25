@@ -385,7 +385,7 @@ TEST("sgl spirv - at .precise a product is its scalar sums in the fixed order, a
     CHECK(counted(fast, 146) == 1);
     CHECK(extended(fast, 49) == 1);
 
-    // .precise leaves the order to no driver: 16 products of the matrices, 4 of the vector and 4 of the dot
+    // .precise leaves the order to no driver: 64 products of the matrices, 16 of the vector and 4 of the dot
     CHECK(counted(precise, 148) == 0);
     CHECK(counted(precise, 145) == 0);
     CHECK(counted(precise, 146) == 0);
@@ -394,6 +394,51 @@ TEST("sgl spirv - at .precise a product is its scalar sums in the fixed order, a
     CHECK(counted(precise, 133) >= 64 + 16 + 4 + 3); // OpFMul, smoothstep's three among them
     // and every float operation it writes is its own
     CHECK(decorated(precise, 42) >= counted(precise, 133) + counted(precise, 129));
+}
+
+TEST("sgl spirv - at .precise the geometry and mix are their fixed forms, and no extended instruction of them "
+     "(EMIT-NEW)")
+{
+    constexpr cc::string_view source
+        = "binding work:\n"
+          "    values: mut buffer[float4]\n"
+          "\n"
+          "fun shaped(id: int3){work} -> float4:\n"
+          "    let v = work.values[id.x]\n"
+          "    let w = work.values[0]\n"
+          "    let n = vec3(w.x, w.y, w.z)\n"
+          "    let i = vec3(v.x, v.y, v.z)\n"
+          "    let r = reflect(i, n) + refract(i, n, w.w)\n"
+          "    let m = mix(v, w, v.x)\n"
+          "    return m + normalize(v) + float4(r.x, r.y, r.z, length(v) + distance(v, w))\n"
+          "\n"
+          "@compute(64) fun loose(@thread_id id: int3){work}:\n"
+          "    work.values[id.x] = shaped(id)\n"
+          "\n"
+          "@float(.precise) @compute(64) fun strict(@thread_id id: int3){work}:\n"
+          "    work.values[id.x] = shaped(id)\n";
+    auto const loose = written(source, "loose", sgl::emit::native_route::require);
+    auto const strict = written(source, "strict", sgl::emit::native_route::require);
+    REQUIRE(loose.has_value()).dump("error", loose.has_error() ? loose.error() : cc::string());
+    REQUIRE(strict.has_value()).dump("error", strict.has_error() ? strict.error() : cc::string());
+    auto const& fast = loose.value().spirv;
+    auto const& precise = strict.value().spirv;
+
+    // GLSL.std.450's FMix, Length, Distance, Normalize, Reflect and Refract, and InverseSqrt
+    constexpr u32 own[] = {46, 66, 67, 69, 71, 72, 32};
+    auto at_fast = isize(0);
+    for (auto const number : own)
+    {
+        at_fast += extended(fast, number);
+        CHECK(extended(precise, number) == 0).dump("instruction", number);
+    }
+    CHECK(at_fast >= 6);
+    // normalize divides 1 by the square root, which length, distance and refract take too
+    CHECK(extended(precise, 31) >= 3);
+    CHECK(counted(precise, 136) == 1); // OpFDiv
+    CHECK(counted(precise, 148) == 0); // no OpDot
+    CHECK(decorated(precise, 42)
+          >= counted(precise, 133) + counted(precise, 129) + counted(precise, 131) + counted(precise, 142));
 }
 
 TEST("sgl spirv - a vector scaled by a scalar builds no splat, and an if around little is a select")

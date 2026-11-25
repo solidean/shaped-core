@@ -906,14 +906,16 @@ void sgl::builtins::register_math(registry& r)
     add(r, "@pure fun cross(a: vec3, b: vec3) -> vec3", cross, {});
     add(r, "@pure fun cross(a: float3, b: float3) -> float3", cross, {});
     add(r, "@pure fun cross(a: half3, b: half3) -> half3", cross, {});
-    add(r, "@pure fun distance(a: pos3, b: pos3) -> float", distance, {});
+    auto const distance_spelling = impl::ordered_spelling(impl::ordered_call::distance);
+    add(r, "@pure fun distance(a: pos3, b: pos3) -> float", distance, distance_spelling);
     for (auto const t : {cc::string_view("float2"), cc::string_view("float3"), cc::string_view("float4")})
-        add(r, cc::format("@pure fun distance(a: {0}, b: {0}) -> float", t), distance, {});
+        add(r, cc::format("@pure fun distance(a: {0}, b: {0}) -> float", t), distance, distance_spelling);
     for (auto const t : {cc::string_view("half2"), cc::string_view("half3"), cc::string_view("half4")})
-        add(r, cc::format("@pure fun distance(a: {0}, b: {0}) -> half", t), distance, {});
-    add(r, "@pure fun reflect(v: vec3, n: vec3) -> vec3", reflect, {}, nullptr, false,
-        "/// `v` mirrored at the plane whose unit normal is `n`.");
-    add(r, "@pure fun refract(v: vec3, n: vec3, eta: float) -> vec3", refract, {}, nullptr, false,
+        add(r, cc::format("@pure fun distance(a: {0}, b: {0}) -> half", t), distance, distance_spelling);
+    add(r, "@pure fun reflect(v: vec3, n: vec3) -> vec3", reflect, impl::ordered_spelling(impl::ordered_call::reflect),
+        nullptr, false, "/// `v` mirrored at the plane whose unit normal is `n`.");
+    add(r, "@pure fun refract(v: vec3, n: vec3, eta: float) -> vec3", refract,
+        impl::ordered_spelling(impl::ordered_call::refract), nullptr, false,
         "/// `v` bent through a surface of unit normal `n` by the ratio of indices `eta`; zero where it reflects "
         "entirely.");
 

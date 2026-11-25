@@ -479,4 +479,13 @@ So both are within about `3 * 2^-24` of the exact value, relatively, and both ar
 They differ for a tiny `t`: where denormals are flushed, `t * t` is zero below about `1e-19`, and `t` times the larger `3 - 2t` first is not.
 So the one DXC already writes is also the better of the two.
 
+The geometry and the blend follow the same rule, since each hides a dot or a sum the target orders its own way.
+Where a function has several written forms, the one kept is DXC's, so the text route under `-Gis` already computed it.
+`mix` is `a + t * (b - a)`, DXC's `lerp`: one product, and exact at `t = 0`; `a * (1 - t) + b * t` has two and is exact at both ends.
+`reflect` computes its scalar `2 * dot(n, i)` first, as DXC does, so the vector sees one product and one difference per lane.
+`refract` keeps DXC's steps and its ordered compare, so a NaN `k` refracts to zero on every route.
+`normalize` is the exception: DXC multiplies by `rsqrt` of the dot.
+`rsqrt` is no correctly rounded operation, and DXIL's `Rsqrt` and SPIR-V's `InverseSqrt` each carry their own vendor's error.
+A division by a square root is two operations every route writes alike, so `v * (1 / length(v))` is written everywhere instead.
+
 A transcendental is no basic operation: each vendor computes `exp2` or `sin` its own way within the precision its API states, and no flag makes two of them agree.

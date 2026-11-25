@@ -163,3 +163,136 @@ cc::string impl::ordered_smoothstep_helper(helper_context const& c)
                       "}}\n",
                       type, scalar);
 }
+
+namespace
+{
+/// The geometry and blend that hide a dot or a sum, in `impl::ordered_call`'s order.
+struct ordered_call_names
+{
+    cc::string_view helper;
+    /// The target's own call, in HLSL and in MSL and WGSL.
+    cc::string_view hlsl;
+    cc::string_view other;
+};
+
+constexpr ordered_call_names k_ordered_calls[] = {
+    {"sgl_ordered_length", "length", "length"},          {"sgl_ordered_distance", "distance", "distance"},
+    {"sgl_ordered_normalize", "normalize", "normalize"}, {"sgl_ordered_reflect", "reflect", "reflect"},
+    {"sgl_ordered_refract", "refract", "refract"},       {"sgl_ordered_mix", "lerp", "mix"},
+};
+
+/// The names each language's text calls or declares: HLSL calls `mix` `lerp`, and WGSL writes no helper.
+constexpr cc::string_view k_ordered_call_hlsl[] = {
+    "length",
+    "distance",
+    "normalize",
+    "reflect",
+    "refract",
+    "lerp",
+    "sqrt",
+    "sgl_ordered_length",
+    "sgl_ordered_distance",
+    "sgl_ordered_normalize",
+    "sgl_ordered_reflect",
+    "sgl_ordered_refract",
+    "sgl_ordered_mix",
+};
+constexpr cc::string_view k_ordered_call_msl[] = {
+    "length",
+    "distance",
+    "normalize",
+    "reflect",
+    "refract",
+    "mix",
+    "sqrt",
+    "sgl_ordered_length",
+    "sgl_ordered_distance",
+    "sgl_ordered_normalize",
+    "sgl_ordered_reflect",
+    "sgl_ordered_refract",
+    "sgl_ordered_mix",
+};
+constexpr cc::string_view k_ordered_call_wgsl[] = {"length", "distance", "normalize", "reflect", "refract", "mix"};
+
+/// The ordered dot of `a` and `b`, `lanes` lanes each.
+[[nodiscard]] cc::string dot_text(cc::string_view a, cc::string_view b, int lanes)
+{
+    auto terms = cc::vector<cc::string>();
+    for (auto k = 0; k < lanes; ++k)
+        terms.push_back(cc::format("{0}[{2}] * {1}[{2}]", a, b, k));
+    return ordered_sum(terms);
+}
+
+written write_ordered_call(call_context const& c)
+{
+    auto const& names = k_ordered_calls[c.data];
+    auto const name = c.is_precise && c.target != language::wgsl ? names.helper
+                    : c.target == language::hlsl                 ? names.hlsl
+                                                                 : names.other;
+    auto text = cc::format("{}(", name);
+    for (auto i = isize(0); i < c.arguments.size(); ++i)
+        text.appendf("{}{}", i == 0 ? "" : ", ", c.arguments[i].text);
+    text += ")";
+    return {.text = cc::move(text)};
+}
+
+/// Each form is the one SGL's own DXIL and SPIR-V lower to, and why each was chosen is said there,
+/// in `lowering::strict_math`.
+cc::string ordered_call_helper(helper_context const& c)
+{
+    if (!c.is_precise || c.target == language::wgsl || c.argument_types.empty())
+        return {};
+    auto const type = c.argument_types[0];
+    auto const shape = shape_of(type);
+    auto const scalar = shape.scalar;
+    auto const lanes = shape.first;
+    switch (impl::ordered_call(c.data))
+    {
+    case impl::ordered_call::length:
+        return cc::format("{} sgl_ordered_length({} v)\n{{\n    return sqrt({});\n}}\n", scalar, type,
+                          dot_text("v", "v", lanes));
+    case impl::ordered_call::distance:
+        return cc::format("{0} sgl_ordered_distance({1} a, {1} b)\n{{\n    {1} d = a - b;\n    return sqrt({2});\n}}\n",
+                          scalar, type, dot_text("d", "d", lanes));
+    case impl::ordered_call::normalize:
+        return cc::format("{1} sgl_ordered_normalize({1} v)\n{{\n    {0} s = ({0})1.0 / sqrt({2});\n    return v * "
+                          "s;\n}}\n",
+                          scalar, type, dot_text("v", "v", lanes));
+    case impl::ordered_call::reflect:
+        return cc::format("{1} sgl_ordered_reflect({1} i, {1} n)\n{{\n    {0} k = ({0})2.0 * {2};\n    return i - n * "
+                          "k;\n}}\n",
+                          scalar, type, dot_text("n", "i", lanes));
+    case impl::ordered_call::refract:
+    {
+        if (c.argument_types.size() < 3)
+            return {};
+        auto const zero = c.target == language::hlsl ? cc::format("({})0.0", type) : cc::format("{}(0.0)", type);
+        return cc::format("{1} sgl_ordered_refract({1} i, {1} n, {2} eta)\n"
+                          "{{\n"
+                          "    {0} d = {3};\n"
+                          "    {0} k = ({0})1.0 - (eta * eta) * (({0})1.0 - d * d);\n"
+                          "    return k >= ({0})0.0 ? eta * i - (eta * d + sqrt(k)) * n : {4};\n"
+                          "}}\n",
+                          scalar, type, c.argument_types[2], dot_text("n", "i", lanes), zero);
+    }
+    case impl::ordered_call::mix:
+        if (c.argument_types.size() < 3)
+            return {};
+        return cc::format("{0} sgl_ordered_mix({0} a, {0} b, {1} t)\n{{\n    return a + t * (b - a);\n}}\n", type,
+                          c.argument_types[2]);
+    }
+    return {};
+}
+} // namespace
+
+spelling impl::ordered_spelling(ordered_call which)
+{
+    return {.kind = spelling_kind::custom,
+            .hlsl = cc::string(k_ordered_calls[u32(which)].hlsl),
+            .custom = write_ordered_call,
+            .helper = ordered_call_helper,
+            .data = u32(which),
+            .hlsl_names = k_ordered_call_hlsl,
+            .wgsl_names = k_ordered_call_wgsl,
+            .msl_names = k_ordered_call_msl};
+}

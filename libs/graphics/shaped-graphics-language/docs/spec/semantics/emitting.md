@@ -836,12 +836,18 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
   A dot product, and each component of a matrix product, is its scalar products summed left to right, `((a0*b0 + a1*b1) + a2*b2) + a3*b3`.
   So no route writes a target's `mul`, `dot`, `OpDot`, `OpMatrixTimesVector` or `OpMatrixTimesMatrix` there.
   `smoothstep(e0, e1, x)` is `t * (t * (3 - 2t))` of `t = saturate((x - e0) / (e1 - e0))`, each operation its own, and never a target's `smoothstep`.
-  The text routes write these as helpers of their own, `sgl_ordered_mul`, `sgl_ordered_dot` and `sgl_ordered_smoothstep`.
+  The geometry and the blend are their definitions over that dot, each step its own, and never a target's own call.
+  `length(v)` is `sqrt(dot(v, v))`, and `distance(a, b)` is `length(a - b)`.
+  `normalize(v)` is `v * (1 / length(v))`, a division of a square root, where DXC's own multiplies by `rsqrt`.
+  `reflect(i, n)` is `i - n * k` of `k = 2 * dot(n, i)`, the scalar factor first.
+  `refract(i, n, eta)` is `eta * i - (eta * d + sqrt(k)) * n` of `d = dot(n, i)` and `k = 1 - (eta * eta) * (1 - d * d)` where `k >= 0`, and zero elsewhere, a NaN `k` included.
+  `mix(a, b, t)` is `a + t * (b - a)`, DXC's lowering of `lerp`.
+  The text routes write these as helpers of their own: `sgl_ordered_mul`, `sgl_ordered_dot`, `sgl_ordered_smoothstep`, and `sgl_ordered_` before each other name.
   A transcendental keeps the target's own precision, which no level makes alike across vendors.
   From `.specials` on, a call of a target's operation carries its precise mark, as DXC's `-Gis` writes it.
   SGL's own DXIL writes no fast-math flag, and marks each call of a DXIL operation that gives a float `!dx.precise`, naming one `!{i32 1}`.
   SGL's own SPIR-V decorates each float arithmetic instruction `NoContraction`, and an extended instruction stays undecorated, as DXC writes it.
-  At `.fast` and `.specials` the targets' own products and `smoothstep` stay, and at `.fast` nothing is marked.
+  At `.fast` and `.specials` the targets' own products, `smoothstep`, geometry and `mix` stay, and at `.fast` nothing is marked.
   What no single operation states, the denormals and SPIR-V's float execution modes, stays the entry point's.
   How a route keeps the guarantee of a scope narrower than its entry point is its own.
 * **EMIT-186** HLSL writes `!=` of float or half lanes as `!(a == b)`, and a whole vector's as `any(!(a == b))`, which is true where either is a NaN.
