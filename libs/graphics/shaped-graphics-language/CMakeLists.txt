@@ -39,6 +39,7 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/builtins/register_bit_math.cc
     src/shaped-graphics-language/builtins/register_bytes.cc
     src/shaped-graphics-language/builtins/register_math.cc
+    src/shaped-graphics-language/builtins/ordered_text.cc
     src/shaped-graphics-language/builtins/register_sync.cc
     src/shaped-graphics-language/builtins/register_derivatives.cc
     src/shaped-graphics-language/builtins/register_subgroups.cc

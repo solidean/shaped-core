@@ -360,3 +360,77 @@ TEST("sgl float - metal's text states its entry point's math mode, fast for no g
     REQUIRE(hlsl.has_value());
     CHECK(!hlsl.value().text.contains("math_mode"));
 }
+
+namespace
+{
+/// A matrix product of a matrix product, a dot and a smoothstep, at `.fast` and at `.precise`.
+constexpr cc::string_view k_products
+    = "binding work:\n"
+      "    values: mut buffer[float4]\n"
+      "\n"
+      "fun shaped(id: int3){work} -> float4:\n"
+      "    let m = mat4(work.values[0], work.values[1], work.values[2], work.values[3])\n"
+      "    let v = work.values[id.x]\n"
+      "    let p = (m * m) * v\n"
+      "    return p + float4(dot(v, p), smoothstep(v.x, v.y, v.z), 0.0, 0.0)\n"
+      "\n"
+      "@compute(64) fun loose(@thread_id id: int3){work}:\n"
+      "    work.values[id.x] = shaped(id)\n"
+      "\n"
+      "@float(.precise) @compute(64) fun strict(@thread_id id: int3){work}:\n"
+      "    work.values[id.x] = shaped(id)\n";
+
+/// How often `text` calls `name` itself, not a longer name that ends in it.
+isize bare_calls(cc::string_view text, cc::string_view name)
+{
+    auto count = isize(0);
+    auto const call = cc::string(name) + "(";
+    for (auto at = text.find(call); at >= 0; at = text.find(call, at + 1))
+    {
+        auto const before = at == 0 ? ' ' : text[at - 1];
+        auto const is_part = before == '_' || (before >= 'a' && before <= 'z') || (before >= 'A' && before <= 'Z')
+                          || (before >= '0' && before <= '9');
+        count += is_part ? 0 : 1;
+    }
+    return count;
+}
+} // namespace
+
+TEST("sgl float - a text at .precise writes its products and smoothstep as helpers in the fixed order (EMIT-NEW)")
+{
+    for (auto const t : {target::hlsl_dx12, target::hlsl_vulkan, target::msl})
+    {
+        auto const of = [&](cc::string_view entry)
+        {
+            auto const e = sgl::compile_to_text(
+                {.source = k_products, .source_name = "products.sgl", .entry_point = entry, .target = t});
+            REQUIRE(e.has_value())
+                .dump("target", sgl::emit::to_string(t))
+                .dump("error", e.has_error() ? e.error() : cc::string());
+            return e.value().text;
+        };
+        auto const loose = of("loose");
+        auto const strict = of("strict");
+        auto const is_hlsl = t != target::msl;
+
+        // .fast keeps the target's own: HLSL's `mul`, MSL's `*`, and every target's `dot` and `smoothstep`
+        CHECK(bare_calls(loose, "mul") == (is_hlsl ? 2 : 0)).dump("text", loose);
+        CHECK(bare_calls(loose, "dot") == 1).dump("text", loose);
+        CHECK(bare_calls(loose, "smoothstep") == 1).dump("text", loose);
+        CHECK(!loose.contains("sgl_ordered_"));
+
+        // .precise calls none of them, and spells each sum out, left to right
+        CHECK(bare_calls(strict, "mul") == 0).dump("text", strict);
+        CHECK(bare_calls(strict, "dot") == 0).dump("text", strict);
+        CHECK(bare_calls(strict, "smoothstep") == 0).dump("text", strict);
+        CHECK(bare_calls(strict, "sgl_ordered_mul") == 2 + 2).dump("text", strict); // two declarations, two calls
+        CHECK(strict.contains("float sgl_ordered_dot(float4 a, float4 b)\n{\n    return (((a[0] * b[0] + a[1] * b[1]) "
+                              "+ a[2] * b[2]) + a[3] * b[3]);\n}\n"))
+            .dump("text", strict);
+        CHECK(strict.contains("return t * (t * ((float)3.0 - (float)2.0 * t));")).dump("text", strict);
+        // row 1 of `m * v`: HLSL indexes a row, MSL a column
+        CHECK(strict.contains(is_hlsl ? "(((m[1][0] * v[0] + m[1][1] * v[1]) + m[1][2] * v[2]) + m[1][3] * v[3])"
+                                      : "(((m[0][1] * v[0] + m[1][1] * v[1]) + m[2][1] * v[2]) + m[3][1] * v[3])"))
+            .dump("text", strict);
+    }
+}

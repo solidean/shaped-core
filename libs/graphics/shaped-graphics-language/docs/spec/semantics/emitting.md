@@ -831,12 +831,19 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
   Each mode needs its device property, so a vulkan entry point needs the feature `float_specials` from `.specials` on, and `float_denormals` at `.ieee`.
   `wgsl` keeps `.fast` alone.
   A host may weaken a guarantee on WGSL alone, which compiles at `.fast` with the warning `float-guarantee-weakened`.
-* **EMIT-NEW** A native route keeps each operation's float guarantee (CHK-435) on the operation itself, as DXC marks what it compiles with `-Gis`.
-  Above `.fast`, DXIL writes no fast-math flag on a float instruction, and marks each call of a DXIL operation that gives a float `!dx.precise`, naming one `!{i32 1}`.
-  A driver may fold a call without the mark, `Exp` of `Log` of `x` to `x` among them, which the level forbids (measured on NVIDIA).
-  SPIR-V decorates each float arithmetic instruction `NoContraction`, the products and dot products among them, and writes an extended instruction undecorated, as DXC does.
-  At `.fast` neither route marks anything, and DXIL's float instructions carry `fast`.
+* **EMIT-NEW** Where the float guarantee is `.precise` or `.ieee` (CHK-435), every route computes the same operations in the same order ([why](why/emitting.md#emit-new)).
+  Each `+`, `-`, `*` and `/` of floats is one IEEE operation of its type, in source order, rounded on its own: none is fused, reassociated or folded into another.
+  A dot product, and each component of a matrix product, is its scalar products summed left to right, `((a0*b0 + a1*b1) + a2*b2) + a3*b3`.
+  So no route writes a target's `mul`, `dot`, `OpDot`, `OpMatrixTimesVector` or `OpMatrixTimesMatrix` there.
+  `smoothstep(e0, e1, x)` is `t * (t * (3 - 2t))` of `t = saturate((x - e0) / (e1 - e0))`, each operation its own, and never a target's `smoothstep`.
+  The text routes write these as helpers of their own, `sgl_ordered_mul`, `sgl_ordered_dot` and `sgl_ordered_smoothstep`.
+  A transcendental keeps the target's own precision, which no level makes alike across vendors.
+  From `.specials` on, a call of a target's operation carries its precise mark, as DXC's `-Gis` writes it.
+  SGL's own DXIL writes no fast-math flag, and marks each call of a DXIL operation that gives a float `!dx.precise`, naming one `!{i32 1}`.
+  SGL's own SPIR-V decorates each float arithmetic instruction `NoContraction`, and an extended instruction stays undecorated, as DXC writes it.
+  At `.fast` and `.specials` the targets' own products and `smoothstep` stay, and at `.fast` nothing is marked.
   What no single operation states, the denormals and SPIR-V's float execution modes, stays the entry point's.
+  How a route keeps the guarantee of a scope narrower than its entry point is its own.
 * **EMIT-186** HLSL writes `!=` of float or half lanes as `!(a == b)`, and a whole vector's as `any(!(a == b))`, which is true where either is a NaN.
   DXC lowers HLSL's own float `!=` to SPIR-V as `OpFOrdNotEqual`, false for a NaN, where DXIL's is unordered; the negated `==` is unordered on both.
   WGSL and MSL write `!=`, which is unordered in both.

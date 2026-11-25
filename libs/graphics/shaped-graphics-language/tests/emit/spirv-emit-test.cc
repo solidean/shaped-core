@@ -323,12 +323,13 @@ TEST("sgl spirv - an entry point's guarantee stands on each float operation it k
 TEST("sgl spirv - a pixel stage's position keeps its guarantee on the reciprocal it writes of w (EMIT-NEW)")
 {
     // FragCoord's w is 1/w where the program reads w, so its one division is the program's own arithmetic
-    constexpr cc::string_view source = "struct link:\n"
-                                       "    @position position: hpos4\n"
-                                       "\n"
-                                       "@pixel fun loose_ps(l: link) -> float4 => float4(l.position.w)\n"
-                                       "\n"
-                                       "@float(.precise) @pixel fun strict_ps(l: link) -> float4 => float4(l.position.w)\n";
+    constexpr cc::string_view source
+        = "struct link:\n"
+          "    @position position: hpos4\n"
+          "\n"
+          "@pixel fun loose_ps(l: link) -> float4 => float4(l.position.w)\n"
+          "\n"
+          "@float(.precise) @pixel fun strict_ps(l: link) -> float4 => float4(l.position.w)\n";
     auto const loose = written(source, "loose_ps", sgl::emit::native_route::require);
     auto const strict = written(source, "strict_ps", sgl::emit::native_route::require);
     REQUIRE(loose.has_value()).dump("error", loose.has_error() ? loose.error() : cc::string());
@@ -337,6 +338,62 @@ TEST("sgl spirv - a pixel stage's position keeps its guarantee on the reciprocal
     CHECK(counted(strict.value().spirv, 136) == 1);
     CHECK(decorated(loose.value().spirv, 42) == 0);
     CHECK(decorated(strict.value().spirv, 42) == 1);
+}
+
+namespace
+{
+/// A matrix product of a matrix product, a dot and a smoothstep, at `.fast` and at `.precise`.
+constexpr cc::string_view k_products
+    = "binding work:\n"
+      "    values: mut buffer[float4]\n"
+      "\n"
+      "fun shaped(id: int3){work} -> float4:\n"
+      "    let m = mat4(work.values[0], work.values[1], work.values[2], work.values[3])\n"
+      "    let v = work.values[id.x]\n"
+      "    let p = (m * m) * v\n"
+      "    return p + float4(dot(v, p), smoothstep(v.x, v.y, v.z), 0.0, 0.0)\n"
+      "\n"
+      "@compute(64) fun loose(@thread_id id: int3){work}:\n"
+      "    work.values[id.x] = shaped(id)\n"
+      "\n"
+      "@float(.precise) @compute(64) fun strict(@thread_id id: int3){work}:\n"
+      "    work.values[id.x] = shaped(id)\n";
+
+/// How many GLSL.std.450 instructions numbered `number` the module calls.
+[[nodiscard]] isize extended(cc::span<u32 const> words, u32 number)
+{
+    auto count = isize(0);
+    for (auto at = isize(5); at < words.size(); at += isize(words[at] >> 16))
+        count += (words[at] & 0xffffu) == 12 && words[at + 4] == number ? 1 : 0;
+    return count;
+}
+} // namespace
+
+TEST("sgl spirv - at .precise a product is its scalar sums in the fixed order, and smoothstep DXC's grouping "
+     "(EMIT-NEW)")
+{
+    auto const loose = written(k_products, "loose", sgl::emit::native_route::require);
+    auto const strict = written(k_products, "strict", sgl::emit::native_route::require);
+    REQUIRE(loose.has_value()).dump("error", loose.has_error() ? loose.error() : cc::string());
+    REQUIRE(strict.has_value()).dump("error", strict.has_error() ? strict.error() : cc::string());
+    auto const& fast = loose.value().spirv;
+    auto const& precise = strict.value().spirv;
+
+    // .fast keeps SPIR-V's own: OpDot, OpMatrixTimesVector, OpMatrixTimesMatrix and GLSL.std.450's SmoothStep
+    CHECK(counted(fast, 148) == 1);
+    CHECK(counted(fast, 145) == 1);
+    CHECK(counted(fast, 146) == 1);
+    CHECK(extended(fast, 49) == 1);
+
+    // .precise leaves the order to no driver: 16 products of the matrices, 4 of the vector and 4 of the dot
+    CHECK(counted(precise, 148) == 0);
+    CHECK(counted(precise, 145) == 0);
+    CHECK(counted(precise, 146) == 0);
+    CHECK(counted(precise, 144) == 0); // nor OpVectorTimesMatrix
+    CHECK(extended(precise, 49) == 0);
+    CHECK(counted(precise, 133) >= 64 + 16 + 4 + 3); // OpFMul, smoothstep's three among them
+    // and every float operation it writes is its own
+    CHECK(decorated(precise, 42) >= counted(precise, 133) + counted(precise, 129));
 }
 
 TEST("sgl spirv - a vector scaled by a scalar builds no splat, and an if around little is a select")

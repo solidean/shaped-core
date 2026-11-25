@@ -619,6 +619,89 @@ TEST("slib - SGL's DXIL marks each float call of a strict entry point `!dx.preci
     CHECK(floored.float_calls == loose.float_calls);
 }
 
+namespace
+{
+/// A matrix product of a matrix product, a dot and a smoothstep, at `.fast` and at `.precise`.
+constexpr cc::string_view k_products
+    = "binding work:\n"
+      "    values: mut buffer[float4]\n"
+      "\n"
+      "fun shaped(id: int3){work} -> float4:\n"
+      "    let m = mat4(work.values[0], work.values[1], work.values[2], work.values[3])\n"
+      "    let v = work.values[id.x]\n"
+      "    let p = (m * m) * v\n"
+      "    return p + float4(dot(v, p), smoothstep(v.x, v.y, v.z), 0.0, 0.0)\n"
+      "\n"
+      "@compute(64) fun loose(@thread_id id: int3){work}:\n"
+      "    work.values[id.x] = shaped(id)\n"
+      "\n"
+      "@float(.precise) @compute(64) fun strict(@thread_id id: int3){work}:\n"
+      "    work.values[id.x] = shaped(id)\n";
+
+/// How many lines of `text` hold `what`.
+[[nodiscard]] int lines_with(cc::string_view text, cc::string_view what)
+{
+    auto count = 0;
+    for (auto at = text.find(what); at >= 0; at = text.find(what, at + 1))
+        ++count;
+    return count;
+}
+} // namespace
+
+TEST("slib - at .precise both DXIL routes write a product as its scalar sums, and neither fuses one (EMIT-NEW)")
+{
+    auto compiler = ssc::dxc::compiler::create();
+    if (compiler.has_error())
+        SKIP("no DXC");
+    // SGL's own DXIL, and DXC's of SGL's HLSL with the compile's own arguments, `-Gis` at .precise
+    auto const native_of = [&](cc::string_view entry)
+    {
+        auto const e = written(k_products, entry);
+        REQUIRE(e.has_value()).dump("error", e.has_error() ? e.error() : cc::string());
+        CHECK(!compiler.value().validate(e.value().dxil).has_value()).dump("entry", entry);
+        auto const text = compiler.value().disassemble(e.value().dxil);
+        REQUIRE(text.has_value());
+        return text.value();
+    };
+    auto const text_of = [&](cc::string_view entry)
+    {
+        auto const e
+            = sgl::compile_to_text({.source = k_products, .entry_point = entry, .target = sgl::emit::target::hlsl_dx12});
+        REQUIRE(e.has_value()).dump("error", e.has_error() ? e.error() : cc::string());
+        // slib hands DXC `-Gis` from `.specials` on (EMIT-185), as a host does
+        auto options = ssc::dxc::compile_options();
+        for (auto const& arg : e.value().dxc_args)
+            options.extra_args.push_back(arg);
+        if (e.value().float_guarantee != sgl::check::float_level::fast)
+            options.extra_args.push_back(cc::string("-Gis"));
+        auto const built = compiler.value().compile(
+            {.source = e.value().text, .entry_point = e.value().entry_point, .stage = sg::shader_stage::compute},
+            options);
+        REQUIRE(built.has_value()).dump("dxc", built.has_error() ? built.error().to_string() : cc::string());
+        auto const text = compiler.value().disassemble(built.value().bytecode);
+        REQUIRE(text.has_value());
+        return text.value();
+    };
+    constexpr cc::string_view fmad = "@dx.op.tertiary.f32(i32 46,";
+    constexpr cc::string_view dot = "@dx.op.dot";
+
+    // .fast keeps the targets' own: DXIL's dot, and DXC's FMad chains of `mul`
+    CHECK(lines_with(native_of("loose"), dot) > 0);
+    auto const loose_text = text_of("loose");
+    CHECK(lines_with(loose_text, dot) > 0).dump("dxil", loose_text);
+    CHECK(lines_with(loose_text, fmad) > 0).dump("dxil", loose_text);
+
+    // .precise: the same separate products and sums on both routes, 64 + 16 + 4 of them, and smoothstep's three;
+    // `m * m` computes m(r, k) * m(k, r) and m(k, r) * m(r, k) for each r != k, which DXC shares as the one value they are
+    for (auto const& strict : {native_of("strict"), text_of("strict")})
+    {
+        CHECK(lines_with(strict, fmad) == 0).dump("dxil", strict);
+        CHECK(lines_with(strict, dot) == 0).dump("dxil", strict);
+        CHECK(lines_with(strict, "fast float") == 0).dump("dxil", strict);
+        CHECK(lines_with(strict, " = fmul float ") >= 64 - 6 + 16 + 4 + 3).dump("dxil", strict);
+    }
+}
+
 // AMD's DXIL compiler crashes on a module without it, though LLVM leaves it optional.
 // docs/bugs-external/amd-d3d12-dxil-without-llvm-ident-crashes has the reproduction.
 TEST("slib - every module SGL's DXIL writes names its producer in llvm.ident, a library's too")

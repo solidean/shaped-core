@@ -813,7 +813,13 @@ void sgl::builtins::register_math(registry& r)
         add(r, cc::format("@pure fun pow(x: {0}, y: {0}) -> {0}", t), binary<pow_of>, {}, pow_undefined);
         add(r, cc::format("@pure fun step(edge: {0}, x: {0}) -> {0}", t), binary<step_of>, {}, nullptr, false,
             "/// 0 where `x` is below `edge`, and 1 from it on.");
-        add(r, cc::format("@pure fun smoothstep(low: {0}, high: {0}, x: {0}) -> {0}", t), smoothstep, {},
+        add(r, cc::format("@pure fun smoothstep(low: {0}, high: {0}, x: {0}) -> {0}", t), smoothstep,
+            {.kind = spelling_kind::custom,
+             .custom = impl::write_ordered_smoothstep,
+             .helper = impl::ordered_smoothstep_helper,
+             .hlsl_names = impl::ordered_smoothstep_names(),
+             .wgsl_names = impl::ordered_smoothstep_names(),
+             .msl_names = impl::ordered_smoothstep_names()},
             smoothstep_undefined, false, "/// 0 up to `low`, 1 from `high` on, and a smooth Hermite curve between.");
         // EMIT-254: HLSL's `fma` takes a double alone, and `mad` is its float's, which DXIL leaves free to fuse
         add(r, cc::format("@pure fun fma(a: {0}, b: {0}, c: {0}) -> {0}", t),

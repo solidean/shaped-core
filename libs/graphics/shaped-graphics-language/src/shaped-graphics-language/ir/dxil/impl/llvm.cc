@@ -675,8 +675,7 @@ ll_value module_builder::extract_value(ll_value aggregate, u32 index)
     return push(inst_code::extract_value, ll_type(_type_args[t.first + index]), args);
 }
 
-ll_value module_builder::call(
-    ll_value callee, ll_type type, cc::span<ll_value const> args, bool is_stable, bool is_precise)
+ll_value module_builder::call(ll_value callee, ll_type type, cc::span<ll_value const> args, bool is_stable, bool is_precise)
 {
     auto raw = cc::vector<u32>::create_with_capacity(args.size() + 1);
     raw.push_back(u32(callee));

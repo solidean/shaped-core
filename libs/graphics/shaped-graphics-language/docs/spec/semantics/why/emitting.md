@@ -463,3 +463,20 @@ It is limited to the six formats that came with it, so no text of a format SGL a
 Nothing reads a query after its loop but its committed hit, which an abort keeps, so the abort changes no answer.
 It does tell the driver the traversal is over, and it keeps one rule for every early exit instead of a judgement of which exits a target needs it for.
 A commit that ends the search marks the search ended rather than aborting at once, since the body may still read its candidate, and a candidate read after an abort is one no target defines.
+
+## EMIT-NEW
+
+A port is checked against its original by comparing what the two compute, and a strict scope is where that comparison is asked to hold bit for bit.
+Every route of one scope therefore computes the one sequence of operations the rule names, rather than what each target's compiler or driver picks.
+Three gaps were measured where it did not (the contrails and volume-clouds ports, NVIDIA RTX 5080).
+DXC lowers HLSL's `mul` of a matrix and a vector to chains of DXIL's `FMad` even under `-Gis`, and NVIDIA evaluates those fused, while `*` and `+` written out stay separate.
+`dot`, `OpDot` and SPIR-V's matrix products leave the order of the sum to the driver, and a Vulkan difference came from exactly that.
+NVIDIA folded SGL's own DXIL call `Exp(Log(x))` of `pow(x, 1.0)` to `x`, where DXC's call marked `!dx.precise` was kept.
+
+`smoothstep` is written `t * (t * (3 - 2t))`, which is DXC's grouping.
+It and the written definition's `(t * t) * (3 - 2t)` each round three times with no cancellation, since `2t` is exact and `3 - 2t` is at least 1.
+So both are within about `3 * 2^-24` of the exact value, relatively, and both are exact at 0 and at 1.
+They differ for a tiny `t`: where denormals are flushed, `t * t` is zero below about `1e-19`, and `t` times the larger `3 - 2t` first is not.
+So the one DXC already writes is also the better of the two.
+
+A transcendental is no basic operation: each vendor computes `exp2` or `sin` its own way within the precision its API states, and no flag makes two of them agree.

@@ -651,7 +651,13 @@ void sgl::builtins::register_vector_math(registry& r)
     r.add_comment("// lengths and angles");
     for (auto const type : measured)
     {
-        add_function(r, "dot", {"a", type, "b", type}, element_of(type), dot);
+        add_function(r, "dot", {"a", type, "b", type}, element_of(type), dot,
+                     {.kind = spelling_kind::custom,
+                      .custom = impl::write_ordered_dot,
+                      .helper = impl::ordered_dot_helper,
+                      .hlsl_names = impl::ordered_dot_names(),
+                      .wgsl_names = impl::ordered_dot_names(),
+                      .msl_names = impl::ordered_dot_names()});
         add_function(r, "length", {"v", type}, element_of(type), length);
         add_function(r, "normalize", {"v", type}, type, normalize);
     }

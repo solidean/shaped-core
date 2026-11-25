@@ -77,6 +77,9 @@ value_ref lowering::add(op code, type_ref type, cc::span<u32 const> operands, u8
     // what follows a `break` or a `return` in its list never runs
     if (_is_terminated)
         return value_ref::none;
+    if (u8(_guarantee) >= u8(float_level::precise))
+        if (auto const strict = strict_form(code, type, operands, sub); is_valid(strict))
+            return strict;
     auto const index = u32(_out.instructions.size());
     auto const first = u32(_out.operands.size());
     for (auto const operand : operands)
@@ -95,6 +98,84 @@ value_ref lowering::add(op code, type_ref type, cc::span<u32 const> operands, u8
         _is_terminated = true;
     }
     return value_ref(index);
+}
+
+value_ref lowering::strict_form(op code, type_ref type, cc::span<u32 const> operands, u8 sub)
+{
+    switch (code)
+    {
+    case op::dot:
+    {
+        if (_out.at(type).kind != type_kind::float_)
+            return value_ref::none;
+        auto const a = value_ref(operands[0]);
+        return ordered_dot(a, value_ref(operands[1]), type, lanes_of(_out.type_of(a)));
+    }
+    case op::matrix_times_vector:
+    {
+        // row r of `m * v` is row r of `m` dotted with `v`; `m` holds its columns, so row r is lane r of each
+        auto const m = value_ref(operands[0]);
+        auto const v = value_ref(operands[1]);
+        auto const& matrix = _out.at(_out.type_of(m));
+        auto const scalar = scalar_of(type);
+        u32 rows[4];
+        for (auto r = u32(0); r < lanes_of(type); ++r)
+        {
+            auto sum = value_ref::none;
+            for (auto c = u32(0); c < matrix.count; ++c)
+            {
+                auto const product = add(
+                    op::fmul, scalar, {extracted(extracted(m, matrix.element, c), scalar, r), extracted(v, scalar, c)});
+                sum = c == 0 ? product : add(op::fadd, scalar, {sum, product});
+            }
+            rows[r] = u32(sum);
+        }
+        return add(op::construct, type, cc::span<u32 const>(rows, isize(lanes_of(type))));
+    }
+    case op::matrix_times_matrix:
+    {
+        // column j of `a * b` is `a` times column j of `b`
+        auto const a = value_ref(operands[0]);
+        auto const b = value_ref(operands[1]);
+        auto const& result = _out.at(type);
+        auto const& right = _out.at(_out.type_of(b));
+        u32 columns[4];
+        for (auto j = u32(0); j < result.count; ++j)
+            columns[j] = u32(add(op::matrix_times_vector, result.element, {a, extracted(b, right.element, j)}));
+        return add(op::construct, type, cc::span<u32 const>(columns, isize(result.count)));
+    }
+    case op::math:
+    {
+        if (math(sub) != math::smooth_step)
+            return value_ref::none;
+        // t = saturate((x - e0) / (e1 - e0)), then t * (t * (3 - 2t)): DXC's grouping, so every route computes one value.
+        // It and the written definition's (t * t) * (3 - 2t) each round three times with no cancellation, since 2t is
+        // exact and 3 - 2t is at least 1, so both are within about 3 * 2^-24 of it, and both are exact at 0 and 1.
+        // This one is kept: t * t underflows to zero for a t below about 1e-19 where denormals are flushed, and t
+        // times the larger 3 - 2t first does not, so it is also the closer of the two where t is tiny.
+        auto const low = value_ref(operands[0]);
+        auto const high = value_ref(operands[1]);
+        auto const x = value_ref(operands[2]);
+        auto const scalar = scalar_of(type);
+        auto const raw = add(op::fdiv, type, {add(op::fsub, type, {x, low}), add(op::fsub, type, {high, low})});
+        auto const t = add(op::math, type,
+                           {raw, splat(float_constant(scalar, 0.0), type), splat(float_constant(scalar, 1.0), type)},
+                           u8(math::fclamp));
+        auto const twice = add(op::fmul, type, {splat(float_constant(scalar, 2.0), type), t});
+        auto const shaped = add(op::fsub, type, {splat(float_constant(scalar, 3.0), type), twice});
+        return add(op::fmul, type, {t, add(op::fmul, type, {t, shaped})});
+    }
+    default:
+        return value_ref::none;
+    }
+}
+
+value_ref lowering::ordered_dot(value_ref a, value_ref b, type_ref scalar, u32 lanes)
+{
+    auto sum = add(op::fmul, scalar, {extracted(a, scalar, 0), extracted(b, scalar, 0)});
+    for (auto l = u32(1); l < lanes; ++l)
+        sum = add(op::fadd, scalar, {sum, add(op::fmul, scalar, {extracted(a, scalar, l), extracted(b, scalar, l)})});
+    return sum;
 }
 
 value_ref lowering::add(op code, type_ref type, std::initializer_list<value_ref> operands, u8 sub, u8 aux)

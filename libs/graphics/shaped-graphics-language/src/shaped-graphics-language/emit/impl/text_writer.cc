@@ -1351,6 +1351,7 @@ struct writer
                                   .is_vulkan = is_vulkan,
                                   .reorders_through_nvapi = p.reorders_through_nvapi,
                                   .states_micromaps = p.states_micromaps,
+                                  .is_precise = u8(p.float_guarantee) >= u8(check::float_level::precise),
                                   .arguments = arguments,
                                   .argument_types = types,
                                   .builtins = *p.m.builtins,
@@ -2014,6 +2015,7 @@ void sgl::emit::impl::write_helpers(cc::string& out, plan const& p, dialect cons
         auto const types = argument_types_of(p, d, *call);
         auto text = record->write.helper({.target = d.language(),
                                           .is_vulkan = p.which == emit::target::hlsl_vulkan,
+                                          .is_precise = u8(p.float_guarantee) >= u8(check::float_level::precise),
                                           .argument_types = types,
                                           .data = record->write.data});
         auto is_known = text.empty();

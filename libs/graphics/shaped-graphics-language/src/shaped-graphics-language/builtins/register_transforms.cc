@@ -160,6 +160,8 @@ written write_affine_apply(call_context const& c, cc::string_view w)
 {
     auto const float4 = c.builtins.at(c.builtins.find_type("float4")).spelled_in(c.target);
     auto const v = w.empty() ? c.arguments[1].text : cc::format("{}({}, {})", float4, c.arguments[1].text, w);
+    if (c.is_precise && c.target != language::wgsl)
+        return impl::write_ordered_product(c.arguments[0], {.text = v});
     if (c.target == language::hlsl)
         return {.text = cc::format("mul({}, {})", c.arguments[0].text, v)};
     return {.text = cc::format("({} * {})", v, wrapped(c.arguments[0], precedence::primary))};
@@ -274,6 +276,8 @@ void multiply_mat2(leaves in, result& out)
 /// A matrix times what stands to its right: HLSL has a function for it, and every other target the operator.
 written product(call_context const& c, written lhs, written rhs)
 {
+    if (c.is_precise && c.target != language::wgsl)
+        return impl::write_ordered_product(lhs, rhs);
     if (c.target == language::hlsl)
         return {.text = cc::format("mul({}, {})", lhs.text, rhs.text)};
     return write_infix("*", precedence::multiplicative, cc::move(lhs), cc::move(rhs));
@@ -354,7 +358,6 @@ void add_matrix_arithmetic(registry& r, cc::string_view matrix)
     impl::add_infix(r, "*", cc::format("scale_{}_after", matrix), "float", matrix, matrix, matrix_scaled<n, true>);
 }
 
-constexpr cc::string_view k_mul[] = {"mul"};
 constexpr cc::string_view k_transpose[] = {"transpose"};
 
 void add_product(registry& r,
@@ -370,7 +373,11 @@ void add_product(registry& r,
         .signature
         = cc::format("@pure @operator(\"*\") fun {}(m: {}, {}: {}) -> {}", name, matrix, parameter, rhs, result_type),
         .evaluate = evaluate,
-        .write = {.kind = spelling_kind::custom, .custom = write, .hlsl_names = k_mul},
+        .write = {.kind = spelling_kind::custom,
+                  .custom = write,
+                  .helper = impl::ordered_product_helper,
+                  .hlsl_names = impl::ordered_product_names(language::hlsl),
+                  .msl_names = impl::ordered_product_names(language::msl)},
     });
 }
 } // namespace
