@@ -1,89 +1,95 @@
-# RADV: ACO's scheduler gives a spilling BC7 encoder wrong indices in five blocks
+# RADV: ACO's scheduler reorders VGPR spills to LDS, so a reload reads the wrong value
 
-**Status:** open, reproduced standalone, not yet filed upstream, its one test skipped on that driver; measured on 2026-11-25.
-**Affects:** RADV in Mesa 26.2.0-devel (git-5c65d4fc31), an AMD Steam Machine (NAVI33, RDNA 3), SteamOS; DXC 1.9.0.5399's SPIR-V.
+**Status:** open, root cause found in Mesa's source, minimized to a 24-line shader, not yet filed upstream; measured on 2026-11-25.
+**Affects:** RADV in Mesa 26.2.0-devel (git-5c65d4fc31), an AMD Steam Machine (NAVI33, RDNA 3), SteamOS; upstream `main` has the same code.
 **Found by:** `shaped-rendering-test`'s `sr - BC7 compression reproduces every two-subset partition and holds a gradient` on `sr vulkan / vulkan`, every run, max error 121.
 **Tracked by:** [bug-sr-bc7-two-subset-radv-aco-scheduler](../../../libs/graphics/shaped-rendering/docs/issues/bug-sr-bc7-two-subset-radv-aco-scheduler.md).
 
+The directory keeps the name it was filed under, from the BC7 encoder that found it; the encoder is not part of the reproduction any more.
+
+## The cause
+
+Since `133ef9f9` ("aco: spill VGPRs to LDS if it doesn't further limit occupancy", 2026-03-27), ACO spills VGPRs to LDS before scratch, in a compute shader whose workgroup is one wave.
+The spill and reload are `ds_write_addtid_b32` and `ds_read_addtid_b32`, built with no `memory_sync_info`.
+They are `aco_spill.cpp`'s `spill_vgpr` and `reload_vgpr`, lines 1398, 1413, 1461 and 1480 at 5c65d4fc31.
+The scratch spills beside them carry `memory_sync_info(storage_vgpr_spill, semantic_private)`.
+The pre-RA scheduler, which runs after the spiller, keeps two memory instructions in order only when their storage classes intersect (`aco_scheduler.cpp`, line 753).
+An LDS spill's storage is empty, so it intersects nothing, and the scheduler moves LDS spills and reloads past each other freely, the same slot included.
+
+The likely fix is giving the four `bld.ds` calls the scratch spills' `memory_sync_info`; it is unbuilt and untested here.
+
 ## What happens
 
-The shader is SGL's BC7 encoder: one thread per 4 x 4 block, each block fitted as two subsets over its own partition, in mode 1 and then mode 3, keeping the closer.
-The image is 64 blocks, block p holding two four-level ramps that only partition p fits exactly, so every block's mode 3 encode decodes to within 2 of its source.
-As RADV compiles it, five blocks come out wrong: 19, 27, 35, 43 and 51.
-Their endpoints are right, and their 2-bit indices are not, in both subsets: subset 0 reads 0, 2 and 3 where its ramp is 0, 1, 2, 1, …, 3.
-In all five, subset 1's endpoints were swapped, so the index flip after the fit ran; many blocks that take that flip come out right.
-With `ACO_DEBUG=nosched` every block is right.
+`shader.hlsl` keeps 280 integers live through two passes, more than a lane's 256 VGPRs, in one wave of 64 threads.
+`repro.cc` computes each thread's result on the CPU as well.
+With the scheduler off, all 64 threads match; as compiled, all 64 are wrong, on every run.
 
-## The trigger
+In ACO's IR after register allocation (`RADV_DEBUG=shaders`), LDS slot 256 holds `%416` and is then reused for `%794`.
+With `ACO_DEBUG=nosched`, `%416`'s reload comes before the reuse:
 
-The module spills: ACO's dump of it holds 4336 VGPR spill and reload operations, and no private array in memory, as compiled and with the scheduler off alike.
-`ACO_DEBUG=validateir,validatera` reports nothing, and the five blocks still come out wrong under it.
+```
+ds_write_addtid_b32 %1970:m0, %416:v[62] offset0:256
+ v1: %1836:v[56] = ds_read_addtid_b32 %1970:m0 offset0:256
+ds_write_addtid_b32 %1970:m0, %794:v[246] offset0:256
+```
 
-| configuration | wrong blocks |
+As compiled, the scheduler has moved the second spill above the reload, which then reads `%794`:
+
+```
+ds_write_addtid_b32 %1970:m0, %416:v[70] offset0:256
+ds_write_addtid_b32 %1970:m0, %794:v[246] offset0:256
+ v1: %1836:v[246] = ds_read_addtid_b32 %1970:m0 offset0:256
+```
+
+None of the shader's `ds_*_addtid` instructions prints a `storage:` field, where every scratch spill prints `storage:vgpr_spill semantics:private`.
+The opposite direction happens too: in the BC7 encoder, a reload was hoisted above its own spill and read whatever the slot held before.
+LDS outlives the workgroup, so such a read is decided by what ran earlier, which is why that encoder's wrong blocks were stable alone and varied run to run inside the test binary.
+
+| configuration | threads wrong |
 |---|---|
-| as compiled | 19, 27, 35, 43, 51 |
+| as compiled | all 64 |
 | `ACO_DEBUG=nosched` | none |
-| `ACO_DEBUG=novn` | 19, 27, 35, 43, 51 |
-| `ACO_DEBUG=noopt` | 3, 11, 19, 27, 35, 43, 51 |
-| DXC at `-O3`, `-O1`, `-O0` or `-Od` | 19, 27, 35, 43, 51 at each |
-| SGL's own SPIR-V of the same encoder, in shaped-core | none |
+| `ACO_DEBUG=nosched,noopt` | none |
+| `ACO_DEBUG=nosched-ilp`, `nosched-vopd`, `force-waitcnt`, `force-waitdeps` or `novn` | all 64 |
 
-`shader.hlsl` is SGL's `hlsl-vulkan` text of the encoder, cut down by hand and still failing.
+`ACO_DEBUG=validateir,validatera` reports nothing.
 
-| cut | bug |
-|---|---|
-| the texture read replaced by a buffer of rgba8 words | stays |
-| mode 6, and the search over 64 partitions for the two closest | stays |
-| two candidate partitions down to one, the block's own | stays |
-| the push constants replaced by literals | stays; with only the bounds check literal, the wrong blocks are 3, 11, 27, 35, 43, 51 |
-| mode 1, so mode 3 runs alone | **gone** |
-| the least-squares refit of either subset | **gone** |
-| the block's opacity fixed at compile time, which lets DXC fold the mode choice | **gone** |
+## The shader is tuned
 
-So the two modes have to run in one loop, each subset refitted, with the mode chosen at run time.
-A hand-written port of the same algorithm, in float3 and with its own helper functions, does not fail; the shape the generated code has is part of the trigger.
-That the wrong blocks move when unrelated code changes points at code generation rather than at the data.
-
-## Why it is not our bug
-
-`repro.cc` is the Vulkan loader and the C++ standard library, and decodes the blocks itself.
-`spirv-val` accepts DXC's module, and the result does not change with DXC's optimization level, `-Od` included.
-On the same device and driver the module comes out right with one compiler pass switched off, and its validators find nothing.
-SGL's own SPIR-V of the same encoder passes on that device.
-
-Not ruled out: undefined behavior in the module that only the scheduler's order exposes.
-No second compiler for this GPU was available to settle it: this RADV build has no LLVM backend, and lavapipe is not installed.
+Which instructions the scheduler moves depends on where the spiller puts them, so `N` is tuned: at 280 the reorder hits a slot, and at 275 or 285 it happens not to.
+Every value is an integer and the result is exact, so the CPU check has no tolerance to argue about.
+The shader was found by writing the pattern the BC7 encoder's IR showed, once its wrong values were traced to a stale LDS reload, rather than by cutting the encoder down.
+That encoder, 2,452 lines of generated HLSL, is this entry's first version in git.
 
 ## Reproducing it
 
     uv run run.py [--vulkan-sdk <dir>] [--vendor <hex PCI id>]
 
-It compiles `shader.hlsl` with the SDK's `dxc` as shaped-core does, checks it with `spirv-val`, builds `repro.cc` with clang against the SDK, and runs it twice.
+It compiles `shader.hlsl` with the SDK's `dxc`, checks it with `spirv-val`, builds `repro.cc` with clang against the SDK, and runs it twice.
 Both runs set `RADV_DEBUG=nocache`; the second also sets `ACO_DEBUG=nosched`.
-It exits 1 when blocks are wrong only with the scheduler on, and 0 when every block is right.
-On the machine above it prints:
+It exits 1 when threads are wrong only with the scheduler on, and 0 when every thread is right.
+On the machine above it prints, the thread lists shortened:
 
 ```
 as compiled:
     device: AMD Steam Machine (RADV NAVI33), vendor 1002, radv Mesa 26.2.0-devel (git-5c65d4fc31)
-    bad=19,27,35,43,51 other=none
+    wrong=0,1,2,…,63
 ACO's scheduler off:
     device: AMD Steam Machine (RADV NAVI33), vendor 1002, radv Mesa 26.2.0-devel (git-5c65d4fc31)
-    bad=none other=none
-REPRODUCED: blocks 19,27,35,43,51 decode wrong as compiled, and every block is right with ACO's scheduler off
+    wrong=none
+REPRODUCED: threads 0,1,2,…,63 are wrong as compiled, and every thread is right with ACO's scheduler off
 ```
 
 ## In the tree
 
 Nothing works around it.
-A second test trips over it intermittently: `sr - BC1 and BC7 compress any mip level, a partial block and a single texel included`.
-There BC7's level-1 encode differs from the same image encoded alone in 7 or 8 texels, in about one run of the whole binary in three, never alone.
-With `ACO_DEBUG=nosched` the whole binary passed 13 runs of 13; a likely reading, unconfirmed, is a spill slot read before it is written, so what ran before decides.
-`bc-compress-test.cc` skips the partition test, and that test's BC7 half, by sg's known issue of this name: a vulkan context on the DXC route, on `radv` whose `driverInfo` starts `Mesa 26.2.0-devel`.
-A Mesa update past that version runs the test again, and so does `uv run dev.py test --known-issues`.
+`bc-compress-test.cc` skips the partition test, and the BC7 half of `sr - BC1 and BC7 compress any mip level, a partial block and a single texel included`, by sg's known issue of this name.
+The key is a vulkan context on the DXC route, on `radv` whose `driverInfo` starts `Mesa 26.2.0-devel`.
+SGL's own SPIR-V of the encoder passes on that device, most likely because it spills differently, so the key leaves that route out.
+A Mesa update past that version runs the tests again, and so does `uv run dev.py test --known-issues`.
 
 ## Re-checking
 
 On a Mesa update, run `run.py`; an exit of 0 retires this entry, its issue and the skip.
 An exit of 1 on a new version wants that version added to the entry's key in `known_issues.cc`.
-A report to Mesa wants `RADV_DEBUG=shaders` output of both arms beside the module, and would settle the undefined-behavior question.
+An exit of 0 on a Mesa that still has the bug is possible, since the shader is tuned: before retiring the entry, check `aco_spill.cpp`'s LDS spills for a `memory_sync_info`.

@@ -3,10 +3,10 @@
 # requires-python = ">=3.14"
 # dependencies = []
 # ///
-"""Drive the RADV ACO scheduler BC7 reproduction.
+"""Drive the reproduction of RADV's LDS spills reordered by ACO's scheduler.
 
 Standalone: no shaped-core imports, no dev.py.
-It compiles shader.hlsl to SPIR-V with the Vulkan SDK's DXC, as shaped-core does, checks it with spirv-val, and builds repro.cc against the SDK.
+It compiles shader.hlsl to SPIR-V with the Vulkan SDK's DXC, checks it with spirv-val, and builds repro.cc against the SDK.
 Then it runs the shader twice, as the driver compiles it and with ACO's scheduler off (ACO_DEBUG=nosched), each without RADV's shader cache.
 
     uv run run.py [--vulkan-sdk <dir>] [--vendor <hex PCI id>]
@@ -14,7 +14,7 @@ Then it runs the shader twice, as the driver compiles it and with ACO's schedule
 `--vulkan-sdk` defaults to $VULKAN_SDK, then to the newest `~/tools/vulkan-sdk/<version>`.
 `--vendor` picks the device, `1002` for AMD; the first GPU otherwise.
 
-Exits 1 when blocks decode wrong as compiled and right with the scheduler off, 0 when every block decodes right, 2 when the run is inconclusive.
+Exits 1 when threads are wrong as compiled and all right with the scheduler off, 0 when every thread is right, 2 when the run is inconclusive.
 """
 
 from __future__ import annotations
@@ -29,8 +29,7 @@ import tempfile
 from pathlib import Path
 
 HERE = Path(__file__).parent
-# shaped-core's DXC arguments for a vulkan compute shader, less the flags that change nothing here
-DXC_ARGS = ["-E", "bc7_cs", "-T", "cs_6_8", "-O3", "-spirv", "-fspv-target-env=vulkan1.3"]
+DXC_ARGS = ["-E", "main", "-T", "cs_6_8", "-O3", "-spirv", "-fspv-target-env=vulkan1.3"]
 ARMS = [
     ("as compiled", {}),
     ("ACO's scheduler off", {"ACO_DEBUG": "nosched"}),
@@ -95,7 +94,7 @@ def main() -> int:
         print("no Vulkan SDK found; pass --vulkan-sdk <dir>")
         return 2
     # one stable directory rather than a fresh temporary one, so reruns leave no litter
-    workdir = Path(tempfile.gettempdir()) / "radv-aco-scheduler-bc7-repro"
+    workdir = Path(tempfile.gettempdir()) / "radv-aco-lds-spill-repro"
     workdir.mkdir(exist_ok=True)
     exe = build(workdir, sdk)
     if exe is None:
@@ -112,20 +111,20 @@ def main() -> int:
         print(f"{label}:")
         for line in out.stdout.strip().splitlines():
             print(f"    {line}")
-        found = re.search(r"bad=(\S+) other=(\S+)", out.stdout)
+        found = re.search(r"wrong=(\S+)", out.stdout)
         if out.returncode == 0 and found is not None:
-            results[label] = found.groups()
+            results[label] = found.group(1)
     if len(results) != len(ARMS):
         print("inconclusive: an arm did not complete")
         return 2
-    (bad, other), (bad_off, other_off) = results["as compiled"], results["ACO's scheduler off"]
-    if bad == "none":
-        print("not reproduced: every block decodes to its source")
+    wrong, wrong_off = results["as compiled"], results["ACO's scheduler off"]
+    if wrong == "none":
+        print("not reproduced: every thread matches the CPU")
         return 0
-    if bad_off == "none" and other_off == "none":
-        print(f"REPRODUCED: blocks {bad} decode wrong as compiled, and every block is right with ACO's scheduler off")
+    if wrong_off == "none":
+        print(f"REPRODUCED: threads {wrong} are wrong as compiled, and every thread is right with ACO's scheduler off")
         return 1
-    print(f"inconclusive: blocks {bad} decode wrong, and the scheduler-off arm is wrong too (bad={bad_off} other={other_off})")
+    print(f"inconclusive: threads {wrong} are wrong, and the scheduler-off arm is wrong too ({wrong_off})")
     return 2
 
 

@@ -22,11 +22,12 @@ Measured:
   `ACO_DEBUG=novn` still fails the same five blocks; `ACO_DEBUG=noopt` fails those and blocks 3 and 11.
 - This RADV build has no LLVM backend (`RADV_DEBUG=llvm` aborts), and no lavapipe is installed, so no second compiler was tried.
 
-It reproduces standalone: [docs/bugs-external/radv-aco-scheduler-wrong-bc7-indices](../../../../../docs/bugs-external/radv-aco-scheduler-wrong-bc7-indices/readme.md).
-There `spirv-val` accepts DXC's module, every DXC optimization level fails alike, and ACO's validators find nothing.
-The module keeps no array in memory and spills VGPRs heavily, so the scheduler's handling of spill code is the likelier trigger.
-Undefined behavior in the module that only the scheduler's order exposes is not ruled out.
+The cause is in ACO, found and minimized: [docs/bugs-external/radv-aco-scheduler-wrong-bc7-indices](../../../../../docs/bugs-external/radv-aco-scheduler-wrong-bc7-indices/readme.md).
+ACO spills VGPRs to LDS with `ds_*_addtid` instructions that carry no memory sync info, so its pre-RA scheduler reorders a spill and a reload of the same LDS slot.
+In this encoder a reload inside the partition-anchor table lookup was hoisted above its own spill, so the lanes of one block column read a stale anchor.
+A 24-line integer shader in that entry reproduces it with an exact CPU check, and has no undefined behavior to expose.
 
 `sr - BC1 and BC7 compress any mip level, a partial block and a single texel included` trips over it too, intermittently and only within the whole binary; `nosched` passes it.
+A stale LDS slot explains that: LDS outlives a workgroup, so what ran before decides what the reload reads.
 Both skip on that driver version, on the DXC route alone, through `sg::known_issue_affecting`.
 Next: report it to Mesa with that entry.

@@ -62,7 +62,8 @@ constexpr sg::known_issue registry[] = {
      .symptom = "NVIDIA's driver loses workgroup atomics of some mesh-shader invocations",
      .affects = [](sg::context const& ctx) { return is_hardware(ctx, vendor_nvidia); }},
     {.id = "radv-aco-scheduler-wrong-bc7-indices",
-     .symptom = "RADV in Mesa 26.2.0-devel gives a spilling BC7 encoder from DXC's SPIR-V wrong indices",
+     .symptom = "RADV in Mesa 26.2.0-devel reorders ACO's VGPR spills to LDS, so DXC's spilling BC7 encoder reads "
+                "stale values",
      .affects =
          [](sg::context const& ctx)
      {
