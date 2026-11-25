@@ -20,7 +20,7 @@ It packs every half's midpoint to its neighbor and the floats a step either side
 A value a half holds exactly packs to that half everywhere, and so does an infinity; a NaN packs to a NaN.
 
 It is the target's conversion and no route's: the two routes of each context agree to the bit.
-[bug-sgl-half-conversion-rounds-toward-zero-on-amd](bug-sgl-half-conversion-rounds-toward-zero-on-amd.md) is the same finding for `f as half` on AMD.
+[bug-sgl-half-conversion-rounds-toward-zero-on-amd](.closed/2026/11/bug-sgl-half-conversion-rounds-toward-zero-on-amd.md) is the same finding for `f as half` on AMD.
 The corpus's `half_math.sgl` saw no such thing on NVIDIA's dx12, so there `LegacyF32ToF16` truncates where a conversion does not.
 
 What would settle it:

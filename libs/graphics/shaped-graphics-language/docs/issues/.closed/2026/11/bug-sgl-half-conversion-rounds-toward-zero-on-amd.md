@@ -3,6 +3,8 @@ created: 2026-11-13
 tags: [half, amd, dx12, vulkan]
 refs:
   - file: libs/graphics/shaped-graphics/tests/differential/corpus/half_math.sgl
+closed: 2026-11-25
+resolution: fixed
 ---
 
 # On AMD a float converted to a half rounds toward zero, as D3D and Vulkan allow, where EVAL-96 rounds to nearest
