@@ -8,6 +8,8 @@ refs:
   - test: "sg differential - every corpus entry point computes on the GPU what SGL's interpreter says"
   - test: "sgl interpret bounds - *"
   - issue: bug-sg-diff-half-corpus-fails-on-intel
+closed: 2026-11-25
+resolution: fixed
 ---
 
 # The interpreter bounds what a GPU may compute under an entry point's float level, and the differential test holds the GPU to that range
