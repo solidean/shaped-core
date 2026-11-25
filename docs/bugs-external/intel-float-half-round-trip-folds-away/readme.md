@@ -60,10 +60,11 @@ SGL writes `(x as half) as float` as the casts on every target, so the vulkan sp
 On D3D12 the intrinsics round, toward zero, which would be a workaround only where toward zero is acceptable; EVAL-96 says to nearest.
 [bug-sg-diff-half-corpus-fails-on-intel](../../../libs/graphics/shaped-graphics/docs/issues/bug-sg-diff-half-corpus-fails-on-intel.md) tracks it.
 
-## Open
+## The rounding each API allows
 
-- D3D's WARP converts a float to a half toward zero, through the casts and through `f32tof16` alike, where EVAL-96 rounds to nearest.
-  Whether D3D specifies toward zero is not looked up; if it does, `bug-sgl-half-conversion-rounds-toward-zero-on-amd` describes D3D's rule rather than AMD's bug.
+D3D rounds a conversion to another float format toward zero, by its data conversion rules, which WARP and the AMD iGPU both do.
+Vulkan leaves it to the implementation, nearest or toward zero, unless the shader asks with `RoundingModeRTE`.
+So toward zero and to nearest are both right, and only a result no half holds is wrong, which is what `run.py` judges.
 
 ## What to re-check after a driver update
 
