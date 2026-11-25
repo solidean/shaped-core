@@ -76,7 +76,10 @@ REPRODUCED: blocks 19,27,35,43,51 decode wrong as compiled, and every block is r
 ## In the tree
 
 Nothing works around it.
-`bc-compress-test.cc` skips the partition test by sg's known issue of this name: a vulkan context on the DXC route, on `radv` whose `driverInfo` starts `Mesa 26.2.0-devel`.
+A second test trips over it intermittently: `sr - BC1 and BC7 compress any mip level, a partial block and a single texel included`.
+There BC7's level-1 encode differs from the same image encoded alone in 7 or 8 texels, in about one run of the whole binary in three, never alone.
+With `ACO_DEBUG=nosched` the whole binary passed 13 runs of 13; a likely reading, unconfirmed, is a spill slot read before it is written, so what ran before decides.
+`bc-compress-test.cc` skips the partition test, and that test's BC7 half, by sg's known issue of this name: a vulkan context on the DXC route, on `radv` whose `driverInfo` starts `Mesa 26.2.0-devel`.
 A Mesa update past that version runs the test again, and so does `uv run dev.py test --known-issues`.
 
 ## Re-checking

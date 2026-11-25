@@ -27,5 +27,6 @@ There `spirv-val` accepts DXC's module, every DXC optimization level fails alike
 The module keeps no array in memory and spills VGPRs heavily, so the scheduler's handling of spill code is the likelier trigger.
 Undefined behavior in the module that only the scheduler's order exposes is not ruled out.
 
-The test skips on that driver version, on the DXC route alone.
+`sr - BC1 and BC7 compress any mip level, a partial block and a single texel included` trips over it too, intermittently and only within the whole binary; `nosched` passes it.
+Both skip on that driver version, on the DXC route alone, through `sg::known_issue_affecting`.
 Next: report it to Mesa with that entry.
