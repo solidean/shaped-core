@@ -19,8 +19,8 @@ void sgl::ir::chain_sums(program& p)
                     ++uses[index_of(value_ref(operands[k]))];
         }
     auto is_taken = cc::vector<bool>::create_filled(p.instructions.size(), false);
-    auto const is_sum
-        = [&](instruction const& i) { return i.code == op::fadd && i.guarantee == check::float_level::fast; };
+    auto const is_sum = [&](instruction const& i)
+    { return i.code == op::fadd && u8(i.guarantee) <= u8(check::float_level::specials); };
 
     struct leaf
     {

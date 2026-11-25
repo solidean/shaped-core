@@ -737,7 +737,10 @@ void writer::define_one(u32 index, ll_value leaf)
 
 u8 writer::flags_of(instruction const& i) const
 {
-    // the level above `fast` keeps what the flags would give away, as `-Gis` does for text
+    // `specials` keeps NaNs, infinities and signed zeros, which `unsafe_algebra` gives away with contraction in LLVM 3.7,
+    // so a reciprocal is the one license it states
+    if (i.guarantee == check::float_level::specials)
+        return fp_flags::allow_reciprocal;
     if (i.guarantee != check::float_level::fast)
         return 0;
     return fp_flags::unsafe_algebra | fp_flags::no_nans | fp_flags::no_infs | fp_flags::no_signed_zeros

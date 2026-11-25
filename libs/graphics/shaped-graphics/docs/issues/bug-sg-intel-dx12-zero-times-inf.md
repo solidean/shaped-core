@@ -4,7 +4,7 @@ parent: epic-sgl-float-guarantee-ladder
 refs:
   - file: libs/graphics/shaped-graphics/tests/compute/compute-float-specials-test.cc
   - file: docs/bugs-external/intel-d3d12-strict-reciprocal-product-folds-to-one/readme.md
-  - test: "sg - an SGL float keeps NaNs, infinities, signed zeros and the order of a sum on the GPU"
+  - test: "sg - an SGL float keeps NaNs, infinities and signed zeros on the GPU"
 ---
 
 # Intel's dx12 driver folds a strict (1 / x) * x to 1 where x is zero

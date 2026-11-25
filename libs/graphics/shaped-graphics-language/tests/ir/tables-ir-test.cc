@@ -1,3 +1,6 @@
+#include <babel-data/shader/dxil_container.hh>
+#include <babel-data/shader/llvm37.hh>
+#include <babel-data/shader/llvm_bitstream.hh>
 #include <clean-core/math/bit.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics-language/driver/compile_to_text.hh>
@@ -144,4 +147,62 @@ TEST("sgl dxil - at .fast a vector's product of constants that cancel writes the
     // simplify cancels it before the writer, so no constant of it is left in the module either
     CHECK(same_module("x * 255.0 / 255.0", "x"));
     CHECK(!same_module("x / 3.0", "x"));
+}
+
+namespace
+{
+/// The flags of every float binop in the DXIL SGL writes of `x * 2.0 + 1.0` at `level`.
+[[nodiscard]] cc::vector<u32> binop_flags_at(sgl::check::float_level level)
+{
+    auto const e = sgl::compile_to_text({.source = "binding io:\n"
+                                                   "    values: mut buffer[float]\n"
+                                                   "\n"
+                                                   "@compute(64) fun cs(@thread_id id: int3){io}:\n"
+                                                   "    io.values[id.x] = io.values[id.x] * 2.0 + 1.0\n",
+                                         .entry_point = "cs",
+                                         .target = sgl::emit::target::hlsl_dx12,
+                                         .float_floor = level,
+                                         .native = sgl::emit::native_route::require});
+    REQUIRE(e.has_value()).dump("error", e.has_error() ? e.error() : cc::string());
+    auto const c = babel::dxil::read(e.value().dxil);
+    REQUIRE(c.has_value());
+    auto const* const part = c.value().part_named("DXIL");
+    REQUIRE(part != nullptr);
+    auto const p = babel::dxil::program_of(*part);
+    REQUIRE(p.has_value());
+    auto const bc = babel::llvm::read_bitstream(p.value().bitcode);
+    REQUIRE(bc.has_value());
+    auto const m = babel::llvm37::read(bc.value());
+    REQUIRE(m.has_value());
+    auto flags = cc::vector<u32>();
+    for (auto const& f : m.value().functions)
+        if (f.body >= 0)
+            for (auto const& i : m.value().bodies[f.body].instructions)
+                if (i.code == babel::llvm37::inst_code::binop)
+                    flags.push_back(i.flags);
+    return flags;
+}
+} // namespace
+
+TEST("sgl dxil - each float level states only what it keeps, a reciprocal alone at .specials (EMIT-281)")
+{
+    using sgl::ir::dxil::impl::fp_flags;
+    auto const fast = u32(fp_flags::unsafe_algebra | fp_flags::no_nans | fp_flags::no_infs | fp_flags::no_signed_zeros
+                          | fp_flags::allow_reciprocal);
+    struct leveled
+    {
+        sgl::check::float_level level;
+        u32 flags;
+    };
+    leveled const expected[] = {{sgl::check::float_level::fast, fast},
+                                {sgl::check::float_level::specials, u32(fp_flags::allow_reciprocal)},
+                                {sgl::check::float_level::precise, 0},
+                                {sgl::check::float_level::ieee, 0}};
+    for (auto const& [level, want] : expected)
+    {
+        auto const flags = binop_flags_at(level);
+        CHECK(flags.size() == 2); // the multiply and the add
+        for (auto const f : flags)
+            CHECK(f == want);
+    }
 }

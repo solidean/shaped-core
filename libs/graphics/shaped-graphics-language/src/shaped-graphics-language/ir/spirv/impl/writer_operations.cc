@@ -66,7 +66,7 @@ struct op_rule
     op code = op::unreachable;
     rule_kind kind = rule_kind::none;
     u32 opcode = 0;
-    /// A guarantee stricter than `fast` decorates it `NoContraction`.
+    /// A guarantee that keeps the order of evaluation, `precise` or `ieee`, decorates it `NoContraction`.
     bool keeps_contraction = false;
 };
 
@@ -409,7 +409,7 @@ void writer::frag_coord(instruction const& i, u32 id)
     emit(_code, spv::CompositeExtract, {scalar, w, loaded, 3u});
     emit(_code, spv::FDiv, {scalar, reciprocal, one, w});
     // the division is the operation's own, so it keeps its guarantee as the table's arithmetic does
-    if (i.guarantee != check::float_level::fast)
+    if (u8(i.guarantee) >= u8(check::float_level::precise))
         emit(_annotations, spv::Decorate, {reciprocal, spv::NoContraction});
     emit(_code, spv::CompositeInsert, {id_of(i.type), id, reciprocal, loaded, 3u});
 }
@@ -570,7 +570,7 @@ void writer::instruction_of(u32 index)
     auto const id = _instruction_ids[index];
     auto const operands = _p.operands_of(i);
     auto const& rule = k_rule_of.rules[isize(i.code)];
-    if (i.guarantee != check::float_level::fast && rule.keeps_contraction)
+    if (u8(i.guarantee) >= u8(check::float_level::precise) && rule.keeps_contraction)
         emit(_annotations, spv::Decorate, {id, spv::NoContraction});
     if (i.aux == k_ir_nonuniform && (i.code == op::access_chain || i.code == op::load || i.code == op::combine_sampler))
         nonuniform(i, id);

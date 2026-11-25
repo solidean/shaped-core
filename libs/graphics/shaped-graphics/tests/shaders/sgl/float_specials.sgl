@@ -1,4 +1,5 @@
-// IEEE behaviour a fast-math compiler would fold away: NaNs, infinities, signed zeros and an unreassociated sum.
+// IEEE behaviour a fast-math compiler would fold away: NaNs, infinities and signed zeros.
+// The order of a sum is `.precise`'s, so result 5 is left unwritten; `.specials` may reassociate.
 // The inputs arrive in a buffer, so no compiler sees a constant to fold before the GPU's own does.
 
 binding float_specials:
@@ -20,7 +21,6 @@ binding float_specials:
     float_specials.results[2] = inf * zero
     float_specials.results[3] = negative_zero + zero
     float_specials.results[4] = negative_zero
-    float_specials.results[5] = (big + one) - big
     float_specials.results[6] = -inf
     float_specials.comparisons[0] = if nan != nan => 1u else 0u
     float_specials.comparisons[1] = if nan == nan => 1u else 0u

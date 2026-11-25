@@ -17,7 +17,7 @@ namespace shaders = sg::test::sgl_shaders;
 
 // The SGL fixture in tests/shaders/sgl/float_specials.sgl: what a float is on the GPU, against EVAL-6's IEEE number.
 
-ASYNC_INVOCABLE_TEST("sg - an SGL float keeps NaNs, infinities, signed zeros and the order of a sum on the GPU",
+ASYNC_INVOCABLE_TEST("sg - an SGL float keeps NaNs, infinities and signed zeros on the GPU",
                      (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
@@ -63,8 +63,6 @@ ASYNC_INVOCABLE_TEST("sg - an SGL float keeps NaNs, infinities, signed zeros and
     // -0 + 0 is +0
     CHECK(bits(3) == 0x00000000u);
     CHECK(bits(4) == 0x80000000u);
-    // (1e30 + 1) - 1e30 rounds the 1 away
-    CHECK(got[5] == 0.0f);
     CHECK(bits(6) == 0xff800000u);
 
     auto const compared = co_await comparisons_back.data();

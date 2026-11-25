@@ -320,6 +320,27 @@ TEST("sgl spirv - an entry point's guarantee stands on each float operation it k
     CHECK(decorated(floored.value().spirv, 42) == 2);
 }
 
+TEST("sgl spirv - at .specials a float operation may contract, so it is undecorated, while its NaNs are kept "
+     "(EMIT-233)")
+{
+    auto const at = [](sgl::check::float_level level)
+    {
+        auto const e = sgl::compile_to_text({.source = k_doubled,
+                                             .entry_point = "run",
+                                             .target = sgl::emit::target::hlsl_vulkan,
+                                             .float_floor = level,
+                                             .native = sgl::emit::native_route::require});
+        REQUIRE(e.has_value()).dump("error", e.has_error() ? e.error() : cc::string());
+        return e.value().spirv;
+    };
+    auto const specials = at(sgl::check::float_level::specials);
+    auto const precise = at(sgl::check::float_level::precise);
+    CHECK(decorated(specials, 42) == 0);
+    CHECK(decorated(precise, 42) == 2);
+    CHECK(with_mode(specials, 4461) == 1); // SignedZeroInfNanPreserve, for 32-bit floats
+    CHECK(with_mode(precise, 4461) == 1);
+}
+
 TEST("sgl spirv - a pixel stage's position keeps its guarantee on the reciprocal it writes of w (EMIT-281)")
 {
     // FragCoord's w is 1/w where the program reads w, so its one division is the program's own arithmetic

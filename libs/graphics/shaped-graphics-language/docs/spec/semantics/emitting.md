@@ -502,8 +502,9 @@ fn main_ps(p: pixel_input) -> target_ {
   `require` makes an entry point with no lowering yet the error `unsupported`, naming what it holds, and `prefer` writes the text and says why in `emitted_source::native_gap`.
   Every stage lowers, and what does not yet is named by [feat-sgl-native-compute-gaps](../../issues/feat-sgl-native-compute-gaps.md); a target's own text never does.
   Float `!=` is unordered, a shift's count is masked to its width, and `and` and `or` branch where their right side could go wrong; nothing here widens what a program may do.
-* **EMIT-233** A float operation of an entry point past `fast` is decorated `NoContraction`, and the entry point states `SignedZeroInfNanPreserve` per float width, and `DenormPreserve` for `ieee`.
-  This is what DXC's `-Gis` and `-denorm preserve` write, per operation in the layer, so a guarantee narrower than an entry point needs no change to the form.
+* **EMIT-233** A float operation at `precise` or `ieee` is decorated `NoContraction`, an entry point past `fast` states `SignedZeroInfNanPreserve` per float width, and one at `ieee` `DenormPreserve`.
+  At `specials` an operation stays undecorated, since that level may contract and reassociate; DXC's `-Gis` cannot say so and decorates it too, which is stricter and allowed.
+  The decoration is per operation in the layer, so a guarantee narrower than an entry point needs no change to the form.
 * **EMIT-234** Where a compile asks, `hlsl-dx12` is written as a DXIL container by SGL itself: `text_request::native`, `sgl emit --target dxil`.
   It takes what EMIT-232 says of a plan, of `require` and `prefer`, and of what a program may do.
   The container states the shader model EMIT-264 gives.
@@ -850,9 +851,11 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
   A transcendental keeps the target's own precision, which no level makes alike across vendors.
   `determinant` stays each target's own.
   A subgroup's float reduction or scan, and a float atomic, add in the order the hardware picks.
-  From `.specials` on, a call of a target's operation carries its precise mark, as DXC's `-Gis` writes it.
-  SGL's own DXIL writes no fast-math flag, and marks each call of a DXIL operation that gives a float `!dx.precise`, naming one `!{i32 1}`.
-  SGL's own SPIR-V decorates each float arithmetic instruction `NoContraction`, and an extended instruction stays undecorated, as DXC writes it.
+  From `.specials` on, a call of a target's operation in the text carries its precise mark, as DXC's `-Gis` writes it, which holds `.specials` stricter than it asks.
+  SGL's own routes mark only what the level keeps.
+  Their DXIL writes no fast-math flag at `.precise` and `.ieee`, and marks each call of a DXIL operation that gives a float `!dx.precise`, naming one `!{i32 1}`.
+  At `.specials` it writes `arcp` alone and marks no call: LLVM 3.7's `fast` would give NaNs away with contraction, so DXIL cannot state a contraction that keeps them.
+  Their SPIR-V decorates each float arithmetic instruction `NoContraction` at `.precise` and `.ieee` (EMIT-233), and an extended instruction stays undecorated, as DXC writes it.
   At `.fast` and `.specials` the targets' own products, `smoothstep`, geometry, `mix` and `cross` stay, and at `.fast` nothing is marked.
   What no single operation states, the denormals and SPIR-V's float execution modes, stays the entry point's.
   How a route keeps the guarantee of a scope narrower than its entry point is its own.
