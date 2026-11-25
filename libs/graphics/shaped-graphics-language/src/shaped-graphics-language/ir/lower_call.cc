@@ -1148,6 +1148,32 @@ value_ref lowering::call(flat_expr const& x, flat_call const& c)
                                          : step == 1 ? math::sclamp
                                                      : math::uclamp);
         }
+        // EVAL-88: each byte is floor(clamped * scale + 0.5), where GLSL.std.450's packs round to the nearest byte
+        if ((fn == math::pack_unorm4x8 || fn == math::pack_snorm4x8)
+            && _plan.compiled_for.api == check::graphics_api::vulkan)
+        {
+            auto const is_signed = fn == math::pack_snorm4x8;
+            auto const lane = scalar_of(_out.type_of(args[0]));
+            auto const low = float_constant(lane, is_signed ? -1.0 : 0.0);
+            auto const high = float_constant(lane, 1.0);
+            auto const scale = float_constant(lane, is_signed ? 127.0 : 255.0);
+            auto const half = float_constant(lane, 0.5);
+            auto word = value_ref::none;
+            for (auto l = u32(0); l < 4; ++l)
+            {
+                auto const unit = add(op::math, lane, {extracted(args[0], lane, l), low, high}, u8(math::fclamp));
+                auto const scaled = add(op::fadd, lane, {add(op::fmul, lane, {unit, scale}), half});
+                auto const rounded = add(op::math, lane, {scaled}, u8(math::floor));
+                auto const byte
+                    = is_signed
+                        ? add(op::bit_and, _uint,
+                              {add(op::bitcast, _uint, {add(op::f_to_s, _int, {rounded})}), uint_constant(0xffu)})
+                        : add(op::f_to_u, _uint, {rounded});
+                auto const placed = l == 0 ? byte : add(op::shift_left, _uint, {byte, uint_constant(8 * l)});
+                word = l == 0 ? placed : add(op::bit_or, _uint, {word, placed});
+            }
+            return word;
+        }
         // a scalar beside vectors stands for a vector of it, where the call gives one;
         // an unpack's word is one scalar whatever its result, and refract's ratio is one too
         auto const takes_scalar = fn == math::refract || fn == math::unpack_half2x16 || fn == math::unpack_snorm4x8

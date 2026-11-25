@@ -100,30 +100,11 @@ u32 canonical_halves(u32 word)
     return one(word & 0xffffu) | (one(word >> 16) << 16);
 }
 
-/// How a pack's byte may round its lane times 255 or 127: EVAL-88's `floor(scaled + 0.5)` with the product and the sum
-/// each rounded to a float, which a fused multiply-add rounding the sum once gives too;
-/// or the product rounded to a float and then to the nearest byte, a tie to the even one, as GLSL.std.450's packs do.
-enum class byte_rounding
+/// EVAL-88's byte of a lane: `floor(scaled + 0.5)` with the product and the sum each rounded to a float, which a fused
+/// multiply-add rounding the sum once gives too.
+i32 byte_of(f32 unit, f32 scale)
 {
-    floor_half_up,
-    nearest_even,
-};
-
-i32 byte_of(f32 unit, f32 scale, byte_rounding r)
-{
-    auto const scaled = unit * scale;
-    switch (r)
-    {
-    case byte_rounding::floor_half_up:
-        return i32(tg::floor(scaled + 0.5f));
-    case byte_rounding::nearest_even:
-    {
-        auto const below = tg::floor(scaled);
-        auto const rest = scaled - below;
-        return i32(below) + (rest > 0.5f || (rest == 0.5f && i32(below) % 2 != 0) ? 1 : 0);
-    }
-    }
-    return 0;
+    return i32(tg::floor(unit * scale + 0.5f));
 }
 
 /// The unit a lane is clamped to before it is scaled.
@@ -132,34 +113,13 @@ f32 unit_of(f32 x, bool is_snorm)
     return cc::clamp(x, is_snorm ? -1.0f : 0.0f, 1.0f);
 }
 
-/// `v` packed as unorm or snorm bytes, every lane rounded by `r`.
-u32 bytes_of(float4 v, bool is_snorm, byte_rounding r)
+/// `v` packed as unorm or snorm bytes.
+u32 bytes_of(float4 v, bool is_snorm)
 {
     auto packed = 0u;
     for (auto l = 0; l < 4; ++l)
-        packed |= (u32(byte_of(unit_of(v[l], is_snorm), is_snorm ? 127.0f : 255.0f, r)) & 0xffu) << (8 * l);
+        packed |= (u32(byte_of(unit_of(v[l], is_snorm), is_snorm ? 127.0f : 255.0f)) & 0xffu) << (8 * l);
     return packed;
-}
-
-/// Whether each byte of `word` is EVAL-88's byte of its lane, or the nearest one where `nearest_is_allowed`.
-bool are_bytes_of(u32 word, float4 v, bool is_snorm, bool nearest_is_allowed)
-{
-    for (auto l = 0; l < 4; ++l)
-    {
-        auto const byte = (word >> (8 * l)) & 0xffu;
-        auto const unit = unit_of(v[l], is_snorm);
-        auto const scale = is_snorm ? 127.0f : 255.0f;
-        auto const is = [&](byte_rounding r) { return byte == (u32(byte_of(unit, scale, r)) & 0xffu); };
-        if (!is(byte_rounding::floor_half_up) && !(nearest_is_allowed && is(byte_rounding::nearest_even)))
-            return false;
-    }
-    return true;
-}
-
-/// Whether EVAL-88's byte and the nearest one disagree on a byte of `v`.
-bool is_byte_tie(float4 v, bool is_snorm)
-{
-    return bytes_of(v, is_snorm, byte_rounding::floor_half_up) != bytes_of(v, is_snorm, byte_rounding::nearest_even);
 }
 
 /// A byte unpacked: `byte / scale`, which `.fast` may compute as `byte * (1 / scale)`, as DXC does.
@@ -278,8 +238,6 @@ cc::shared_async<outputs> run(sg::context& ctx,
 /// exactly; a value between two halves to the nearest, or toward zero where `.toward_zero` is counted.
 struct held
 {
-    /// TEMPORARY(bug-sgl-spirv-pack-bytes-round-ties-to-even): a byte taken to the nearest, where that is allowed.
-    bool nearest_bytes = false;
     isize toward_zero = 0;
     isize rounded = 0;
 };
@@ -297,16 +255,16 @@ void hold_to_cpu(outputs const& o, cc::span<float4 const> values, cc::span<u32 c
         {
             auto const unorm = o.packed[i][0];
             auto const snorm = o.packed[i][1];
-            CHECK(report(are_bytes_of(unorm, v, false, h.nearest_bytes)))
+            CHECK(report(unorm == bytes_of(v, false)))
                 .dump("route", route)
                 .dump("x", v)
                 .dump("gpu", unorm)
-                .dump("cpu", bytes_of(v, false, byte_rounding::floor_half_up));
-            CHECK(report(are_bytes_of(snorm, v, true, h.nearest_bytes)))
+                .dump("cpu", bytes_of(v, false));
+            CHECK(report(snorm == bytes_of(v, true)))
                 .dump("route", route)
                 .dump("x", v)
                 .dump("gpu", snorm)
-                .dump("cpu", bytes_of(v, true, byte_rounding::floor_half_up));
+                .dump("cpu", bytes_of(v, true));
         }
         for (auto const pair : {0, 1})
         {
@@ -404,8 +362,7 @@ ASYNC_INVOCABLE_TEST("sg - every half and byte packs and unpacks alike through D
     REQUIRE(through_dxc.unpacked.size() == 3 * values.size());
     REQUIRE(through_native.unpacked.size() == 3 * values.size());
 
-    // TEMPORARY(bug-sgl-spirv-pack-bytes-round-ties-to-even): GLSL.std.450's packs take a byte to the nearest
-    auto native_held = held{.nearest_bytes = !takes_dxil};
+    auto native_held = held();
     auto dxc_held = held();
     hold_to_cpu(through_native, values, words, "native", native_held);
     hold_to_cpu(through_dxc, values, words, "dxc", dxc_held);
@@ -420,11 +377,10 @@ ASYNC_INVOCABLE_TEST("sg - every half and byte packs and unpacks alike through D
             auto const is_half = lane >= 2;
             auto const a = is_half ? canonical_halves(through_native.packed[i][lane]) : through_native.packed[i][lane];
             auto const b = is_half ? canonical_halves(through_dxc.packed[i][lane]) : through_dxc.packed[i][lane];
-            // what the SPIR-V route's byte ties, and every target's byte of a NaN, leave open
+            // a vulkan byte of a NaN is open, which EVAL-88 gives no value targets agree on
             auto const v = values[i];
             auto const is_open
-                = !takes_dxil && !is_half
-               && (is_nan(v[0]) || is_nan(v[1]) || is_nan(v[2]) || is_nan(v[3]) || is_byte_tie(v, lane == 1));
+                = !takes_dxil && !is_half && (is_nan(v[0]) || is_nan(v[1]) || is_nan(v[2]) || is_nan(v[3]));
             if (a != b && !is_open && differs++ < 8)
                 CHECK(a == b).dump("x", v).dump("lane", lane).dump("native", a).dump("dxc", b);
         }

@@ -4,6 +4,8 @@ tags: [spirv, vulkan]
 refs:
   - file: libs/graphics/shaped-graphics/tests/compute/compute-pack-routes-test.cc
   - file: libs/graphics/shaped-graphics-language/src/shaped-graphics-language/ir/spirv/impl/writer_operations.cc
+closed: 2026-11-25
+resolution: fixed
 ---
 
 # SGL's SPIR-V packs bytes by GLSL.std.450's round, where EVAL-88 says floor(x + 0.5)
