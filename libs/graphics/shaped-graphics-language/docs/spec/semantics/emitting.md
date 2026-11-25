@@ -842,12 +842,16 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
   `reflect(i, n)` is `i - n * k` of `k = 2 * dot(n, i)`, the scalar factor first.
   `refract(i, n, eta)` is `eta * i - (eta * d + sqrt(k)) * n` of `d = dot(n, i)` and `k = 1 - (eta * eta) * (1 - d * d)` where `k >= 0`, and zero elsewhere, a NaN `k` included.
   `mix(a, b, t)` is `a + t * (b - a)`, DXC's lowering of `lerp`.
+  `cross(a, b)` is `a_p * b_q - a_q * b_p` in each lane, as DXC writes it.
   The text routes write these as helpers of their own: `sgl_ordered_mul`, `sgl_ordered_dot`, `sgl_ordered_smoothstep`, and `sgl_ordered_` before each other name.
-  A transcendental keeps the target's own precision, which no level makes alike across vendors.
+  These are the forms of `float` and `half`; a `double`'s builtins are bodies of the prelude, which every route computes alike.
+  The interpreter keeps a float's exact meaning (EVAL-6), from which these forms depart by their roundings (EVAL-96).
+  Not kept alike: a transcendental keeps the target's own precision, which no level makes alike across vendors.
+  Nor `determinant`, which stays each target's own, nor a subgroup's float reduction or scan, nor a float atomic, whose order the hardware picks.
   From `.specials` on, a call of a target's operation carries its precise mark, as DXC's `-Gis` writes it.
   SGL's own DXIL writes no fast-math flag, and marks each call of a DXIL operation that gives a float `!dx.precise`, naming one `!{i32 1}`.
   SGL's own SPIR-V decorates each float arithmetic instruction `NoContraction`, and an extended instruction stays undecorated, as DXC writes it.
-  At `.fast` and `.specials` the targets' own products, `smoothstep`, geometry and `mix` stay, and at `.fast` nothing is marked.
+  At `.fast` and `.specials` the targets' own products, `smoothstep`, geometry, `mix` and `cross` stay, and at `.fast` nothing is marked.
   What no single operation states, the denormals and SPIR-V's float execution modes, stays the entry point's.
   How a route keeps the guarantee of a scope narrower than its entry point is its own.
 * **EMIT-186** HLSL writes `!=` of float or half lanes as `!(a == b)`, and a whole vector's as `any(!(a == b))`, which is true where either is a NaN.

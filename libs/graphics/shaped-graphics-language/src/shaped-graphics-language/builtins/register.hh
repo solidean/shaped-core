@@ -179,10 +179,11 @@ enum class ordered_call : u32
     reflect,
     refract,
     mix,
+    cross,
 };
 [[nodiscard]] spelling ordered_spelling(ordered_call which);
 /// The names those writers and helpers write in HLSL and MSL, which a program's names must not hide.
 [[nodiscard]] cc::span<cc::string_view const> ordered_product_names(language l);
-[[nodiscard]] cc::span<cc::string_view const> ordered_dot_names();
-[[nodiscard]] cc::span<cc::string_view const> ordered_smoothstep_names();
+[[nodiscard]] cc::span<cc::string_view const> ordered_dot_names(language l);
+[[nodiscard]] cc::span<cc::string_view const> ordered_smoothstep_names(language l);
 } // namespace sgl::builtins::impl

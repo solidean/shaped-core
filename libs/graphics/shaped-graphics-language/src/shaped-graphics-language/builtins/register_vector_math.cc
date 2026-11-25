@@ -655,9 +655,9 @@ void sgl::builtins::register_vector_math(registry& r)
                      {.kind = spelling_kind::custom,
                       .custom = impl::write_ordered_dot,
                       .helper = impl::ordered_dot_helper,
-                      .hlsl_names = impl::ordered_dot_names(),
-                      .wgsl_names = impl::ordered_dot_names(),
-                      .msl_names = impl::ordered_dot_names()});
+                      .hlsl_names = impl::ordered_dot_names(language::hlsl),
+                      .wgsl_names = impl::ordered_dot_names(language::wgsl),
+                      .msl_names = impl::ordered_dot_names(language::msl)});
         add_function(r, "length", {"v", type}, element_of(type), length, ordered_spelling(ordered_call::length));
         add_function(r, "normalize", {"v", type}, type, normalize, ordered_spelling(ordered_call::normalize));
     }

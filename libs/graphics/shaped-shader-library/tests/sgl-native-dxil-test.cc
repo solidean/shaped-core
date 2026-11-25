@@ -719,7 +719,7 @@ TEST("slib - at .precise both DXIL routes write the geometry and mix as one form
           "    let w = work.values[0]\n"
           "    let n = vec3(w.x, w.y, w.z)\n"
           "    let i = vec3(v.x, v.y, v.z)\n"
-          "    let r = reflect(i, n) + refract(i, n, w.w)\n"
+          "    let r = reflect(i, n) + refract(i, n, w.w) + cross(i, n)\n"
           "    let m = mix(v, w, v.x)\n"
           "    return m + normalize(v) + float4(r.x, r.y, r.z, length(v) + distance(v, w))\n"
           "\n"

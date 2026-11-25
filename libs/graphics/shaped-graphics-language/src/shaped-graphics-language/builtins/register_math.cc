@@ -817,9 +817,9 @@ void sgl::builtins::register_math(registry& r)
             {.kind = spelling_kind::custom,
              .custom = impl::write_ordered_smoothstep,
              .helper = impl::ordered_smoothstep_helper,
-             .hlsl_names = impl::ordered_smoothstep_names(),
-             .wgsl_names = impl::ordered_smoothstep_names(),
-             .msl_names = impl::ordered_smoothstep_names()},
+             .hlsl_names = impl::ordered_smoothstep_names(language::hlsl),
+             .wgsl_names = impl::ordered_smoothstep_names(language::wgsl),
+             .msl_names = impl::ordered_smoothstep_names(language::msl)},
             smoothstep_undefined, false, "/// 0 up to `low`, 1 from `high` on, and a smooth Hermite curve between.");
         // EMIT-254: HLSL's `fma` takes a double alone, and `mad` is its float's, which DXIL leaves free to fuse
         add(r, cc::format("@pure fun fma(a: {0}, b: {0}, c: {0}) -> {0}", t),
@@ -903,9 +903,10 @@ void sgl::builtins::register_math(registry& r)
     }
 
     r.add_comment("// geometry");
-    add(r, "@pure fun cross(a: vec3, b: vec3) -> vec3", cross, {});
-    add(r, "@pure fun cross(a: float3, b: float3) -> float3", cross, {});
-    add(r, "@pure fun cross(a: half3, b: half3) -> half3", cross, {});
+    auto const cross_spelling = impl::ordered_spelling(impl::ordered_call::cross);
+    add(r, "@pure fun cross(a: vec3, b: vec3) -> vec3", cross, cross_spelling);
+    add(r, "@pure fun cross(a: float3, b: float3) -> float3", cross, cross_spelling);
+    add(r, "@pure fun cross(a: half3, b: half3) -> half3", cross, cross_spelling);
     auto const distance_spelling = impl::ordered_spelling(impl::ordered_call::distance);
     add(r, "@pure fun distance(a: pos3, b: pos3) -> float", distance, distance_spelling);
     for (auto const t : {cc::string_view("float2"), cc::string_view("float3"), cc::string_view("float4")})

@@ -116,16 +116,22 @@ value_ref lowering::strict_form(op code, type_ref type, cc::span<u32 const> oper
         // row r of `m * v` is row r of `m` dotted with `v`; `m` holds its columns, so row r is lane r of each
         auto const m = value_ref(operands[0]);
         auto const v = value_ref(operands[1]);
-        auto const& matrix = _out.at(_out.type_of(m));
+        auto const matrix = _out.at(_out.type_of(m));
         auto const scalar = scalar_of(type);
+        value_ref columns[4];
+        value_ref lanes[4];
+        for (auto c = u32(0); c < matrix.count; ++c)
+        {
+            columns[c] = extracted(m, matrix.element, c);
+            lanes[c] = extracted(v, scalar, c);
+        }
         u32 rows[4];
         for (auto r = u32(0); r < lanes_of(type); ++r)
         {
             auto sum = value_ref::none;
             for (auto c = u32(0); c < matrix.count; ++c)
             {
-                auto const product = add(
-                    op::fmul, scalar, {extracted(extracted(m, matrix.element, c), scalar, r), extracted(v, scalar, c)});
+                auto const product = add(op::fmul, scalar, {extracted(columns[c], scalar, r), lanes[c]});
                 sum = c == 0 ? product : add(op::fadd, scalar, {sum, product});
             }
             rows[r] = u32(sum);
@@ -137,8 +143,8 @@ value_ref lowering::strict_form(op code, type_ref type, cc::span<u32 const> oper
         // column j of `a * b` is `a` times column j of `b`
         auto const a = value_ref(operands[0]);
         auto const b = value_ref(operands[1]);
-        auto const& result = _out.at(type);
-        auto const& right = _out.at(_out.type_of(b));
+        auto const result = _out.at(type);
+        auto const right = _out.at(_out.type_of(b));
         u32 columns[4];
         for (auto j = u32(0); j < result.count; ++j)
             columns[j] = u32(add(op::matrix_times_vector, result.element, {a, extracted(b, right.element, j)}));
@@ -177,6 +183,21 @@ value_ref lowering::strict_math(math fn, type_ref type, cc::span<u32 const> oper
         auto const twice = add(op::fmul, type, {constant(2.0, type), t});
         auto const shaped = add(op::fsub, type, {constant(3.0, type), twice});
         return add(op::fmul, type, {t, add(op::fmul, type, {t, shaped})});
+    }
+    case math::cross:
+    {
+        // each lane a_p * b_q - a_q * b_p, as DXC writes `cross`: SPIR-V's own is an extended instruction no
+        // `NoContraction` reaches, which a driver may fuse
+        auto const a = value_ref(operands[0]);
+        auto const b = value_ref(operands[1]);
+        auto const minor = [&](u32 p, u32 q)
+        {
+            return u32(add(op::fsub, scalar,
+                           {add(op::fmul, scalar, {extracted(a, scalar, p), extracted(b, scalar, q)}),
+                            add(op::fmul, scalar, {extracted(a, scalar, q), extracted(b, scalar, p)})}));
+        };
+        u32 const lanes[] = {minor(1, 2), minor(2, 0), minor(0, 1)};
+        return add(op::construct, type, lanes);
     }
     case math::fmix:
         // a + t * (b - a), DXC's lowering of `lerp`, rather than a * (1 - t) + b * t: one product, and exact at t = 0

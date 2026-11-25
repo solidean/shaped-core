@@ -408,7 +408,7 @@ TEST("sgl spirv - at .precise the geometry and mix are their fixed forms, and no
           "    let w = work.values[0]\n"
           "    let n = vec3(w.x, w.y, w.z)\n"
           "    let i = vec3(v.x, v.y, v.z)\n"
-          "    let r = reflect(i, n) + refract(i, n, w.w)\n"
+          "    let r = reflect(i, n) + refract(i, n, w.w) + cross(i, n)\n"
           "    let m = mix(v, w, v.x)\n"
           "    return m + normalize(v) + float4(r.x, r.y, r.z, length(v) + distance(v, w))\n"
           "\n"
@@ -424,15 +424,15 @@ TEST("sgl spirv - at .precise the geometry and mix are their fixed forms, and no
     auto const& fast = loose.value().spirv;
     auto const& precise = strict.value().spirv;
 
-    // GLSL.std.450's FMix, Length, Distance, Normalize, Reflect and Refract, and InverseSqrt
-    constexpr u32 own[] = {46, 66, 67, 69, 71, 72, 32};
+    // GLSL.std.450's FMix, Length, Distance, Cross, Normalize, Reflect and Refract, and InverseSqrt
+    constexpr u32 own[] = {46, 66, 67, 68, 69, 71, 72, 32};
     auto at_fast = isize(0);
     for (auto const number : own)
     {
         at_fast += extended(fast, number);
         CHECK(extended(precise, number) == 0).dump("instruction", number);
     }
-    CHECK(at_fast >= 6);
+    CHECK(at_fast >= 7);
     // normalize divides 1 by the square root, which length, distance and refract take too
     CHECK(extended(precise, 31) >= 3);
     CHECK(counted(precise, 136) == 1); // OpFDiv

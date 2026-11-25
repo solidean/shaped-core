@@ -14,7 +14,9 @@ namespace
 constexpr cc::string_view k_product_hlsl[] = {"mul", "sgl_ordered_mul"};
 constexpr cc::string_view k_product_msl[] = {"sgl_ordered_mul"};
 constexpr cc::string_view k_dot[] = {"dot", "sgl_ordered_dot"};
+constexpr cc::string_view k_dot_wgsl[] = {"dot"};
 constexpr cc::string_view k_smoothstep[] = {"smoothstep", "saturate", "sgl_ordered_smoothstep"};
+constexpr cc::string_view k_smoothstep_wgsl[] = {"smoothstep"};
 
 /// A type as the target spells it: `float3x4` is float, 3 and 4, `half3` is half, 3 and 0, `float` is float, 1 and 0.
 struct spelled_shape
@@ -24,17 +26,18 @@ struct spelled_shape
     int second = 0;
 };
 
+/// Read from the end, since a scalar's own name may hold digits: HLSL spells a half vector `float16_t3`.
 [[nodiscard]] spelled_shape shape_of(cc::string_view type)
 {
-    auto at = isize(0);
-    while (at < type.size() && (type[at] < '0' || type[at] > '9'))
-        ++at;
-    auto shape = spelled_shape{.scalar = type.subview({.start = 0, .end = at})};
-    if (at < type.size())
-        shape.first = type[at] - '0';
-    if (at + 2 < type.size() && type[at + 1] == 'x')
-        shape.second = type[at + 2] - '0';
-    return shape;
+    auto const is_digit = [](char c) { return c >= '0' && c <= '9'; };
+    auto const n = type.size();
+    if (n >= 3 && type[n - 2] == 'x' && is_digit(type[n - 3]) && is_digit(type[n - 1]))
+        return {.scalar = type.subview({.start = 0, .end = n - 3}),
+                .first = type[n - 3] - '0',
+                .second = type[n - 1] - '0'};
+    if (n >= 2 && is_digit(type[n - 1]) && !is_digit(type[n - 2]))
+        return {.scalar = type.subview({.start = 0, .end = n - 1}), .first = type[n - 1] - '0'};
+    return {.scalar = type};
 }
 
 /// `((t0 + t1) + t2) + t3`, left to right.
@@ -59,14 +62,15 @@ cc::span<cc::string_view const> impl::ordered_product_names(language l)
                               : cc::span<cc::string_view const>(k_product_hlsl);
 }
 
-cc::span<cc::string_view const> impl::ordered_dot_names()
+cc::span<cc::string_view const> impl::ordered_dot_names(language l)
 {
-    return k_dot;
+    return l == language::wgsl ? cc::span<cc::string_view const>(k_dot_wgsl) : cc::span<cc::string_view const>(k_dot);
 }
 
-cc::span<cc::string_view const> impl::ordered_smoothstep_names()
+cc::span<cc::string_view const> impl::ordered_smoothstep_names(language l)
 {
-    return k_smoothstep;
+    return l == language::wgsl ? cc::span<cc::string_view const>(k_smoothstep_wgsl)
+                               : cc::span<cc::string_view const>(k_smoothstep);
 }
 
 written impl::write_ordered_product(written const& lhs, written const& rhs)
@@ -176,9 +180,13 @@ struct ordered_call_names
 };
 
 constexpr ordered_call_names k_ordered_calls[] = {
-    {"sgl_ordered_length", "length", "length"},          {"sgl_ordered_distance", "distance", "distance"},
-    {"sgl_ordered_normalize", "normalize", "normalize"}, {"sgl_ordered_reflect", "reflect", "reflect"},
-    {"sgl_ordered_refract", "refract", "refract"},       {"sgl_ordered_mix", "lerp", "mix"},
+    {"sgl_ordered_length", "length", "length"},
+    {"sgl_ordered_distance", "distance", "distance"},
+    {"sgl_ordered_normalize", "normalize", "normalize"},
+    {"sgl_ordered_reflect", "reflect", "reflect"},
+    {"sgl_ordered_refract", "refract", "refract"},
+    {"sgl_ordered_mix", "lerp", "mix"},
+    {"sgl_ordered_cross", "cross", "cross"},
 };
 
 /// The names each language's text calls or declares: HLSL calls `mix` `lerp`, and WGSL writes no helper.
@@ -196,6 +204,8 @@ constexpr cc::string_view k_ordered_call_hlsl[] = {
     "sgl_ordered_reflect",
     "sgl_ordered_refract",
     "sgl_ordered_mix",
+    "cross",
+    "sgl_ordered_cross",
 };
 constexpr cc::string_view k_ordered_call_msl[] = {
     "length",
@@ -211,8 +221,11 @@ constexpr cc::string_view k_ordered_call_msl[] = {
     "sgl_ordered_reflect",
     "sgl_ordered_refract",
     "sgl_ordered_mix",
+    "cross",
+    "sgl_ordered_cross",
 };
-constexpr cc::string_view k_ordered_call_wgsl[] = {"length", "distance", "normalize", "reflect", "refract", "mix"};
+constexpr cc::string_view k_ordered_call_wgsl[]
+    = {"length", "distance", "normalize", "reflect", "refract", "mix", "cross"};
 
 /// The ordered dot of `a` and `b`, `lanes` lanes each.
 [[nodiscard]] cc::string dot_text(cc::string_view a, cc::string_view b, int lanes)
@@ -275,6 +288,12 @@ cc::string ordered_call_helper(helper_context const& c)
                           "}}\n",
                           scalar, type, c.argument_types[2], dot_text("n", "i", lanes), zero);
     }
+    case impl::ordered_call::cross:
+        // each lane a_p * b_q - a_q * b_p, as DXC writes `cross` and SGL's own DXIL does at every level
+        return cc::format("{0} sgl_ordered_cross({0} a, {0} b)\n{{\n    return {0}(a[1] * b[2] - a[2] * b[1], a[2] * "
+                          "b[0] - "
+                          "a[0] * b[2], a[0] * b[1] - a[1] * b[0]);\n}}\n",
+                          type);
     case impl::ordered_call::mix:
         if (c.argument_types.size() < 3)
             return {};

@@ -447,7 +447,7 @@ constexpr cc::string_view k_geometry
       "    let w = work.values[0]\n"
       "    let n = vec3(w.x, w.y, w.z)\n"
       "    let i = vec3(v.x, v.y, v.z)\n"
-      "    let r = reflect(i, n) + refract(i, n, w.w)\n"
+      "    let r = reflect(i, n) + refract(i, n, w.w) + cross(i, n)\n"
       "    let m = mix(v, w, v.x)\n"
       "    return m + normalize(v) + float4(r.x, r.y, r.z, length(v) + distance(v, w))\n"
       "\n"
@@ -475,7 +475,7 @@ TEST("sgl float - a text at .precise writes the geometry and mix as helpers of t
         auto const strict = of("strict");
         auto const blend = t == target::msl ? cc::string_view("mix") : cc::string_view("lerp");
         for (auto const name : {cc::string_view("length"), cc::string_view("distance"), cc::string_view("normalize"),
-                                cc::string_view("reflect"), cc::string_view("refract"), blend})
+                                cc::string_view("reflect"), cc::string_view("refract"), cc::string_view("cross"), blend})
         {
             CHECK(bare_calls(loose, name) == 1).dump("call", name).dump("text", loose);
             CHECK(bare_calls(strict, name) == 0).dump("call", name).dump("text", strict);
@@ -500,5 +500,83 @@ TEST("sgl float - a text at .precise writes the geometry and mix as helpers of t
                               "d[3] * "
                               "d[3]));\n"))
             .dump("text", strict);
+    }
+}
+
+namespace
+{
+/// Each matrix shape's product at `.precise`: mat3 and mat2 by a vector and by each other, and an affine3's three.
+constexpr cc::string_view k_shapes = "binding work:\n"
+                                     "    values: mut buffer[float4]\n"
+                                     "\n"
+                                     "@float(.precise) @compute(64) fun strict(@thread_id id: int3){work}:\n"
+                                     "    let a = work.values[0]\n"
+                                     "    let b = work.values[1]\n"
+                                     "    let c = work.values[2]\n"
+                                     "    let m3 = mat3(a.xyz, b.xyz, c.xyz)\n"
+                                     "    let m2 = mat2(a.xy, b.xy)\n"
+                                     "    let af = affine3.from_rows(a, b, c)\n"
+                                     "    let s = (m3 * m3) * c.xyz\n"
+                                     "    let t = (m2 * m2) * c.xy\n"
+                                     "    let u = af * pos3(c.x, c.y, c.z)\n"
+                                     "    work.values[id.x] = float4(s.x + t.x, u.x, u.y, u.z)\n";
+} // namespace
+
+TEST("sgl float - a text at .precise indexes each matrix shape's elements as its target holds them (EMIT-NEW)")
+{
+    for (auto const t : {target::hlsl_dx12, target::msl})
+    {
+        auto const e = sgl::compile_to_text(
+            {.source = k_shapes, .source_name = "shapes.sgl", .entry_point = "strict", .target = t});
+        REQUIRE(e.has_value()).dump("error", e.has_error() ? e.error() : cc::string());
+        auto const& text = e.value().text;
+        auto const is_hlsl = t != target::msl;
+        // row 1 of a mat3 times a vector: HLSL's m[row][column], MSL's m[column][row]
+        CHECK(text.contains(is_hlsl ? "((m[1][0] * v[0] + m[1][1] * v[1]) + m[1][2] * v[2])"
+                                    : "((m[0][1] * v[0] + m[1][1] * v[1]) + m[2][1] * v[2])"))
+            .dump("text", text);
+        // element (row 0, column 1) of a mat2 times a mat2
+        CHECK(text.contains(is_hlsl ? "o[0][1] = (a[0][0] * b[0][1] + a[0][1] * b[1][1]);"
+                                    : "o[1][0] = (a[0][0] * b[1][0] + a[1][0] * b[1][1]);"))
+            .dump("text", text);
+        // an affine3 is three rows of four in both, each row dotted with the widened position
+        CHECK(text.contains("float3 sgl_ordered_mul(float3x4 m, float4 v)")).dump("text", text);
+        CHECK(text.contains("(((m[2][0] * v[0] + m[2][1] * v[1]) + m[2][2] * v[2]) + m[2][3] * v[3])")).dump("text", text);
+        CHECK(text.contains("sgl_ordered_mul(af, float4(float3(c.x, c.y, c.z), 1.0))")).dump("text", text);
+    }
+}
+
+TEST("sgl float - a text at .precise spells a half vector's helpers in halves, every lane summed (EMIT-NEW)")
+{
+    constexpr cc::string_view source = "require shader_f16\n"
+                                       "\n"
+                                       "binding work:\n"
+                                       "    values: mut buffer[float4]\n"
+                                       "\n"
+                                       "@float(.precise) @compute(64) fun strict(@thread_id id: int3){work}:\n"
+                                       "    let v = work.values[id.x]\n"
+                                       "    let h = half3(v.x as half, v.y as half, v.z as half)\n"
+                                       "    let s = smoothstep(h, h + h, h)\n"
+                                       "    work.values[id.x] = float4((dot(h, h) + length(h)) as float, s.x as float, "
+                                       "0.0, 0.0)\n";
+    for (auto const t : {target::hlsl_dx12, target::msl})
+    {
+        auto const e
+            = sgl::compile_to_text({.source = source, .source_name = "half.sgl", .entry_point = "strict", .target = t});
+        REQUIRE(e.has_value()).dump("error", e.has_error() ? e.error() : cc::string());
+        auto const& text = e.value().text;
+        auto const half = t == target::msl ? cc::string_view("half") : cc::string_view("float16_t");
+        CHECK(text.contains(cc::format("{0} sgl_ordered_dot({0}3 a, {0}3 b)\n{{\n    return ((a[0] * b[0] + a[1] * "
+                                       "b[1]) "
+                                       "+ a[2] * b[2]);\n}}\n",
+                                       half)))
+            .dump("text", text);
+        CHECK(text.contains(cc::format("{0} sgl_ordered_length({0}3 v)\n{{\n    return sqrt(((v[0] * v[0] + v[1] * "
+                                       "v[1]) "
+                                       "+ v[2] * v[2]));\n}}\n",
+                                       half)))
+            .dump("text", text);
+        // the constants are halves, so no step computes in floats
+        CHECK(text.contains(cc::format("return t * (t * (({0})3.0 - ({0})2.0 * t));", half))).dump("text", text);
     }
 }
