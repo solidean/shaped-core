@@ -206,6 +206,7 @@ public:
         _tessellation_shader = features.tessellationShader == VK_TRUE;
         _sample_rate_shading = features.sampleRateShading == VK_TRUE;
         _wireframe_fill = features.fillModeNonSolid == VK_TRUE;
+        _independent_blend = features.independentBlend == VK_TRUE;
         _sampler_anisotropy = features.samplerAnisotropy == VK_TRUE;
         _texture_compression_bc = features.textureCompressionBC == VK_TRUE;
         _indirect_first_instance = features.drawIndirectFirstInstance == VK_TRUE;
@@ -428,6 +429,8 @@ public:
             return _sample_rate_shading;
         case sg::feature::wireframe_fill:
             return _wireframe_fill;
+        case sg::feature::independent_blend:
+            return _independent_blend;
         case sg::feature::depth32_float_stencil8:
             return _depth32_float_stencil8;
         case sg::feature::float32_filtering:
@@ -1079,6 +1082,7 @@ public:
     bool _float_specials = false;
     bool _float_denormals = false;
     bool _wireframe_fill = false;
+    bool _independent_blend = false;
     bool _depth32_float_stencil8 = false;
     /// The 16-bit kinds each with the 16-bit buffer storage they need, and the whole subgroup family in compute and pixel.
     /// Creation enables the device features behind them wherever the device has them.

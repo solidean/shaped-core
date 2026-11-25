@@ -145,6 +145,9 @@ public:
         case sg::feature::sample_rate_shading:
             // `@builtin(sample_index)` and `@interpolate(…, sample)` are core WGSL.
             return true;
+        case sg::feature::independent_blend:
+            // each GPUColorTargetState carries its own blend and write mask
+            return true;
         case sg::feature::ray_query:
             return true;
         case sg::feature::raytracing_pipeline:

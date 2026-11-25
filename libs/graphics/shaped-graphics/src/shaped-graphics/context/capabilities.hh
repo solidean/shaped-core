@@ -317,6 +317,11 @@ enum class sg::feature
     /// `VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT`, and Metal on every GPU, which filters all six.
     /// Without it, binding such a view to a `filterable_float` binding is refused on every backend, as `float32_filtering` refuses its formats.
     norm16_filtering,
+
+    /// A raster pipeline's color targets may blend, or mask what they write, each its own way.
+    /// Vulkan gives it only with the `independentBlend` device feature; D3D12, Metal and WebGPU always.
+    /// Without it, a pipeline whose targets differ in `blend` or `write_mask` is refused.
+    independent_blend,
 };
 
 CC_FLAG_ENUM_INDEXED(sg, feature, cc::u64);
@@ -379,8 +384,9 @@ inline constexpr feature k_all_features[] = {
     feature::float_round_trip_workaround,
     feature::readwrite_norm16_image_formats,
     feature::norm16_filtering,
+    feature::independent_blend,
 };
-static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize(feature::norm16_filtering) + 1,
+static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize(feature::independent_blend) + 1,
               "k_all_features lists every feature");
 
 /// The enumerator's name, `ray_query`, which is also what SGL's `require` spells it as.
@@ -490,6 +496,8 @@ static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize
         return "readwrite_norm16_image_formats";
     case feature::norm16_filtering:
         return "norm16_filtering";
+    case feature::independent_blend:
+        return "independent_blend";
     }
     return "";
 }

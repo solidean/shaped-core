@@ -430,13 +430,35 @@ ASYNC_INVOCABLE_TEST("sg - an SGL pixel shader states its targets, and a pipelin
 
     // A shader is input, so each is a refusal the caller receives, and nothing asserts.
     // One target written, two declared: the second is left undefined unless its write mask is empty.
-    // (An empty one differs from the first target's, which vulkan without independentBlend refuses, so it is not
-    // built here; the dx12 pipeline-cache test builds one.)
+    // (An empty one differs from the first target's, which a device without sg::feature::independent_blend refuses,
+    // so it is not built here; the dx12 pipeline-cache test builds one.)
     CHECK((co_await refusal_of(*ctx, described({rgba, rgba}, ""))).contains("write mask must be empty"));
     // One written, none declared: the output goes nowhere.
     CHECK((co_await refusal_of(*ctx, described({}, ""))).contains("writes 1 color targets, and the pipeline has 0"));
     // A description that names another set than the shader writes.
     CHECK((co_await refusal_of(*ctx, described({rgba}, shaders::quads::overlay::name))).contains("and the pipeline names"));
+}
+
+ASYNC_INVOCABLE_TEST("sg - color targets that blend each their own way are refused on a device without "
+                     "independent blend, naming it",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (ctx->supports(sg::feature::independent_blend))
+        SKIP("this device blends each target its own way, so nothing is refused");
+
+    auto const& vs = co_await shaders::quads::main_vs->acquire(*ctx);
+    auto const& ps = co_await shaders::quads::main_ps->acquire(*ctx);
+    auto const rgba = sg::color_target_state{.format = sg::pixel_format::rgba8_unorm};
+    auto const blended = sg::color_target_state{.format = sg::pixel_format::rgba8_unorm, .blend = sg::blend_alpha};
+    auto const refusal = co_await refusal_of(*ctx, {.layout = shaders::quads::main_vs.acquire_layout(*ctx),
+                                                    .vertex_shader = vs,
+                                                    .fragment_shader = ps,
+                                                    .vertex_input = shaders::quads::quad::layout(),
+                                                    .color_targets = {rgba, blended}});
+    CHECK(refusal.contains("independent_blend"));
 }
 
 ASYNC_INVOCABLE_TEST("sg - a 32-bit indexed draw honours an odd first index", (sg::context_handle const& ctx))

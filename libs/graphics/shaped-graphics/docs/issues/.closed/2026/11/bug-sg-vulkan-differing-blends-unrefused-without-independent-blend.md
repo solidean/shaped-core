@@ -3,8 +3,8 @@ created: 2026-11-13
 tags: [vulkan, raster]
 refs:
   - file: libs/graphics/shaped-graphics/backends/vulkan/src/shaped-graphics/backends/vulkan/vulkan_context.create.cc
-claimed-by: Claude (for Philip Trettner)
-claimed-at: 2026-11-25T19:46Z
+closed: 2026-11-25
+resolution: fixed
 ---
 
 # A pipeline blending its color targets differently is not refused on a vulkan device without independentBlend

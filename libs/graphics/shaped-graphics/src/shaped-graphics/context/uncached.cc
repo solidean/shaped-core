@@ -413,6 +413,12 @@ cc::optional<cc::string> refusal_of(sg::raster_pipeline_description const& desc,
         return cc::string("the pipeline renders several views, and this device lacks sg::feature::view_instancing");
     if (desc.rasterization.fill == sg::fill_mode::wireframe && !supported.has(sg::feature::wireframe_fill))
         return cc::string("the pipeline fills wireframe, and this device lacks sg::feature::wireframe_fill");
+    if (!supported.has(sg::feature::independent_blend))
+        for (auto const& target : desc.color_targets)
+            if (target.blend != desc.color_targets[0].blend || target.write_mask != desc.color_targets[0].write_mask)
+                return cc::string("the pipeline's color targets blend or mask their writes each their own way, and "
+                                  "this "
+                                  "device lacks sg::feature::independent_blend");
     if (desc.depth_stencil_format == sg::pixel_format::depth32_float_stencil8
         && !supported.has(sg::feature::depth32_float_stencil8))
         return cc::string("the pipeline's depth-stencil format is depth32_float_stencil8, and this device lacks "

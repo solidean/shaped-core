@@ -188,6 +188,9 @@ bool metal_context::supports(sg::feature f) const
     case sg::feature::wireframe_fill:
         // `MTLTriangleFillModeLines` is on every Apple GPU.
         return true;
+    case sg::feature::independent_blend:
+        // each color attachment descriptor blends on its own
+        return true;
     case sg::feature::first_instance:
     case sg::feature::indirect_first_instance:
         // `[[base_instance]]` is on every Apple GPU this backend's Metal 4 floor admits.

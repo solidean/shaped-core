@@ -276,6 +276,7 @@ public:
         case sg::feature::multisampled_array_textures:
         case sg::feature::sample_rate_shading:
         case sg::feature::wireframe_fill:
+        case sg::feature::independent_blend: // each render target's blend is its own in D3D12_BLEND_DESC
         case sg::feature::depth32_float_stencil8:
         case sg::feature::device_coherence:        // `globallycoherent` is core HLSL
         case sg::feature::image_atomics:           // typed UAV atomics on r32 integer formats are required
