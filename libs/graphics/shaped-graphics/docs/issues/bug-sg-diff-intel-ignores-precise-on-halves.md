@@ -1,36 +1,21 @@
 ---
 created: 2026-11-25
 refs:
-  - file: libs/graphics/shaped-graphics/tests/differential/corpus/half_arithmetic.sgl
-  - file: libs/graphics/shaped-graphics/tests/differential/corpus/half_math.sgl
-  - test: "sg differential - every corpus entry point computes at a precise floor what SGL's interpreter says"
+  - file: libs/graphics/shaped-shader-library/src/shaped-shader-library/shader_asset.cc
+  - test: "sg differential - a compile at a precise floor keeps the floor through slib"
   - issue: bug-sg-diff-half-corpus-fails-on-intel
 ---
 
 # Intel's Arc keeps half operations at a float's precision under a precise floor, on dx12 and vulkan alike
 
-The strict-floor twin compiles each corpus entry point at a `.precise` floor, where no target may keep a half operation at a float's precision or contract it (EVAL-6, CHK-435).
-On the Arc B580, driver 32.0.101.9150, Intel's results do not change from `.fast`.
+**Not Intel's bug: the floor never reached the GPU's compile.**
 
-## Measured
+The strict-floor twin's first run saw `half_arithmetic.sgl` come back from Intel's Arc at a `.precise` floor bit for bit as at `.fast`, on every route, and this issue blamed the driver.
+`shader_asset::acquire` keys, and compiles, with the options the entry point declares and an allowlist of compile options, and `float_floor` was on neither.
+So slib dropped it, every twin compile ran at `.fast`, and the twin's own SPIR-V carried no `NoContraction`, as `spirv-dis` of the dumped bytecode showed.
 
-- **`half_arithmetic.sgl`, dx12 and vulkan, DXC and native routes alike:** the same 12 of 1024 elements as at `.fast`, bit for bit.
-  `[115]`, `a * b - a` with `a = 30.984375` and `b = 0.99560546875`, is `-0.1361084` where binary16's operations give `-0.140625`.
-  That is the product unrounded and the difference rounded once, a half fused multiply-add.
-- **`half_math.sgl`, dx12 both routes:** 1023 of 1024 elements still skip the float-to-half-to-float round trip, as `bug-sg-diff-half-corpus-fails-on-intel` measured at `.fast`.
-  Vulkan rounds them at either level.
+With `float_floor` on the allowlist, Intel rounds every half operation of `half_arithmetic.sgl` as binary16 does, on dx12 and vulkan, both routes.
+`docs/bugs-external/intel-float-half-round-trip-folds-away` measures the same on the corpus kernel under `-Gis` and HLSL's `precise`.
+`sg differential - a compile at a precise floor keeps the floor through slib` now holds the floor to the GPU's compile.
 
-## What SGL asks for
-
-- On vulkan SGL's own SPIR-V decorates each contractable instruction `NoContraction` once its guarantee is stricter than `.fast` (`writer_operations.cc`).
-  The floor raises every instruction's guarantee, since `lower.cc` takes the entry point's.
-  DXC's route asks with `-Gis`, which writes the same decoration.
-- On dx12 the DXC route compiles with `-Gis` and SGL's DXIL marks the operations precise.
-- So both routes ask for what the driver does not do: which is a driver bug unless a 16-bit operation is exempt somewhere, which is not checked.
-
-## Not known
-
-- Whether Vulkan's precision rules let a 16-bit `OpFMul` be computed wider without `RelaxedPrecision`; they read as correctly rounded.
-- A standalone repro in docs/bugs-external, which this needs before a report to Intel.
-
-`half_arithmetic.sgl` and `half_math.sgl` carry `known intel <backend> ... precise` lines for it, so the twin logs these and fails once Intel keeps the floor.
+What the twin does see on Intel is `half_math.sgl`'s round trip folded away on dx12, `bug-sg-diff-half-corpus-fails-on-intel`'s.

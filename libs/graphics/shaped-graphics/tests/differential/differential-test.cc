@@ -322,6 +322,48 @@ ASYNC_TEST("sg differential - every corpus entry point computes on the GPU what 
 // A file's `known` line says how a driver diverges at the level the file states, so here it only logs either way:
 // a driver that agrees at the floor is one that keeps it.
 // A `known` line ending in `precise` is this twin's own, held as the other tests hold theirs.
+// The twin's floor reaches the GPU's compile: its first run held a driver to a floor that slib had dropped on the way.
+// SPIR-V says so in the open, a `NoContraction` on every contractable operation, where DXIL keeps it in flags.
+ASYNC_TEST("sg differential - a compile at a precise floor keeps the floor through slib")
+{
+    auto const configurations = machine_configurations();
+    auto const* vulkan = static_cast<configuration const*>(nullptr);
+    for (auto const& c : configurations)
+        if (c.route.format == sg::shader_format::spirv && vulkan == nullptr)
+            vulkan = &c;
+    if (vulkan == nullptr)
+        SKIP("this machine runs SGL on no vulkan adapter");
+    auto const corpus = sg_diff::read_corpus();
+    auto const* half = static_cast<sg_diff::workload const*>(nullptr);
+    for (auto const& w : corpus.workloads)
+        if (w.entry == "half_operations")
+            half = &w;
+    REQUIRE(half != nullptr);
+    if (auto* const home = vulkan->ctx->device_home())
+        co_await cc::async_resume_on(*home);
+
+    // OpDecorate is opcode 71 of three words, and NoContraction decoration 42
+    auto const decorations = [](cc::span<byte const> spirv)
+    {
+        auto count = 0;
+        auto const* const words = reinterpret_cast<u32 const*>(spirv.data());
+        for (auto i = isize(5); i + 2 < spirv.size() / 4; i += isize(words[i] >> 16 > 0 ? words[i] >> 16 : 1))
+            count += words[i] == ((3u << 16) | 71u) && words[i + 2] == 42u ? 1 : 0;
+        return count;
+    };
+    for (auto const* const floor : {"", "precise"})
+    {
+        auto route = vulkan->route;
+        route.float_floor = floor;
+        auto const shader = co_await sg_diff::compiled_on(*vulkan->ctx, route, *half->asset);
+        auto const count = decorations(shader.bytecode.span());
+        if (route.float_floor.empty())
+            CHECK(count == 0).context("half_operations at its own level, fast");
+        else
+            CHECK(count >= 4).context(cc::format("half_operations at a precise floor, on {}", vulkan->label));
+    }
+}
+
 ASYNC_TEST("sg differential - every corpus entry point computes at a precise floor what SGL's interpreter says")
 {
     auto const configurations = machine_configurations();

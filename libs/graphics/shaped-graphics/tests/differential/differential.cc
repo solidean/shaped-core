@@ -4,6 +4,7 @@
 
 #include <clean-core/math/bit.hh>
 #include <clean-core/platform/environment.hh>
+#include <clean-core/streams/file_stream.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/from_string.hh>
 #include <clean-core/thread/async_coroutine.hh>
@@ -374,6 +375,17 @@ cc::shared_async<sg_diff::run_result> sg_diff::run(sg::context* ctx, workload co
             co_return run_result{.skipped
                                  = cc::format("this context lacks {}, which {} requires", sg::to_string(f), w->file)};
     auto const shader = co_await compiled_on(*ctx, r, *w->asset);
+    // the bytecode each route ran, to run in a standalone reproduction (differential-testing.md)
+    if (auto const dir = cc::environment_variable("SC_DIFFERENTIAL_SHADER_DUMP"); dir.has_value())
+        if (auto f = cc::file_write_stream_adapter::create(cc::format(
+                "{}/{}-{}-{}{}.bin", dir.value(), w->entry, ctx->backend() == sg::backend_kind::dx12 ? "dx12" : "vulkan",
+                r.name, r.float_floor.empty() ? cc::string() : "-" + r.float_floor));
+            f.has_value())
+        {
+            auto stream = f.value().stream();
+            (void)stream.write(shader.bytecode.span());
+            (void)stream.flush();
+        }
     if (r.native && shader.compiler.name != "sgl")
         co_return run_result{.skipped = cc::format("SGL writes no {} of it yet, so {} compiled it",
                                                    r.format == sg::shader_format::dxil ? "DXIL" : "SPIR-V",

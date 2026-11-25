@@ -1,7 +1,5 @@
 // differential: setup floats
 // differential: across relative 0.001
-// differential: known intel dx12 bug-sg-diff-intel-ignores-precise-on-halves precise
-// differential: known intel vulkan bug-sg-diff-intel-ignores-precise-on-halves precise
 // EVAL-96 rounds each operation of halves once, to nearest, ties to even; at `.fast` a GPU may keep a float's precision instead (CHK-435).
 // Apple's compiler does under Metal's fast math, and Intel's does too; the interpreter's range for each result holds both answers.
 // 0.001, about an ulp of a half, is the slack around that range, and what two GPUs that round differently are held to.

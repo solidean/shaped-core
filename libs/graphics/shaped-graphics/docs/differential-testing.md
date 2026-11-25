@@ -153,7 +153,10 @@ WGSL keeps only `.fast` (EMIT-185), so a webgpu context runs no twin.
 
 A file's `known` lines describe its own level, so in the twin they only log, whether the driver diverges there or not.
 A `known` line that ends in `precise` is the twin's own, held as the other tests hold theirs.
-The first is Intel's Arc, which keeps halves at a float's precision whatever the floor: [bug-sg-diff-intel-ignores-precise-on-halves](issues/bug-sg-diff-intel-ignores-precise-on-halves.md).
+The first is `half_math.sgl` on Intel's dx12, which folds a float's round trip through a half away at any level.
+[bug-sg-diff-half-corpus-fails-on-intel](issues/bug-sg-diff-half-corpus-fails-on-intel.md) tracks it.
+`sg differential - a compile at a precise floor keeps the floor through slib` holds the floor to the GPU's compile, since the first twin lost it in slib and blamed a driver.
+`SC_DIFFERENTIAL_SHADER_DUMP=<dir>` writes the bytecode every route ran there, to run it in a standalone reproduction.
 
 ### Open conditions
 
