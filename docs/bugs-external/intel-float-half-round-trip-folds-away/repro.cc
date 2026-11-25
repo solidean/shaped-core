@@ -3,7 +3,7 @@
 // Standalone: D3D12, DXGI and the C++ standard library, nothing else.
 // The shader is DXIL that run.py compiled with the Windows SDK's dxc and -enable-16bit-types, with -Gis or without.
 //
-//     repro.exe <cs.cso> [--warp]
+//     repro.exe <cs.cso> [--warp | --adapter <substring>]
 //
 // Prints one line, repro-judge.hh's.
 // Exit codes: 0 every round trip is a half, 1 one is not, 2 setup failed or the adapter has no native 16-bit
@@ -15,6 +15,7 @@
 #include <dxgi1_6.h>
 #include <wrl/client.h>
 
+#include <cctype>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -22,6 +23,7 @@
 #include <iterator>
 #include <string>
 #include <vector>
+#include <cwctype>
 
 #pragma comment(lib, "d3d12.lib")
 #pragma comment(lib, "dxgi.lib")
@@ -88,6 +90,12 @@ int main(int argc, char** argv)
     }
     auto const shader = read_file(argv[1]);
     auto const warp = argc > 2 && std::strcmp(argv[2], "--warp") == 0;
+    // `--adapter <substring>`: the first adapter whose name holds it, case-insensitively, in place of the fastest
+    auto match = std::wstring();
+    for (auto i = 2; i + 1 < argc; ++i)
+        if (std::strcmp(argv[i], "--adapter") == 0)
+            for (auto const* c = argv[i + 1]; *c != 0; ++c)
+                match += wchar_t(std::tolower(static_cast<unsigned char>(*c)));
     if (shader.empty())
     {
         std::printf("could not read the shader\n");
@@ -99,8 +107,27 @@ int main(int argc, char** argv)
     ComPtr<IDXGIAdapter1> adapter;
     if (warp)
         CHECK_HR(factory->EnumWarpAdapter(IID_PPV_ARGS(&adapter)));
-    else
+    else if (match.empty())
         CHECK_HR(factory->EnumAdapterByGpuPreference(0, DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE, IID_PPV_ARGS(&adapter)));
+    else
+    {
+        for (UINT k = 0; factory->EnumAdapters1(k, &adapter) != DXGI_ERROR_NOT_FOUND; ++k)
+        {
+            auto d = DXGI_ADAPTER_DESC1{};
+            adapter->GetDesc1(&d);
+            auto name = std::wstring(d.Description);
+            for (auto& c : name)
+                c = wchar_t(std::towlower(c));
+            if (name.find(match) != std::wstring::npos)
+                break;
+            adapter.Reset();
+        }
+        if (adapter == nullptr)
+        {
+            std::printf("no adapter matches --adapter\n");
+            return 2;
+        }
+    }
     auto desc = DXGI_ADAPTER_DESC1{};
     adapter->GetDesc1(&desc);
     char name[128] = {};

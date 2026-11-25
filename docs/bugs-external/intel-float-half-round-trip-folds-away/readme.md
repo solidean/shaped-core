@@ -2,7 +2,7 @@
 
 **Status:** open, not yet filed upstream; shaped-core's differential test logs it through a `known` line, with no workaround.
 **Affects:** Intel Arc B580, driver 32.0.101.9150, Windows 11, on D3D12 and on vulkan, each in one spelling.
-WARP is not affected.
+WARP and an AMD Radeon iGPU are not affected.
 **Found by:** `half_math.sgl` of shaped-graphics' differential corpus, whose `(x as half) as float` came back as `x` on dx12.
 
 ## What happens
@@ -22,7 +22,11 @@ D3D12   WARP      strict (-Gis)   halves, toward zero       halves, toward zero
 D3D12   WARP      fast            halves, toward zero       halves, toward zero
 vulkan  Arc B580  strict (-Gis)   halves, to nearest        no half, 256 of 256
 vulkan  Arc B580  fast            halves, to nearest        no half, 256 of 256
+D3D12   AMD iGPU  either            halves, toward zero       halves, toward zero
+vulkan  AMD iGPU  either            halves, toward zero       halves, toward zero
 ```
+
+The AMD rows are an AMD Radeon iGPU of the same machine, run by hand with the hosts' `--adapter amd`, so the fold is Intel's alone.
 
 The first input, `0x3efe7280`, comes back `0x3efe7280` where it fails, where a half holds `0x3efe8000` to nearest or `0x3efe6000` toward zero.
 
