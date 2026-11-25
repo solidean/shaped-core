@@ -281,6 +281,8 @@ private:
     ll_value _break_condition = ll_value::none;
     /// The block `lower_block` is writing.
     u32 _lowering = 0;
+    /// The guarantee of the operation `lower_block` is writing, which its calls keep (EMIT-281); `fast` between them.
+    check::float_level _guarantee = check::float_level::fast;
 
     // ---- writer_lines.cc (EMIT-257)
     /// What the instructions written for `i` carry as their location: its statement, where the line table names one.

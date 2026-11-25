@@ -77,6 +77,9 @@ value_ref lowering::add(op code, type_ref type, cc::span<u32 const> operands, u8
     // what follows a `break` or a `return` in its list never runs
     if (_is_terminated)
         return value_ref::none;
+    if (u8(_guarantee) >= u8(float_level::precise))
+        if (auto const strict = strict_form(code, type, operands, sub); is_valid(strict))
+            return strict;
     auto const index = u32(_out.instructions.size());
     auto const first = u32(_out.operands.size());
     for (auto const operand : operands)
@@ -95,6 +98,171 @@ value_ref lowering::add(op code, type_ref type, cc::span<u32 const> operands, u8
         _is_terminated = true;
     }
     return value_ref(index);
+}
+
+value_ref lowering::strict_form(op code, type_ref type, cc::span<u32 const> operands, u8 sub)
+{
+    switch (code)
+    {
+    case op::dot:
+    {
+        if (_out.at(type).kind != type_kind::float_)
+            return value_ref::none;
+        auto const a = value_ref(operands[0]);
+        return ordered_dot(a, value_ref(operands[1]), type, lanes_of(_out.type_of(a)));
+    }
+    case op::matrix_times_vector:
+    {
+        // row r of `m * v` is row r of `m` dotted with `v`; `m` holds its columns, so row r is lane r of each
+        auto const m = value_ref(operands[0]);
+        auto const v = value_ref(operands[1]);
+        auto const matrix = _out.at(_out.type_of(m));
+        auto const scalar = scalar_of(type);
+        value_ref columns[4];
+        value_ref lanes[4];
+        for (auto c = u32(0); c < matrix.count; ++c)
+        {
+            columns[c] = extracted(m, matrix.element, c);
+            lanes[c] = extracted(v, scalar, c);
+        }
+        u32 rows[4];
+        for (auto r = u32(0); r < lanes_of(type); ++r)
+        {
+            auto sum = value_ref::none;
+            for (auto c = u32(0); c < matrix.count; ++c)
+            {
+                auto const product = add(op::fmul, scalar, {extracted(columns[c], scalar, r), lanes[c]});
+                sum = c == 0 ? product : add(op::fadd, scalar, {sum, product});
+            }
+            rows[r] = u32(sum);
+        }
+        return add(op::construct, type, cc::span<u32 const>(rows, isize(lanes_of(type))));
+    }
+    case op::matrix_times_matrix:
+    {
+        // column j of `a * b` is `a` times column j of `b`
+        auto const a = value_ref(operands[0]);
+        auto const b = value_ref(operands[1]);
+        auto const result = _out.at(type);
+        auto const right = _out.at(_out.type_of(b));
+        u32 columns[4];
+        for (auto j = u32(0); j < result.count; ++j)
+            columns[j] = u32(add(op::matrix_times_vector, result.element, {a, extracted(b, right.element, j)}));
+        return add(op::construct, type, cc::span<u32 const>(columns, isize(result.count)));
+    }
+    case op::math:
+        return strict_math(math(sub), type, operands);
+    default:
+        return value_ref::none;
+    }
+}
+
+value_ref lowering::strict_math(math fn, type_ref type, cc::span<u32 const> operands)
+{
+    auto const scalar = scalar_of(type);
+    auto const constant = [&](f64 value, type_ref of) { return splat(float_constant(scalar, value), of); };
+    auto const length_of = [&](value_ref v)
+    {
+        auto const s = scalar_of(_out.type_of(v));
+        return add(op::math, s, {ordered_dot(v, v, s, lanes_of(_out.type_of(v)))}, u8(math::sqrt));
+    };
+    switch (fn)
+    {
+    case math::smooth_step:
+    {
+        // t = saturate((x - e0) / (e1 - e0)), then t * (t * (3 - 2t)): DXC's grouping, so every route computes one value.
+        // It and the written definition's (t * t) * (3 - 2t) each round three times with no cancellation, since 2t is
+        // exact and 3 - 2t is at least 1, so both are within about 3 * 2^-24 of it, and both are exact at 0 and 1.
+        // This one is kept: t * t underflows to zero for a t below about 1e-19 where denormals are flushed, and t
+        // times the larger 3 - 2t first does not, so it is also the closer of the two where t is tiny.
+        auto const low = value_ref(operands[0]);
+        auto const high = value_ref(operands[1]);
+        auto const x = value_ref(operands[2]);
+        auto const raw = add(op::fdiv, type, {add(op::fsub, type, {x, low}), add(op::fsub, type, {high, low})});
+        auto const t = add(op::math, type, {raw, constant(0.0, type), constant(1.0, type)}, u8(math::fclamp));
+        auto const twice = add(op::fmul, type, {constant(2.0, type), t});
+        auto const shaped = add(op::fsub, type, {constant(3.0, type), twice});
+        return add(op::fmul, type, {t, add(op::fmul, type, {t, shaped})});
+    }
+    case math::cross:
+    {
+        // each lane a_p * b_q - a_q * b_p, as DXC writes `cross`: SPIR-V's own is an extended instruction no
+        // `NoContraction` reaches, which a driver may fuse
+        auto const a = value_ref(operands[0]);
+        auto const b = value_ref(operands[1]);
+        auto const minor = [&](u32 p, u32 q)
+        {
+            return u32(add(op::fsub, scalar,
+                           {add(op::fmul, scalar, {extracted(a, scalar, p), extracted(b, scalar, q)}),
+                            add(op::fmul, scalar, {extracted(a, scalar, q), extracted(b, scalar, p)})}));
+        };
+        u32 const lanes[] = {minor(1, 2), minor(2, 0), minor(0, 1)};
+        return add(op::construct, type, lanes);
+    }
+    case math::fmix:
+        // a + t * (b - a), DXC's lowering of `lerp`, rather than a * (1 - t) + b * t: one product, and exact at t = 0
+        return add(
+            op::fadd, type,
+            {value_ref(operands[0]),
+             add(op::fmul, type,
+                 {value_ref(operands[2]), add(op::fsub, type, {value_ref(operands[1]), value_ref(operands[0])})})});
+    case math::length:
+        // sqrt of the ordered dot of v with itself, as DXC writes `length`
+        return length_of(value_ref(operands[0]));
+    case math::distance:
+        // the length of a - b
+        return length_of(
+            add(op::fsub, _out.type_of(value_ref(operands[0])), {value_ref(operands[0]), value_ref(operands[1])}));
+    case math::normalize:
+    {
+        // v times 1 / length(v): DXC's `normalize` multiplies by `rsqrt` instead, but `rsqrt` is no operation SPIR-V and
+        // DXIL compute alike, and a division of a square root is, on every route; so all three write this one
+        auto const v = value_ref(operands[0]);
+        auto const inverse = add(op::fdiv, scalar, {float_constant(scalar, 1.0), length_of(v)});
+        return add(op::vector_times_scalar, type, {v, inverse});
+    }
+    case math::reflect:
+    {
+        // i - n * (2 * dot(n, i)): the scalar factor first, as DXC writes it, then multiplied into n, then subtracted
+        auto const i = value_ref(operands[0]);
+        auto const n = value_ref(operands[1]);
+        auto const k = add(op::fmul, scalar, {float_constant(scalar, 2.0), ordered_dot(n, i, scalar, lanes_of(type))});
+        return add(op::fsub, type, {i, add(op::vector_times_scalar, type, {n, k})});
+    }
+    case math::refract:
+    {
+        // k = 1 - eta * eta * (1 - d * d) of d = dot(n, i), then eta * i - (eta * d + sqrt(k)) * n where k >= 0 and zero
+        // elsewhere, each step as DXC writes `refract`; a NaN k gives zero, as DXC's ordered compare does
+        auto const i = value_ref(operands[0]);
+        auto const n = value_ref(operands[1]);
+        auto const eta = value_ref(operands[2]);
+        auto const one = float_constant(scalar, 1.0);
+        auto const zero = float_constant(scalar, 0.0);
+        auto const d = ordered_dot(n, i, scalar, lanes_of(type));
+        auto const sine = add(op::fsub, scalar, {one, add(op::fmul, scalar, {d, d})});
+        auto const k = add(op::fsub, scalar, {one, add(op::fmul, scalar, {add(op::fmul, scalar, {eta, eta}), sine})});
+        auto const term
+            = add(op::fadd, scalar, {add(op::fmul, scalar, {eta, d}), add(op::math, scalar, {k}, u8(math::sqrt))});
+        auto const bent
+            = add(op::fsub, type,
+                  {add(op::vector_times_scalar, type, {i, eta}), add(op::vector_times_scalar, type, {n, term})});
+        auto const is_bent = add(op::fge, _bool, {k, zero});
+        u32 lanes[4];
+        for (auto l = u32(0); l < lanes_of(type); ++l)
+            lanes[l] = u32(add(op::select, scalar, {is_bent, extracted(bent, scalar, l), zero}));
+        return add(op::construct, type, cc::span<u32 const>(lanes, isize(lanes_of(type))));
+    }
+    default:
+        return value_ref::none;
+    }
+}
+
+value_ref lowering::ordered_dot(value_ref a, value_ref b, type_ref scalar, u32 lanes)
+{
+    auto sum = add(op::fmul, scalar, {extracted(a, scalar, 0), extracted(b, scalar, 0)});
+    for (auto l = u32(1); l < lanes; ++l)
+        sum = add(op::fadd, scalar, {sum, add(op::fmul, scalar, {extracted(a, scalar, l), extracted(b, scalar, l)})});
+    return sum;
 }
 
 value_ref lowering::add(op code, type_ref type, std::initializer_list<value_ref> operands, u8 sub, u8 aux)

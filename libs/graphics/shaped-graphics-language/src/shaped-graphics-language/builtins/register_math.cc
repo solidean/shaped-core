@@ -813,7 +813,13 @@ void sgl::builtins::register_math(registry& r)
         add(r, cc::format("@pure fun pow(x: {0}, y: {0}) -> {0}", t), binary<pow_of>, {}, pow_undefined);
         add(r, cc::format("@pure fun step(edge: {0}, x: {0}) -> {0}", t), binary<step_of>, {}, nullptr, false,
             "/// 0 where `x` is below `edge`, and 1 from it on.");
-        add(r, cc::format("@pure fun smoothstep(low: {0}, high: {0}, x: {0}) -> {0}", t), smoothstep, {},
+        add(r, cc::format("@pure fun smoothstep(low: {0}, high: {0}, x: {0}) -> {0}", t), smoothstep,
+            {.kind = spelling_kind::custom,
+             .custom = impl::write_ordered_smoothstep,
+             .helper = impl::ordered_smoothstep_helper,
+             .hlsl_names = impl::ordered_smoothstep_names(language::hlsl),
+             .wgsl_names = impl::ordered_smoothstep_names(language::wgsl),
+             .msl_names = impl::ordered_smoothstep_names(language::msl)},
             smoothstep_undefined, false, "/// 0 up to `low`, 1 from `high` on, and a smooth Hermite curve between.");
         // EMIT-254: HLSL's `fma` takes a double alone, and `mad` is its float's, which DXIL leaves free to fuse
         add(r, cc::format("@pure fun fma(a: {0}, b: {0}, c: {0}) -> {0}", t),
@@ -897,17 +903,20 @@ void sgl::builtins::register_math(registry& r)
     }
 
     r.add_comment("// geometry");
-    add(r, "@pure fun cross(a: vec3, b: vec3) -> vec3", cross, {});
-    add(r, "@pure fun cross(a: float3, b: float3) -> float3", cross, {});
-    add(r, "@pure fun cross(a: half3, b: half3) -> half3", cross, {});
-    add(r, "@pure fun distance(a: pos3, b: pos3) -> float", distance, {});
+    auto const cross_spelling = impl::ordered_spelling(impl::ordered_call::cross);
+    add(r, "@pure fun cross(a: vec3, b: vec3) -> vec3", cross, cross_spelling);
+    add(r, "@pure fun cross(a: float3, b: float3) -> float3", cross, cross_spelling);
+    add(r, "@pure fun cross(a: half3, b: half3) -> half3", cross, cross_spelling);
+    auto const distance_spelling = impl::ordered_spelling(impl::ordered_call::distance);
+    add(r, "@pure fun distance(a: pos3, b: pos3) -> float", distance, distance_spelling);
     for (auto const t : {cc::string_view("float2"), cc::string_view("float3"), cc::string_view("float4")})
-        add(r, cc::format("@pure fun distance(a: {0}, b: {0}) -> float", t), distance, {});
+        add(r, cc::format("@pure fun distance(a: {0}, b: {0}) -> float", t), distance, distance_spelling);
     for (auto const t : {cc::string_view("half2"), cc::string_view("half3"), cc::string_view("half4")})
-        add(r, cc::format("@pure fun distance(a: {0}, b: {0}) -> half", t), distance, {});
-    add(r, "@pure fun reflect(v: vec3, n: vec3) -> vec3", reflect, {}, nullptr, false,
-        "/// `v` mirrored at the plane whose unit normal is `n`.");
-    add(r, "@pure fun refract(v: vec3, n: vec3, eta: float) -> vec3", refract, {}, nullptr, false,
+        add(r, cc::format("@pure fun distance(a: {0}, b: {0}) -> half", t), distance, distance_spelling);
+    add(r, "@pure fun reflect(v: vec3, n: vec3) -> vec3", reflect, impl::ordered_spelling(impl::ordered_call::reflect),
+        nullptr, false, "/// `v` mirrored at the plane whose unit normal is `n`.");
+    add(r, "@pure fun refract(v: vec3, n: vec3, eta: float) -> vec3", refract,
+        impl::ordered_spelling(impl::ordered_call::refract), nullptr, false,
         "/// `v` bent through a surface of unit normal `n` by the ratio of indices `eta`; zero where it reflects "
         "entirely.");
 

@@ -134,7 +134,9 @@ def _bump(ctx: Context, subs: list[lib.Submodule]) -> None:
     paths = [s.path for s in moved]
     # A project whose registry derives a file from a submodule (CMakePresets.json from shaped-core's) refreshes it in the same commit.
     listed = subprocess.run(["uv", "run", "dev.py", "check", "--list"], cwd=str(ctx.root), capture_output=True, text=True)
-    if "presets" in listed.stdout.split():
+    # a check's name opens its unindented line; a word of some check's description is no check
+    names = {line.split()[0] for line in listed.stdout.splitlines() if line.strip() and not line[0].isspace()}
+    if "presets" in names:
         _dev(ctx, "check", "presets", "--fix")
         paths += [line[3:] for line in _dirty(ctx.root)]
     _git(ctx.root, "add", "--", *paths)

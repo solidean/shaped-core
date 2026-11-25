@@ -131,6 +131,8 @@ inline constexpr u32 k_attr_readonly = 21;
 inline constexpr u32 k_ll_constant_bit = 0x80000000u;
 /// The `sub` of an element pointer that `dx.nonuniform` marks.
 inline constexpr u8 k_ll_nonuniform = 1;
+/// The `sub` of a call that `dx.precise` marks.
+inline constexpr u8 k_ll_precise = 1;
 inline constexpr u32 k_ll_global_bit = 0x40000000u;
 inline constexpr u32 k_ll_index_mask = 0x3fffffffu;
 
@@ -281,7 +283,12 @@ public:
     [[nodiscard]] ll_value select(ll_value condition, ll_value yes, ll_value no);
     [[nodiscard]] ll_value extract_value(ll_value aggregate, u32 index);
     /// `is_stable` says a call that reads memory reads what never changes, so two of it are one.
-    [[nodiscard]] ll_value call(ll_value callee, ll_type type, cc::span<ll_value const> args, bool is_stable = false);
+    /// `is_precise` attaches `dx.precise` where the call gives a float, the calls DXC marks under `-Gis` (EMIT-281).
+    [[nodiscard]] ll_value call(ll_value callee,
+                                ll_type type,
+                                cc::span<ll_value const> args,
+                                bool is_stable = false,
+                                bool is_precise = false);
     /// `count` elements of `element`, whose size operand is an i32 constant.
     [[nodiscard]] ll_value alloca_of(ll_type allocated, u32 alignment);
     [[nodiscard]] ll_value load(ll_type t, ll_value pointer, u32 alignment);
@@ -476,6 +483,8 @@ private:
     [[nodiscard]] ll_type add_type(type_entry const& t, cc::span<ll_type const> args);
     [[nodiscard]] ll_value add_constant(constant_entry const& c, cc::span<ll_value const> args);
     [[nodiscard]] ll_value push(inst_code code, ll_type type, cc::span<u32 const> args, u8 sub = 0, u8 flags = 0);
+    /// The id of `_one_node`, made where none is yet.
+    [[nodiscard]] u32 one_node();
     [[nodiscard]] u32 add_name(cc::string_view name);
     [[nodiscard]] bool has_effect(inst_entry const& inst) const;
     [[nodiscard]] bool may_share(inst_entry const& inst) const;
@@ -499,8 +508,8 @@ private:
     cc::vector<u32> _constant_slots;
     cc::vector<global_entry> _globals;
     cc::vector<ll_type> _arguments;
-    /// The `!{i32 1}` of `dx.nonuniform`, made on first use.
-    u32 _nonuniform_node = 0;
+    /// The `!{i32 1}` that `dx.nonuniform` and `dx.precise` both name, as DXC's one node; made on first use.
+    u32 _one_node = 0;
     cc::vector<ll_attribute> _attribute_items;
     cc::vector<attribute_list> _attribute_lists;
     cc::vector<md_entry> _metadata;

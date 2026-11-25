@@ -831,6 +831,31 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
   Each mode needs its device property, so a vulkan entry point needs the feature `float_specials` from `.specials` on, and `float_denormals` at `.ieee`.
   `wgsl` keeps `.fast` alone.
   A host may weaken a guarantee on WGSL alone, which compiles at `.fast` with the warning `float-guarantee-weakened`.
+* **EMIT-281** Where the float guarantee is `.precise` or `.ieee` (CHK-435), every route computes the same operations in the same order ([why](why/emitting.md#emit-281)).
+  Each `+`, `-`, `*` and `/` of floats is one IEEE operation of its type, in source order, rounded on its own: none is fused, reassociated or folded into another.
+  A dot product, and each component of a matrix product, is its scalar products summed left to right, `((a0*b0 + a1*b1) + a2*b2) + a3*b3`.
+  So no route writes a target's `mul`, `dot`, `OpDot`, `OpMatrixTimesVector` or `OpMatrixTimesMatrix` there.
+  `smoothstep(e0, e1, x)` is `t * (t * (3 - 2t))` of `t = saturate((x - e0) / (e1 - e0))`, each operation its own, and never a target's `smoothstep`.
+  The geometry and the blend are their definitions over that dot, each step its own, and never a target's own call.
+  `length(v)` is `sqrt(dot(v, v))`, and `distance(a, b)` is `length(a - b)`.
+  `normalize(v)` is `v * (1 / length(v))`, a division of a square root, where DXC's own multiplies by `rsqrt`.
+  `reflect(i, n)` is `i - n * k` of `k = 2 * dot(n, i)`, the scalar factor first.
+  `refract(i, n, eta)` is `eta * i - (eta * d + sqrt(k)) * n` of `d = dot(n, i)` and `k = 1 - (eta * eta) * (1 - d * d)` where `k >= 0`, and zero elsewhere, a NaN `k` included.
+  `mix(a, b, t)` is `a + t * (b - a)`, DXC's lowering of `lerp`.
+  `cross(a, b)` is `(a1*b2 - a2*b1, a2*b0 - a0*b2, a0*b1 - a1*b0)`, as DXC writes it.
+  The text routes write these as helpers of their own: `sgl_ordered_mul`, `sgl_ordered_dot`, `sgl_ordered_smoothstep`, and `sgl_ordered_` before each other name.
+  These are the forms of `float` and `half`.
+  A `double`'s builtins are bodies of the prelude, the same operations on every route but `sqrt` and `inverse_sqrt`, which are each API's own (EVAL-108).
+  The interpreter keeps a float's exact meaning (EVAL-6), from which these forms depart by their roundings (EVAL-96).
+  A transcendental keeps the target's own precision, which no level makes alike across vendors.
+  `determinant` stays each target's own.
+  A subgroup's float reduction or scan, and a float atomic, add in the order the hardware picks.
+  From `.specials` on, a call of a target's operation carries its precise mark, as DXC's `-Gis` writes it.
+  SGL's own DXIL writes no fast-math flag, and marks each call of a DXIL operation that gives a float `!dx.precise`, naming one `!{i32 1}`.
+  SGL's own SPIR-V decorates each float arithmetic instruction `NoContraction`, and an extended instruction stays undecorated, as DXC writes it.
+  At `.fast` and `.specials` the targets' own products, `smoothstep`, geometry, `mix` and `cross` stay, and at `.fast` nothing is marked.
+  What no single operation states, the denormals and SPIR-V's float execution modes, stays the entry point's.
+  How a route keeps the guarantee of a scope narrower than its entry point is its own.
 * **EMIT-186** HLSL writes `!=` of float or half lanes as `!(a == b)`, and a whole vector's as `any(!(a == b))`, which is true where either is a NaN.
   DXC lowers HLSL's own float `!=` to SPIR-V as `OpFOrdNotEqual`, false for a NaN, where DXIL's is unordered; the negated `==` is unordered on both.
   WGSL and MSL write `!=`, which is unordered in both.

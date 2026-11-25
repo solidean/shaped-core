@@ -26,6 +26,9 @@ A listing here is the dump of a flat tree, shortened: a label is `$name`, and a 
   An operation of them computes as its 32-bit family does and rounds its result once: a half to nearest, ties to even, and an integer to its low 16 bits.
   So `+`, `-`, `*`, `/` and `sqrt` of halves are exactly binary16's own, and a builtin of several steps, such as `mix` or `dot`, rounds once where a GPU may round each step.
   At `.fast` a GPU may skip a half's rounding and carry a float's precision instead: Apple's compiler does under Metal's fast math, so only a level above `.fast` holds a half to binary16 there.
+  A float converted to a half, `x as half`, rounds once either to nearest, ties to even, or toward zero, at every level: whichever its target does.
+  D3D converts to another float format toward zero, and Vulkan leaves a conversion's rounding to the device, so no target promises nearest; the interpreter rounds to nearest.
+  It is a half either way, and a result no half holds is no conversion.
 * **EVAL-108** A double's rounding functions are exact, and a zero they give keeps the sign of the argument: `trunc(-0.5)` is -0.0 (CHK-458).
   `round` takes a tie to the even neighbour, and `fract(x)` is `x - floor(x)`.
   `sqrt` is the double nearest the root on the interpreter, and within one ULP of it on dx12; `inverse_sqrt` is `1 / sqrt(x)` there, and within two ULP on dx12.

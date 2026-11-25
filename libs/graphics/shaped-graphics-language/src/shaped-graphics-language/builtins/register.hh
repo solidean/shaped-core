@@ -159,4 +159,31 @@ cc::string_view spread_check(cc::span<check::scalar const> in)
 /// The arguments of `c` with the scalar at `at` written as a vector of the type `c.data` names, `vec3i(s)`.
 /// It is for a target that takes no vector beside a scalar for the operator at hand, as WGSL's `&` and its shifts.
 [[nodiscard]] cc::vector<written> spread_arguments(call_context const& c, isize at);
+/// EMIT-281: what a text writes of a dot or matrix product and of a smoothstep where the entry point's guarantee is
+/// `.precise` or stricter: a call of a helper that spells out each scalar operation in the fixed order, since HLSL's
+/// `mul` and `dot` reach DXIL as fused or driver-ordered operations and SPIR-V's and Metal's smoothstep as the driver's.
+/// Each writes the target's own call where the entry point is looser, and each helper writes nothing there.
+[[nodiscard]] written write_ordered_product(written const& lhs, written const& rhs);
+[[nodiscard]] cc::string ordered_product_helper(helper_context const& c);
+[[nodiscard]] written write_ordered_dot(call_context const& c);
+[[nodiscard]] cc::string ordered_dot_helper(helper_context const& c);
+[[nodiscard]] written write_ordered_smoothstep(call_context const& c);
+[[nodiscard]] cc::string ordered_smoothstep_helper(helper_context const& c);
+/// The geometry and blend whose targets' forms hide a dot or a sum: written in the fixed order at `.precise` as the
+/// smoothstep is, as `sgl_ordered_<name>` helpers, and as the target's own call elsewhere.
+enum class ordered_call : u32
+{
+    length,
+    distance,
+    normalize,
+    reflect,
+    refract,
+    mix,
+    cross,
+};
+[[nodiscard]] spelling ordered_spelling(ordered_call which);
+/// The names those writers and helpers write in HLSL and MSL, which a program's names must not hide.
+[[nodiscard]] cc::span<cc::string_view const> ordered_product_names(language l);
+[[nodiscard]] cc::span<cc::string_view const> ordered_dot_names(language l);
+[[nodiscard]] cc::span<cc::string_view const> ordered_smoothstep_names(language l);
 } // namespace sgl::builtins::impl

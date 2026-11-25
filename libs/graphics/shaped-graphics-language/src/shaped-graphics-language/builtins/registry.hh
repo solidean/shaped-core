@@ -65,6 +65,8 @@ struct sgl::builtins::call_context
     bool reorders_through_nvapi = false;
     /// The entry point's traces see opacity micromaps (EMIT-184); where they do not, a trace forces no 2 states.
     bool states_micromaps = false;
+    /// The entry point's float guarantee is `.precise` or stricter, so a product is written in its fixed order (EMIT-281).
+    bool is_precise = false;
     cc::span<written const> arguments;
     /// Each argument's type as the target spells it, for a record with a `helper`; empty for any other.
     cc::span<cc::string const> argument_types;
@@ -97,6 +99,8 @@ struct sgl::builtins::helper_context
     language target = language::hlsl;
     /// HLSL for vulkan.
     bool is_vulkan = false;
+    /// As `call_context::is_precise`.
+    bool is_precise = false;
     cc::span<cc::string const> argument_types;
     /// The record's `spelling::data`.
     u32 data = 0;

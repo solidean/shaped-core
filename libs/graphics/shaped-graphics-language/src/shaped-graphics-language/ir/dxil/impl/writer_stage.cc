@@ -1138,6 +1138,6 @@ ll_value writer::call(dx_op op, ll_type overload, cc::span<ll_value const> args,
     auto const key = (u64(info.shape) << 32) | (info.overloads != k_no_overload ? u64(u32(overload)) + 1 : 0u);
     for (auto const& known : _functions)
         if (known.key == key)
-            return _m.call(function, known.type, args, is_stable);
+            return _m.call(function, known.type, args, is_stable, _guarantee != check::float_level::fast);
     return ll_value::none;
 }

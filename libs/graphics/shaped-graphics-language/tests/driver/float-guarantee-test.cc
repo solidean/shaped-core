@@ -360,3 +360,279 @@ TEST("sgl float - metal's text states its entry point's math mode, fast for no g
     REQUIRE(hlsl.has_value());
     CHECK(!hlsl.value().text.contains("math_mode"));
 }
+
+namespace
+{
+/// A matrix product of a matrix product, a dot and a smoothstep, at `.fast` and at `.precise`.
+constexpr cc::string_view k_products
+    = "binding work:\n"
+      "    values: mut buffer[float4]\n"
+      "\n"
+      "fun shaped(id: int3){work} -> float4:\n"
+      "    let m = mat4(work.values[0], work.values[1], work.values[2], work.values[3])\n"
+      "    let v = work.values[id.x]\n"
+      "    let p = (m * m) * v\n"
+      "    return p + float4(dot(v, p), smoothstep(v.x, v.y, v.z), 0.0, 0.0)\n"
+      "\n"
+      "@compute(64) fun loose(@thread_id id: int3){work}:\n"
+      "    work.values[id.x] = shaped(id)\n"
+      "\n"
+      "@float(.precise) @compute(64) fun strict(@thread_id id: int3){work}:\n"
+      "    work.values[id.x] = shaped(id)\n";
+
+/// How often `text` calls `name` itself, not a longer name that ends in it.
+isize bare_calls(cc::string_view text, cc::string_view name)
+{
+    auto count = isize(0);
+    auto const call = cc::string(name) + "(";
+    for (auto at = text.find(call); at >= 0; at = text.find(call, at + 1))
+    {
+        auto const before = at == 0 ? ' ' : text[at - 1];
+        auto const is_part = before == '_' || (before >= 'a' && before <= 'z') || (before >= 'A' && before <= 'Z')
+                          || (before >= '0' && before <= '9');
+        count += is_part ? 0 : 1;
+    }
+    return count;
+}
+} // namespace
+
+TEST("sgl float - a text at .precise writes its products and smoothstep as helpers in the fixed order (EMIT-281)")
+{
+    for (auto const t : {target::hlsl_dx12, target::hlsl_vulkan, target::msl})
+    {
+        auto const of = [&](cc::string_view entry)
+        {
+            auto const e = sgl::compile_to_text(
+                {.source = k_products, .source_name = "products.sgl", .entry_point = entry, .target = t});
+            REQUIRE(e.has_value())
+                .dump("target", sgl::emit::to_string(t))
+                .dump("error", e.has_error() ? e.error() : cc::string());
+            return e.value().text;
+        };
+        auto const loose = of("loose");
+        auto const strict = of("strict");
+        auto const is_hlsl = t != target::msl;
+
+        // .fast keeps the target's own: HLSL's `mul`, MSL's `*`, and every target's `dot` and `smoothstep`
+        CHECK(bare_calls(loose, "mul") == (is_hlsl ? 2 : 0)).dump("text", loose);
+        CHECK(bare_calls(loose, "dot") == 1).dump("text", loose);
+        CHECK(bare_calls(loose, "smoothstep") == 1).dump("text", loose);
+        CHECK(!loose.contains("sgl_ordered_"));
+
+        // .precise calls none of them, and spells each sum out, left to right
+        CHECK(bare_calls(strict, "mul") == 0).dump("text", strict);
+        CHECK(bare_calls(strict, "dot") == 0).dump("text", strict);
+        CHECK(bare_calls(strict, "smoothstep") == 0).dump("text", strict);
+        CHECK(bare_calls(strict, "sgl_ordered_mul") == 2 + 2).dump("text", strict); // two declarations, two calls
+        CHECK(strict.contains("float sgl_ordered_dot(float4 a, float4 b)\n{\n    return (((a[0] * b[0] + a[1] * b[1]) "
+                              "+ a[2] * b[2]) + a[3] * b[3]);\n}\n"))
+            .dump("text", strict);
+        CHECK(strict.contains("return t * (t * ((float)3.0 - (float)2.0 * t));")).dump("text", strict);
+        // row 1 of `m * v`: HLSL indexes a row, MSL a column
+        CHECK(strict.contains(is_hlsl ? "(((m[1][0] * v[0] + m[1][1] * v[1]) + m[1][2] * v[2]) + m[1][3] * v[3])"
+                                      : "(((m[0][1] * v[0] + m[1][1] * v[1]) + m[2][1] * v[2]) + m[3][1] * v[3])"))
+            .dump("text", strict);
+    }
+}
+
+namespace
+{
+/// The geometry and the blend that hide a dot or a sum, at `.fast` and at `.precise`.
+constexpr cc::string_view k_geometry
+    = "binding work:\n"
+      "    values: mut buffer[float4]\n"
+      "\n"
+      "fun shaped(id: int3){work} -> float4:\n"
+      "    let v = work.values[id.x]\n"
+      "    let w = work.values[0]\n"
+      "    let n = vec3(w.x, w.y, w.z)\n"
+      "    let i = vec3(v.x, v.y, v.z)\n"
+      "    let r = reflect(i, n) + refract(i, n, w.w) + cross(i, n)\n"
+      "    let m = mix(v, w, v.x)\n"
+      "    return m + normalize(v) + float4(r.x, r.y, r.z, length(v) + distance(v, w))\n"
+      "\n"
+      "@compute(64) fun loose(@thread_id id: int3){work}:\n"
+      "    work.values[id.x] = shaped(id)\n"
+      "\n"
+      "@float(.precise) @compute(64) fun strict(@thread_id id: int3){work}:\n"
+      "    work.values[id.x] = shaped(id)\n";
+} // namespace
+
+TEST("sgl float - a text at .precise writes the geometry and mix as helpers of their fixed forms (EMIT-281)")
+{
+    for (auto const t : {target::hlsl_dx12, target::hlsl_vulkan, target::msl})
+    {
+        auto const of = [&](cc::string_view entry)
+        {
+            auto const e = sgl::compile_to_text(
+                {.source = k_geometry, .source_name = "geometry.sgl", .entry_point = entry, .target = t});
+            REQUIRE(e.has_value())
+                .dump("target", sgl::emit::to_string(t))
+                .dump("error", e.has_error() ? e.error() : cc::string());
+            return e.value().text;
+        };
+        auto const loose = of("loose");
+        auto const strict = of("strict");
+        auto const blend = t == target::msl ? cc::string_view("mix") : cc::string_view("lerp");
+        for (auto const name : {cc::string_view("length"), cc::string_view("distance"), cc::string_view("normalize"),
+                                cc::string_view("reflect"), cc::string_view("refract"), cc::string_view("cross"), blend})
+        {
+            CHECK(bare_calls(loose, name) == 1).dump("call", name).dump("text", loose);
+            CHECK(bare_calls(strict, name) == 0).dump("call", name).dump("text", strict);
+            CHECK(bare_calls(strict, cc::format("sgl_ordered_{}", name == blend ? cc::string_view("mix") : name)) == 2)
+                .dump("call", name)
+                .dump("text", strict);
+        }
+        CHECK(!loose.contains("sgl_ordered_"));
+
+        // each form as EMIT-281 states it
+        CHECK(strict.contains("    return a + t * (b - a);\n")).dump("text", strict);
+        CHECK(strict.contains("    float s = (float)1.0 / sqrt((((v[0] * v[0] + v[1] * v[1]) + v[2] * v[2]) + v[3] * "
+                              "v[3]));\n    return v * s;\n"))
+            .dump("text", strict);
+        CHECK(strict.contains("    float k = (float)2.0 * ((n[0] * i[0] + n[1] * i[1]) + n[2] * i[2]);\n"
+                              "    return i - n * k;\n"))
+            .dump("text", strict);
+        CHECK(strict.contains("    float k = (float)1.0 - (eta * eta) * ((float)1.0 - d * d);\n"
+                              "    return k >= (float)0.0 ? eta * i - (eta * d + sqrt(k)) * n : "))
+            .dump("text", strict);
+        CHECK(strict.contains("    float4 d = a - b;\n    return sqrt((((d[0] * d[0] + d[1] * d[1]) + d[2] * d[2]) + "
+                              "d[3] * "
+                              "d[3]));\n"))
+            .dump("text", strict);
+    }
+}
+
+namespace
+{
+/// Each matrix shape's product at `.precise`: mat3 and mat2 by a vector and by each other, and an affine3's three.
+constexpr cc::string_view k_shapes = "binding work:\n"
+                                     "    values: mut buffer[float4]\n"
+                                     "\n"
+                                     "@float(.precise) @compute(64) fun strict(@thread_id id: int3){work}:\n"
+                                     "    let a = work.values[0]\n"
+                                     "    let b = work.values[1]\n"
+                                     "    let c = work.values[2]\n"
+                                     "    let m3 = mat3(a.xyz, b.xyz, c.xyz)\n"
+                                     "    let m2 = mat2(a.xy, b.xy)\n"
+                                     "    let af = affine3.from_rows(a, b, c)\n"
+                                     "    let s = (m3 * m3) * c.xyz\n"
+                                     "    let t = (m2 * m2) * c.xy\n"
+                                     "    let u = af * pos3(c.x, c.y, c.z)\n"
+                                     "    work.values[id.x] = float4(s.x + t.x, u.x, u.y, u.z)\n";
+} // namespace
+
+TEST("sgl float - a text at .precise indexes each matrix shape's elements as its target holds them (EMIT-281)")
+{
+    for (auto const t : {target::hlsl_dx12, target::msl})
+    {
+        auto const e = sgl::compile_to_text(
+            {.source = k_shapes, .source_name = "shapes.sgl", .entry_point = "strict", .target = t});
+        REQUIRE(e.has_value()).dump("error", e.has_error() ? e.error() : cc::string());
+        auto const& text = e.value().text;
+        auto const is_hlsl = t != target::msl;
+        // row 1 of a mat3 times a vector: HLSL's m[row][column], MSL's m[column][row]
+        CHECK(text.contains(is_hlsl ? "((m[1][0] * v[0] + m[1][1] * v[1]) + m[1][2] * v[2])"
+                                    : "((m[0][1] * v[0] + m[1][1] * v[1]) + m[2][1] * v[2])"))
+            .dump("text", text);
+        // element (row 0, column 1) of a mat2 times a mat2
+        CHECK(text.contains(is_hlsl ? "o[0][1] = (a[0][0] * b[0][1] + a[0][1] * b[1][1]);"
+                                    : "o[1][0] = (a[0][0] * b[1][0] + a[1][0] * b[1][1]);"))
+            .dump("text", text);
+        // an affine3 is three rows of four in both, each row dotted with the widened position
+        CHECK(text.contains("float3 sgl_ordered_mul(float3x4 m, float4 v)")).dump("text", text);
+        CHECK(text.contains("(((m[2][0] * v[0] + m[2][1] * v[1]) + m[2][2] * v[2]) + m[2][3] * v[3])")).dump("text", text);
+        CHECK(text.contains("sgl_ordered_mul(af, float4(float3(c.x, c.y, c.z), 1.0))")).dump("text", text);
+    }
+}
+
+TEST("sgl float - a text at .precise spells a half vector's helpers in halves, every lane summed (EMIT-281)")
+{
+    constexpr cc::string_view source = "require shader_f16\n"
+                                       "\n"
+                                       "binding work:\n"
+                                       "    values: mut buffer[float4]\n"
+                                       "\n"
+                                       "@float(.precise) @compute(64) fun strict(@thread_id id: int3){work}:\n"
+                                       "    let v = work.values[id.x]\n"
+                                       "    let h = half3(v.x as half, v.y as half, v.z as half)\n"
+                                       "    let s = smoothstep(h, h + h, h)\n"
+                                       "    work.values[id.x] = float4((dot(h, h) + length(h)) as float, s.x as float, "
+                                       "0.0, 0.0)\n";
+    for (auto const t : {target::hlsl_dx12, target::msl})
+    {
+        auto const e
+            = sgl::compile_to_text({.source = source, .source_name = "half.sgl", .entry_point = "strict", .target = t});
+        REQUIRE(e.has_value()).dump("error", e.has_error() ? e.error() : cc::string());
+        auto const& text = e.value().text;
+        auto const half = t == target::msl ? cc::string_view("half") : cc::string_view("float16_t");
+        CHECK(text.contains(cc::format("{0} sgl_ordered_dot({0}3 a, {0}3 b)\n{{\n    return ((a[0] * b[0] + a[1] * "
+                                       "b[1]) "
+                                       "+ a[2] * b[2]);\n}}\n",
+                                       half)))
+            .dump("text", text);
+        CHECK(text.contains(cc::format("{0} sgl_ordered_length({0}3 v)\n{{\n    return sqrt(((v[0] * v[0] + v[1] * "
+                                       "v[1]) "
+                                       "+ v[2] * v[2]));\n}}\n",
+                                       half)))
+            .dump("text", text);
+        // the constants are halves, so no step computes in floats
+        CHECK(text.contains(cc::format("return t * (t * (({0})3.0 - ({0})2.0 * t));", half))).dump("text", text);
+    }
+}
+
+TEST("sgl float - a text's cross is each lane's a_p * b_q - a_q * b_p at .precise, and the target's at .fast "
+     "(EMIT-281)")
+{
+    constexpr cc::string_view source = "require shader_f16\n"
+                                       "\n"
+                                       "binding work:\n"
+                                       "    values: mut buffer[float4]\n"
+                                       "\n"
+                                       "fun crossed(id: int3){work} -> float4:\n"
+                                       "    let v = work.values[id.x]\n"
+                                       "    let w = work.values[0]\n"
+                                       "    let h = half3(v.x as half, v.y as half, v.z as half)\n"
+                                       "    let g = half3(w.x as half, w.y as half, w.z as half)\n"
+                                       "    let c = cross(h, g)\n"
+                                       "    let f = cross(v.xyz, w.xyz)\n"
+                                       "    let e = cross(vec3(v.x, v.y, v.z), vec3(w.x, w.y, w.z))\n"
+                                       "    return float4(c.x as float, f.y, e.z, 0.0)\n"
+                                       "\n"
+                                       "@compute(64) fun loose(@thread_id id: int3){work}:\n"
+                                       "    work.values[id.x] = crossed(id)\n"
+                                       "\n"
+                                       "@float(.precise) @compute(64) fun strict(@thread_id id: int3){work}:\n"
+                                       "    work.values[id.x] = crossed(id)\n";
+    auto const of = [&](cc::string_view entry, target t)
+    {
+        auto const e
+            = sgl::compile_to_text({.source = source, .source_name = "cross.sgl", .entry_point = entry, .target = t});
+        REQUIRE(e.has_value())
+            .dump("target", sgl::emit::to_string(t))
+            .dump("error", e.has_error() ? e.error() : cc::string());
+        return e.value().text;
+    };
+    for (auto const t : {target::hlsl_dx12, target::hlsl_vulkan, target::msl, target::wgsl})
+    {
+        auto const loose = of("loose", t);
+        CHECK(loose.contains("cross(h, g)")).dump("text", loose);
+        CHECK(loose.contains("cross(v.xyz, w.xyz)")).dump("text", loose);
+        CHECK(!loose.contains("sgl_ordered_")).dump("text", loose);
+    }
+    for (auto const t : {target::hlsl_dx12, target::hlsl_vulkan, target::msl})
+    {
+        auto const strict = of("strict", t);
+        auto const half = t == target::msl ? cc::string_view("half3") : cc::string_view("float16_t3");
+        for (auto const type : {half, cc::string_view("float3")})
+            CHECK(strict.contains(cc::format("{0} sgl_ordered_cross({0} a, {0} b)\n{{\n    return {0}(a[1] * b[2] - "
+                                             "a[2] * "
+                                             "b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]);\n}}\n",
+                                             type)))
+                .dump("type", type)
+                .dump("text", strict);
+        // a vec3's and a float3's helper are one text, written once
+        CHECK(bare_calls(strict, "sgl_ordered_cross") == 5).dump("text", strict);
+        CHECK(bare_calls(strict, "cross") == 0).dump("text", strict);
+    }
+}

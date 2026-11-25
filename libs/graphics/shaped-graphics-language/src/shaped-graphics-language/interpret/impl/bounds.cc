@@ -189,6 +189,19 @@ struct sum_chain
 
 /// Adds to `h` what a GPU may give for a result the evaluator gave as `wide`, a 32-bit leaf, narrowed to `kind`.
 /// `product` is the result exact, where the call is a product a contraction may keep unrounded, and NaN elsewhere.
+/// `x` rounded to a half toward zero, back as a float: the nearest half, or the one below it in magnitude where the
+/// nearest is larger, which is the largest finite half where the nearest overflows.
+[[nodiscard]] f32 half_toward_zero(f32 x)
+{
+    auto const bits = builtins::impl::half_bits_of(x);
+    auto const nearest = builtins::impl::float_of_half_bits(bits);
+    auto const magnitude = x < 0 ? -x : x;
+    auto const nearest_magnitude = nearest < 0 ? -nearest : nearest;
+    if (!(nearest_magnitude > magnitude) || (bits & 0x7fffu) == 0)
+        return nearest;
+    return builtins::impl::float_of_half_bits((bits & 0x8000u) | ((bits & 0x7fffu) - 1));
+}
+
 void add_result(hull& h, f32 wide, f64 product, value_kind kind, call_shape shape, impl::float_licenses licenses)
 {
     auto const rounded = kind == value_kind::scalar_half
@@ -197,6 +210,9 @@ void add_result(hull& h, f32 wide, f64 product, value_kind kind, call_shape shap
     h.add(rounded);
     if (kind == value_kind::scalar_half && licenses.keeps_half_at_float && !shape.is_conversion)
         h.add(wide);
+    // EVAL-96: a conversion to a half rounds to nearest or toward zero, as its target does, at every level
+    if (kind == value_kind::scalar_half && shape.is_conversion && is_finite(wide))
+        h.add(half_toward_zero(wide));
     if (kind == value_kind::scalar_float && licenses.contracts && product == product && is_finite(wide))
     {
         // the exact product, rounded outward to the floats on either side of it
@@ -316,7 +332,7 @@ void impl::bound_call(builtins::function_record const& record,
         if (end.count > 1)
             ends.push_back(cc::move(end));
     }
-    if (ends.empty() && !licenses.is_any() && !shape.is_dot)
+    if (ends.empty() && !licenses.is_any() && !shape.is_dot && !shape.is_conversion)
         return;
 
     auto hulls = cc::vector<hull>::create_filled(results.size(), hull{});
