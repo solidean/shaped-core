@@ -91,6 +91,7 @@ A `known` line names the vendor, the backend and the issue:
 The vendor is `amd`, `apple`, `intel` or `nvidia`, matched by the adapter's PCI vendor id, and the backend is `dx12`, `vulkan`, `metal` or `webgpu`.
 On a matching context a difference logs at info, naming the issue, where it would fail.
 **A known line that stops diverging fails**, against the reference and against the interpreter: a fixed driver retires its line, and the issue gets checked.
+A trailing `precise` scopes a line to [the strict-floor twin](#the-strict-floor-twin) alone.
 A matching context is never what the others are held to, and a refresh writes no reference from it.
 Two routes of one matching context are not held to each other, since one driver folding both alike proves nothing.
 
@@ -141,6 +142,20 @@ a builtin's own precision, and a texture read, a subgroup operation, a derivativ
 The test says at info how much of `across` each file used against the interpreter, beyond its ranges, over every configuration it holds no known divergence for.
 That number is how far a file's tolerance carries what the ranges leave out, and 0 says the ranges hold everything.
 So does a construct a device runs natively, the trace above all: its emulated form is the interpreter's stand-in for the hardware, whose precision is its own.
+
+### The strict-floor twin
+
+`sg differential - every corpus entry point computes at a precise floor what SGL's interpreter says` is the twin.
+It compiles every entry point again at a `.precise` floor (`slib::k_float_floor_option`), and runs the interpreter at the same floor.
+There a target may no longer reassociate, contract or keep a half at a float's precision, so the ranges shrink to rounding, denormals and a sum of products' steps.
+It checks that a driver keeps what it is asked to keep, which the file's own level, usually `.fast`, cannot.
+WGSL keeps only `.fast` (EMIT-185), so a webgpu context runs no twin.
+
+A file's `known` lines describe its own level, so in the twin they only log, whether the driver diverges there or not.
+A `known` line that ends in `precise` is the twin's own, held as the other tests hold theirs.
+The first is Intel's Arc, which keeps halves at a float's precision whatever the floor: [bug-sg-diff-intel-ignores-precise-on-halves](issues/bug-sg-diff-intel-ignores-precise-on-halves.md).
+
+### Open conditions
 
 A condition the range leaves open, one a GPU may decide either way, is run both ways and the stores joined, up to six of them in an invocation.
 Past that, and at an index or a `switch` the range leaves open, what the invocation stores after it is bounded by nothing, and the test says at info how many elements are.

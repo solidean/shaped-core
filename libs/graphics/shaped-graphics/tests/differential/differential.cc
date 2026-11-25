@@ -126,10 +126,12 @@ namespace
         words.push_back(text.subview({.offset = 0, .size = end}));
         text = trimmed(end < text.size() ? text.subview(end) : cc::string_view());
     }
-    if (words.size() != 3)
+    if (words.size() != 3 && !(words.size() == 4 && words[3] == "precise"))
         return cc::nullopt;
 
     auto result = sg_diff::known_divergence{.issue = cc::string(words[2])};
+    if (words.size() == 4)
+        result.floor = cc::string(words[3]);
     if (words[0] == "amd")
         result.vendor_id = 0x1002;
     else if (words[0] == "apple")
@@ -155,10 +157,10 @@ namespace
 }
 } // namespace
 
-sg_diff::known_divergence const* sg_diff::workload::known_on(sg::context const& ctx) const
+sg_diff::known_divergence const* sg_diff::workload::known_on(sg::context const& ctx, cc::string_view floor) const
 {
     for (auto const& k : known)
-        if (k.vendor_id == ctx.metrics.adapter().vendor_id && k.backend == ctx.backend())
+        if (k.vendor_id == ctx.metrics.adapter().vendor_id && k.backend == ctx.backend() && k.floor == floor)
             return &k;
     return nullptr;
 }
@@ -291,8 +293,8 @@ sg_diff::corpus sg_diff::read_corpus()
                     known.push_back(parsed.value());
                 else
                     problem = cc::format("'{}' is no known divergence; one is `known <vendor> <backend> <issue>`, the "
-                                         "vendor "
-                                         "amd, apple, intel or nvidia and the backend dx12, vulkan, metal or webgpu",
+                                         "vendor amd, apple, intel or nvidia, the backend dx12, vulkan, metal or "
+                                         "webgpu, and a trailing `precise` for the strict-floor twin alone",
                                          value);
             }
             else
@@ -393,6 +395,8 @@ sg::async_compiled_shader sg_diff::compiled_on(sg::context const& ctx, route con
         kept.push_back({.name = cc::string(r.format == sg::shader_format::dxil ? slib::k_native_dxil_option
                                                                                : slib::k_native_spirv_option),
                         .value = cc::string("true")});
+    if (!r.float_floor.empty())
+        kept.push_back({.name = cc::string(slib::k_float_floor_option), .value = r.float_floor});
     return asset.acquire(r.format, kept);
 }
 
