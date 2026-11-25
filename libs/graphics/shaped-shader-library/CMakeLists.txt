@@ -335,6 +335,7 @@ if(SC_BUILD_TESTS)
             twin_b.sgl:*
             slib_test.sgl:*
             struct_cases.sgl:*
+            weakened.sgl:*
     )
 
     # And one in MSL, which only slib's metal compiler compiles.

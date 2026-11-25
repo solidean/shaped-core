@@ -264,3 +264,22 @@ TEST("slib sgl options - a name given twice is logged as an error, and the first
     auto const shader = slib_test::sgl_shaders::scaled::scale.asset->acquire(sg::shader_format::wgsl, twice);
     CHECK(text_of(shader).contains("@workgroup_size(32, 1, 1)"));
 }
+
+TEST("slib sgl options - an acquire that may weaken a float guarantee passes that on to the compile (EMIT-185)",
+     exclusive("slib-shader-library"))
+{
+    slib::shader_library lib;
+    lib.add_compiler(slib::create_sgl_compiler(slib::create_wgsl_compiler()));
+    lib.add_package(slib_test::sgl_shaders::package());
+    auto const& asset = slib_test::sgl_shaders::weakened::halve.asset;
+    REQUIRE(asset != nullptr);
+
+    auto const refused = asset->acquire(sg::shader_format::wgsl);
+    REQUIRE(refused != nullptr);
+    REQUIRE(refused->has_error());
+
+    // which the compile logs, as it does for a host that allows it
+    nx::expect_warning("float-guarantee-weakened");
+    slib::shader_option const weakens[] = {{.name = cc::string(slib::k_weakens_float_option), .value = "true"}};
+    CHECK(!text_of(asset->acquire(sg::shader_format::wgsl, weakens)).empty());
+}

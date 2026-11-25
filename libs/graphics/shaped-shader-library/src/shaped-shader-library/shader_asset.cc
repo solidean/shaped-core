@@ -100,11 +100,11 @@ sg::async_compiled_shader slib::shader_asset::acquire(sg::shader_format format, 
             }
     // What the device has is no option of the source, so no entry point lists it, and it may change what any of them
     // writes: a `has` anywhere it inlines, a prelude function's included.
-    // A compile's float floor is the same: it raises every entry point, and no source names it.
+    // A compile's float floor is the same: it raises every entry point, and no source names it, nor does its permission to weaken one.
     for (auto const& o : options)
         if (o.name == k_device_features_option || o.name == k_native_spirv_option || o.name == k_native_dxil_option
             || o.name == k_native_debug_info_option || o.name == k_mesh_form_option || o.name == k_float_floor_option
-            || o.name == k_polyfill_vertex_option || o.name == k_polyfill_task_option
+            || o.name == k_weakens_float_option || o.name == k_polyfill_vertex_option || o.name == k_polyfill_task_option
             || o.name == k_polyfill_control_option || o.name == k_polyfill_pass_option)
             key.push_back(o);
     cc::sort(key, [](shader_option const& a, shader_option const& b) { return a.name < b.name; });

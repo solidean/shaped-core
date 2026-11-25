@@ -1,0 +1,7 @@
+// An entry point whose float guarantee WGSL cannot keep: refused, unless the compile may weaken it (EMIT-185).
+
+binding weakened_work:
+    values: mut buffer[float]
+
+@float(.specials) @compute(64) fun halve(@thread_id id: int3){weakened_work}:
+    weakened_work.values[id.x] = weakened_work.values[id.x] * 0.5

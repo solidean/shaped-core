@@ -3,8 +3,8 @@ created: 2026-11-25
 refs:
   - file: libs/graphics/shaped-shader-library/src/shaped-shader-library/shader_asset.cc
   - issue: bug-sg-diff-intel-ignores-precise-on-halves
-claimed-by: Claude (for Philip Trettner)
-claimed-at: 2026-11-25T19:46Z
+closed: 2026-11-25
+resolution: fixed
 ---
 
 # shader_asset::acquire drops weakens_float, so a WebGPU host's permission to weaken a float guarantee never reaches the compile
