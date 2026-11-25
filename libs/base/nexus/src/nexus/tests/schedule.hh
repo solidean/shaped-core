@@ -145,6 +145,10 @@ struct nx::test_schedule_config
     // Read from a test body through nx::is_smoke(); set via --smoke.
     bool smoke = false;
 
+    // Run on where a test would skip for a known external bug, to see whether it still reproduces.
+    // Read from a test body through nx::runs_known_issues(); set via --known-issues.
+    bool run_known_issues = false;
+
     // Run only shard `shard_index` of `shard_count`, 0-based; set via --shard K/N, and 1 shard is the whole run.
     // A test belongs to one shard by a hash of its name, so the same test lands in the same shard on every run and machine.
     // A driver an alias names runs in every shard and shards its children instead, by driver, invocation group and child.

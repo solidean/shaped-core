@@ -4,6 +4,7 @@
 
 #include <clean-core/math/bit.hh>
 #include <clean-core/platform/environment.hh>
+#include <clean-core/streams/file_stream.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/from_string.hh>
 #include <clean-core/thread/async_coroutine.hh>
@@ -92,10 +93,14 @@ constexpr isize k_named_elements = 4;
 }
 
 /// Whether `b` is within `t` of the range `least` to `most`; a range with an infinite end bounds nothing.
+/// Held `exact`, `b` must be one of the ends, bit for bit: a file held exact ranges only its alternatives, a
+/// conversion's two roundings above all, and a value between those is no rounding of the conversion.
 [[nodiscard]] bool within_range(f32 least, f32 most, u32 b, sg_diff::tolerance t)
 {
     if (least - least != 0.0f || most - most != 0.0f)
         return true;
+    if (t.kind == sg_diff::tolerance::measure::exact)
+        return b == cc::bit_cast<u32>(least) || b == cc::bit_cast<u32>(most);
     if (is_nan_bits(b))
         return false;
     auto const fb = cc::bit_cast<f32>(b);
@@ -126,10 +131,12 @@ namespace
         words.push_back(text.subview({.offset = 0, .size = end}));
         text = trimmed(end < text.size() ? text.subview(end) : cc::string_view());
     }
-    if (words.size() != 3)
+    if (words.size() != 3 && !(words.size() == 4 && (words[3] == "precise" || words[3] == "across")))
         return cc::nullopt;
 
     auto result = sg_diff::known_divergence{.issue = cc::string(words[2])};
+    if (words.size() == 4)
+        result.scope = cc::string(words[3]);
     if (words[0] == "amd")
         result.vendor_id = 0x1002;
     else if (words[0] == "apple")
@@ -155,12 +162,18 @@ namespace
 }
 } // namespace
 
-sg_diff::known_divergence const* sg_diff::workload::known_on(sg::context const& ctx) const
+sg_diff::known_divergence const* sg_diff::workload::known_on(sg::context const& ctx, cc::string_view scope) const
 {
     for (auto const& k : known)
-        if (k.vendor_id == ctx.metrics.adapter().vendor_id && k.backend == ctx.backend())
+        if (k.vendor_id == ctx.metrics.adapter().vendor_id && k.backend == ctx.backend() && k.scope == scope)
             return &k;
     return nullptr;
+}
+
+sg_diff::known_divergence const* sg_diff::workload::known_between_gpus(sg::context const& ctx) const
+{
+    auto const* const across = known_on(ctx, "across");
+    return across != nullptr ? across : known_on(ctx);
 }
 
 cc::optional<sg_diff::tolerance> sg_diff::tolerance::parse(cc::string_view text)
@@ -291,8 +304,9 @@ sg_diff::corpus sg_diff::read_corpus()
                     known.push_back(parsed.value());
                 else
                     problem = cc::format("'{}' is no known divergence; one is `known <vendor> <backend> <issue>`, the "
-                                         "vendor "
-                                         "amd, apple, intel or nvidia and the backend dx12, vulkan, metal or webgpu",
+                                         "vendor amd, apple, intel or nvidia, the backend dx12, vulkan, metal or "
+                                         "webgpu, and a trailing `precise` or `across` for the strict-floor twin or "
+                                         "the GPU-to-GPU tests alone",
                                          value);
             }
             else
@@ -372,6 +386,17 @@ cc::shared_async<sg_diff::run_result> sg_diff::run(sg::context* ctx, workload co
             co_return run_result{.skipped
                                  = cc::format("this context lacks {}, which {} requires", sg::to_string(f), w->file)};
     auto const shader = co_await compiled_on(*ctx, r, *w->asset);
+    // the bytecode each route ran, to run in a standalone reproduction (../../docs/differential-testing.md)
+    if (auto const dir = cc::environment_variable("SC_DIFFERENTIAL_SHADER_DUMP"); dir.has_value())
+        if (auto f = cc::file_write_stream_adapter::create(cc::format(
+                "{}/{}-{}-{}{}.bin", dir.value(), w->entry, ctx->backend() == sg::backend_kind::dx12 ? "dx12" : "vulkan",
+                r.name, r.float_floor.empty() ? cc::string() : "-" + r.float_floor));
+            f.has_value())
+        {
+            auto stream = f.value().stream();
+            (void)stream.write(shader.bytecode.span());
+            (void)stream.flush();
+        }
     if (r.native && shader.compiler.name != "sgl")
         co_return run_result{.skipped = cc::format("SGL writes no {} of it yet, so {} compiled it",
                                                    r.format == sg::shader_format::dxil ? "DXIL" : "SPIR-V",
@@ -393,6 +418,8 @@ sg::async_compiled_shader sg_diff::compiled_on(sg::context const& ctx, route con
         kept.push_back({.name = cc::string(r.format == sg::shader_format::dxil ? slib::k_native_dxil_option
                                                                                : slib::k_native_spirv_option),
                         .value = cc::string("true")});
+    if (!r.float_floor.empty())
+        kept.push_back({.name = cc::string(slib::k_float_floor_option), .value = r.float_floor});
     return asset.acquire(r.format, kept);
 }
 

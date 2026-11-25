@@ -32,9 +32,13 @@ struct configuration
 
 /// Holds a configuration's differences from a ground truth: each fails, unless the file knows its driver diverges.
 /// A known divergence that no longer shows fails too, so a fixed driver retires its line.
-void judge(sg_diff::workload const& w, configuration const& c, cc::string_view against, cc::vector<cc::string> const& lines)
+void judge(sg_diff::workload const& w,
+           configuration const& c,
+           cc::string_view against,
+           cc::vector<cc::string> const& lines,
+           cc::string_view scope = {})
 {
-    auto const* const known = w.known_on(*c.ctx);
+    auto const* const known = scope == "across" ? w.known_between_gpus(*c.ctx) : w.known_on(*c.ctx, scope);
     if (known == nullptr)
     {
         for (auto const& line : lines)
@@ -56,10 +60,10 @@ cc::shared_async<cc::unit> held_alike(sg_diff::workload const& w, cc::span<confi
 {
     auto configurations = cc::vector<configuration const*>();
     for (auto const& c : all)
-        if (w.known_on(*c.ctx) == nullptr)
+        if (w.known_between_gpus(*c.ctx) == nullptr)
             configurations.push_back(&c);
     for (auto const& c : all)
-        if (w.known_on(*c.ctx) != nullptr)
+        if (w.known_between_gpus(*c.ctx) != nullptr)
             configurations.push_back(&c);
 
     auto reference = cc::optional<sg_diff::run_result>();
@@ -83,7 +87,7 @@ cc::shared_async<cc::unit> held_alike(sg_diff::workload const& w, cc::span<confi
         auto const tolerance = c.ctx == reference_of->ctx ? w.routes : w.across;
         auto const lines = sg_diff::differences(reference.value(), result, tolerance);
         // two routes of one known driver may agree with each other, so agreeing proves nothing here
-        if (auto const* const known = w.known_on(*c.ctx); known != nullptr)
+        if (auto const* const known = w.known_between_gpus(*c.ctx); known != nullptr)
         {
             if (!lines.empty())
                 CC_LOG_INFO("differential: {} {}: {} against {} diverges as {} says: {}", w.file, w.entry, c.label,
@@ -229,7 +233,7 @@ ASYNC_TEST("sg differential - every corpus entry point computes what its committ
             for (auto const& c : configurations)
             {
                 // a driver the file knows to diverge writes no reference
-                if (w.known_on(*c.ctx) != nullptr)
+                if (w.known_between_gpus(*c.ctx) != nullptr)
                     continue;
                 auto const result = co_await sg_diff::run(c.ctx.get(), &w, c.route);
                 if (result.skipped.has_value())
@@ -259,7 +263,7 @@ ASYNC_TEST("sg differential - every corpus entry point computes what its committ
                                                  w.entry, o.name, c.ctx->metrics.adapter().name, c.route.name);
                     write_text(name, cc::string_view(reinterpret_cast<char const*>(o.bytes.data()), o.bytes.size()));
                 }
-            judge(w, c, sg_diff::reference_name(w), sg_diff::against_reference(reference.value(), w, result));
+            judge(w, c, sg_diff::reference_name(w), sg_diff::against_reference(reference.value(), w, result), "across");
         }
     }
 }
@@ -310,4 +314,110 @@ ASYNC_TEST("sg differential - every corpus entry point computes on the GPU what 
                         w.across.to_string());
     }
     CC_LOG_INFO("differential: {} of {} entry points interpreted", interpreted, corpus.workloads.size());
+}
+
+// The strict-floor twin: every corpus entry point compiled at a `.precise` floor, where a target may reassociate,
+// contract and keep a half at a float's precision no more, and the interpreter's ranges collapse to what is left.
+// WGSL keeps only `.fast` (EMIT-185), so a webgpu context has nothing to compile here.
+// A file's `known` line says how a driver diverges at the level the file states, so here it only logs either way:
+// a driver that agrees at the floor is one that keeps it.
+// A `known` line ending in `precise` is this twin's own, held as the other tests hold theirs.
+// The twin's floor reaches the GPU's compile: its first run held a driver to a floor that slib had dropped on the way.
+// SPIR-V says so in the open, a `NoContraction` on every contractable operation, where DXIL keeps it in flags.
+ASYNC_TEST("sg differential - a compile at a precise floor keeps the floor through slib")
+{
+    auto const configurations = machine_configurations();
+    auto const* vulkan = static_cast<configuration const*>(nullptr);
+    for (auto const& c : configurations)
+        if (c.route.format == sg::shader_format::spirv && vulkan == nullptr)
+            vulkan = &c;
+    if (vulkan == nullptr)
+        SKIP("this machine runs SGL on no vulkan adapter");
+    auto const corpus = sg_diff::read_corpus();
+    auto const* half = static_cast<sg_diff::workload const*>(nullptr);
+    for (auto const& w : corpus.workloads)
+        if (w.entry == "half_operations")
+            half = &w;
+    REQUIRE(half != nullptr);
+    if (auto* const home = vulkan->ctx->device_home())
+        co_await cc::async_resume_on(*home);
+
+    // OpDecorate is opcode 71 of three words, and NoContraction decoration 42
+    auto const decorations = [](cc::span<byte const> spirv)
+    {
+        auto count = 0;
+        auto const* const words = reinterpret_cast<u32 const*>(spirv.data());
+        for (auto i = isize(5); i + 2 < spirv.size() / 4; i += isize(words[i] >> 16 > 0 ? words[i] >> 16 : 1))
+            count += words[i] == ((3u << 16) | 71u) && words[i + 2] == 42u ? 1 : 0;
+        return count;
+    };
+    for (auto const* const floor : {"", "precise"})
+    {
+        auto route = vulkan->route;
+        route.float_floor = floor;
+        auto const shader = co_await sg_diff::compiled_on(*vulkan->ctx, route, *half->asset);
+        auto const count = decorations(shader.bytecode.span());
+        if (route.float_floor.empty())
+            CHECK(count == 0).context("half_operations at its own level, fast");
+        else
+            CHECK(count >= 4).context(cc::format("half_operations at a precise floor, on {}", vulkan->label));
+    }
+}
+
+ASYNC_TEST("sg differential - every corpus entry point computes at a precise floor what SGL's interpreter says")
+{
+    auto const configurations = machine_configurations();
+    if (configurations.empty())
+        SKIP("this machine runs SGL on no hardware adapter");
+    auto const corpus = sg_diff::read_corpus();
+    check_corpus(corpus);
+    REQUIRE(!corpus.workloads.empty());
+
+    for (auto const& w : corpus.workloads)
+    {
+        auto& host = *configurations[0].ctx;
+        if (auto* const home = host.device_home())
+            co_await cc::async_resume_on(*home);
+        auto const oracle = sg_diff::interpreted(w, host, sgl::check::float_level::precise);
+        if (oracle.has_error())
+        {
+            CHECK(false).context(cc::format("{} {} on the interpreter at a precise floor: {}", w.file, w.entry,
+                                            oracle.error().to_string()));
+            continue;
+        }
+        if (oracle.value().skipped.has_value())
+            continue;
+        auto used = 0.0;
+        for (auto const& c : configurations)
+        {
+            if (c.route.format == sg::shader_format::wgsl)
+                continue;
+            auto route = c.route;
+            route.float_floor = "precise";
+            auto const result = co_await sg_diff::run(c.ctx.get(), &w, route);
+            if (result.skipped.has_value())
+                continue;
+            auto const lines = sg_diff::differences(oracle.value(), result, w.across);
+            if (w.known_on(*c.ctx, "precise") != nullptr)
+            {
+                judge(w, c, "the interpreter at a precise floor", lines, "precise");
+                continue;
+            }
+            if (auto const* const known = w.known_on(*c.ctx); known != nullptr)
+            {
+                CC_LOG_INFO("differential: {} {} on {} at a precise floor, which {} knows it to diverge from at its "
+                            "own level, {}",
+                            w.file, w.entry, c.label, known->issue,
+                            lines.empty() ? cc::string("agrees") : cc::format("diverges too: {}", lines.front()));
+                continue;
+            }
+            used = cc::max(used, sg_diff::tolerance_used(oracle.value(), result, w.across));
+            for (auto const& line : lines)
+                CHECK(false).context(cc::format("{} {} on {} at a precise floor against the interpreter: {}", w.file,
+                                                w.entry, c.label, line));
+        }
+        if (w.across.kind != sg_diff::tolerance::measure::exact)
+            CC_LOG_INFO("differential: {} {} uses {} of its across {} at a precise floor", w.file, w.entry, used,
+                        w.across.to_string());
+    }
 }

@@ -8,6 +8,7 @@
 #include <shaped-graphics/command_list/command_list.hh>
 #include <shaped-graphics/compute/compute_pipeline.hh>
 #include <shaped-graphics/context/context.hh>
+#include <shaped-graphics/context/known_issues.hh>
 #include <shaped-graphics/raster/raster_pipeline.hh>
 #include <shaped-graphics/resource/texture.hh>
 
@@ -669,10 +670,8 @@ ASYNC_INVOCABLE_TEST("sg - one draw of two views moves geometry with only the ve
         SKIP("no compiler builds this binary's shaders into a format this context accepts");
     if (!ctx->supports(sg::feature::view_instancing))
         SKIP("this context renders one view per draw");
-    auto const& adapter = ctx->metrics.adapter();
-    if (ctx->backend() == sg::backend_kind::dx12 && adapter.vendor_id == 0x8086 && !adapter.is_software)
-        SKIP("Intel's dx12 driver draws nothing here; see "
-             "docs/bugs-external/intel-d3d12-view-instancing-draws-nothing");
+    if (auto const* issue = sg::known_issue_affecting(*ctx, "intel-d3d12-view-instancing-draws-nothing"))
+        nx::skip_known_issue(issue->id, issue->symptom);
 
     nx::allow_warnings("takes no `@view_index`", "slib");
 

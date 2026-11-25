@@ -332,6 +332,7 @@ private:
         auto options = cc::vector<sgl::check::option_value>();
         auto device_features = sgl::check::feature_set();
         auto weakens_float = false;
+        auto float_floor = sgl::check::float_level::fast;
         auto native_debug_info = sgl::emit::debug_info::none;
         auto mesh = sgl::emit::mesh_form::native;
         auto polyfill_vertex = cc::string();
@@ -348,6 +349,14 @@ private:
             if (o.name == slib::k_weakens_float_option)
             {
                 weakens_float = o.value == "true";
+                continue;
+            }
+            if (o.name == slib::k_float_floor_option)
+            {
+                float_floor = o.value == "ieee"     ? sgl::check::float_level::ieee
+                            : o.value == "precise"  ? sgl::check::float_level::precise
+                            : o.value == "specials" ? sgl::check::float_level::specials
+                                                    : sgl::check::float_level::fast;
                 continue;
             }
             if (o.name == slib::k_native_debug_info_option)
@@ -430,6 +439,7 @@ private:
              .guards_undefined = _guards_undefined,
              .software_trace = desc.software_trace,
              .weakens_float = weakens_float,
+             .float_floor = float_floor,
              .device_features = device_features,
              .native = native,
              .native_debug_info = native_debug_info,

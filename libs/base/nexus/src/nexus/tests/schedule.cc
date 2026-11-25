@@ -244,6 +244,9 @@ nx::args_builder build_cli(nx::test_schedule_config& config, cli_state& state)
     args.arg({"thorough"}, config.thorough, "run every test at full strength, however long that takes (nx::is_thorough)");
     args.arg({"smoke"}, config.smoke,
              "let a heavy test narrow to its smallest case, as check's other presets do (nx::is_smoke)");
+    args.arg({"known-issues"}, config.run_known_issues,
+             "run the tests a known external bug would skip, to see whether it still reproduces "
+             "(nx::runs_known_issues)");
     args.arg({"watchdog"}, config.watchdog_secs,
              {.desc = "after this many seconds with no test starting or finishing, report the hung run and exit 4; 0 "
                       "turns it off",

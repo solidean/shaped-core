@@ -81,7 +81,8 @@ void fill_value(sgl::check::value& v, cc::span<i64 const> parts)
 cc::result<sg_diff::run_result> pixels_interpreted(sg_diff::workload const& w,
                                                    sgl::check::checked_module const& m,
                                                    sgl::check::flat_entry_point const& e,
-                                                   sg_diff::interpreter_half const& half)
+                                                   sg_diff::interpreter_half const& half,
+                                                   sgl::check::float_level floor)
 {
     using namespace sgl::check;
     if (half.pixel_varyings == nullptr || half.extent <= 0 || half.extent % 2 != 0)
@@ -108,7 +109,7 @@ cc::result<sg_diff::run_result> pixels_interpreted(sg_diff::workload const& w,
                 inputs.value().lane_parameters.push_back(cc::move(v));
             }
 
-            auto const o = interpret(m, e, inputs.value(), {.bounds_floats = true});
+            auto const o = interpret(m, e, inputs.value(), {.bounds_floats = true, .float_floor = floor});
             if (o.status != run_status::ok)
                 return cc::error(cc::format("{} {}: the quad at ({}, {}) ends {}: {}", w.file, w.entry, qx, qy,
                                             to_string(o.status), o.detail));
@@ -140,7 +141,7 @@ cc::result<sg_diff::run_result> pixels_interpreted(sg_diff::workload const& w,
 }
 } // namespace
 
-cc::result<sg_diff::run_result> sg_diff::interpreted(workload const& w, sg::context& ctx)
+cc::result<sg_diff::run_result> sg_diff::interpreted(workload const& w, sg::context& ctx, sgl::check::float_level floor)
 {
     using namespace sgl::check;
     if (w.setup->interpreted == nullptr)
@@ -171,7 +172,7 @@ cc::result<sg_diff::run_result> sg_diff::interpreted(workload const& w, sg::cont
     if (half.skipped.has_value())
         return run_result{.skipped = half.skipped};
     if (e->entry_stage == stage::pixel)
-        return pixels_interpreted(w, m, *e, half);
+        return pixels_interpreted(w, m, *e, half, floor);
     auto const width = i64(e->workgroup[0] > 0 ? e->workgroup[0] : 1);
     // each output's ranges, carried from one invocation to the next beside its bytes
     for (auto& g : half.bindings.groups)
@@ -212,7 +213,7 @@ cc::result<sg_diff::run_result> sg_diff::interpreted(workload const& w, sg::cont
             inputs.value().stage_inputs.push_back(cc::move(v));
         }
 
-        auto const o = interpret(m, *e, inputs.value(), {.bounds_floats = true});
+        auto const o = interpret(m, *e, inputs.value(), {.bounds_floats = true, .float_floor = floor});
         if (o.status != run_status::ok)
             return cc::error(
                 cc::format("{} {}: invocation {} ends {}: {}", w.file, w.entry, i, to_string(o.status), o.detail));

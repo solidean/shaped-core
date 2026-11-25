@@ -93,6 +93,9 @@ struct sg_diff::known_divergence
     u32 vendor_id = 0;
     sg::backend_kind backend = sg::backend_kind::dx12;
     cc::string issue;
+    /// Which tests it holds for: empty for every test at the file's own level, `precise` for the strict-floor twin
+    /// alone, `across` for the tests that hold one GPU to another, where a difference both APIs allow still shows.
+    cc::string scope = {};
 };
 
 /// One corpus entry point, under the setup and tolerances its file's comment block states.
@@ -109,8 +112,11 @@ struct sg_diff::workload
     /// Its file's `known <vendor> <backend> <issue>` lines: a vendor's driver on a backend computes it wrongly, as the issue says.
     cc::vector<known_divergence> known;
 
-    /// The issue that explains a divergence on `ctx`, or nullptr where this file expects it to agree.
-    [[nodiscard]] known_divergence const* known_on(sg::context const& ctx) const;
+    /// The issue that explains a divergence on `ctx` in `scope`, `known_divergence::scope`'s, or nullptr where this file
+    /// expects it to agree there.
+    [[nodiscard]] known_divergence const* known_on(sg::context const& ctx, cc::string_view scope = {}) const;
+    /// The same for a test that holds one GPU to another: an `across` line, else one of the file's own level.
+    [[nodiscard]] known_divergence const* known_between_gpus(sg::context const& ctx) const;
 };
 
 /// Every compute entry point of the corpus package.
@@ -127,6 +133,9 @@ struct sg_diff::route
     cc::string name; ///< `dxc`, `native`, `wgsl` or `msl`
     sg::shader_format format;
     bool native = false;
+    /// The float guarantee the corpus entry point is compiled at as a floor, `precise` say, `slib::k_float_floor_option`'s;
+    /// empty for the level the entry point states.
+    cc::string float_floor = {};
 };
 
 /// What a setup is handed for one run: the corpus entry point compiled on the route, and the route, which the setup's own stages compile on too.
@@ -206,7 +215,10 @@ bool register_setup(setup s);
 /// A bounding run, so each float output carries the range its entry point's float level allows a GPU (EVAL-6).
 /// A builtin's own precision and reassociation are not in those ranges, so a GPU is held to them at `across`.
 /// Built on `ctx` where the setup's half needs a device; called on its device home.
-[[nodiscard]] cc::result<run_result> interpreted(workload const& w, sg::context& ctx);
+/// `floor` raises the entry point's float level as a route's `float_floor` does.
+[[nodiscard]] cc::result<run_result> interpreted(workload const& w,
+                                                 sg::context& ctx,
+                                                 sgl::check::float_level floor = sgl::check::float_level::fast);
 
 /// The name of `w`'s file's committed reference, `integer_bits.ref` for `integer_bits.sgl`.
 [[nodiscard]] cc::string reference_name(workload const& w);

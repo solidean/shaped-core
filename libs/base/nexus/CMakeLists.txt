@@ -37,6 +37,7 @@ add_library(nexus
     src/nexus/tests/config.cc
     src/nexus/tests/entry.cc
     src/nexus/tests/invoke_tests.cc
+    src/nexus/tests/known_issues.cc
     src/nexus/tests/execute.cc
     src/nexus/tests/logs.cc
     src/nexus/tests/registry.cc
@@ -126,6 +127,7 @@ target_sources(nexus
     src/nexus/tests/export/pgo_json.hh
     src/nexus/tests/export/timings_json.hh
     src/nexus/tests/thorough.hh
+    src/nexus/tests/known_issues.hh
     src/nexus/tests/export/listing_json.hh
     src/nexus/tests/export/runner_report.hh
 
@@ -228,6 +230,7 @@ if(SC_BUILD_TESTS)
         tests/test-entry-test.cc
         tests/test-export-test.cc
         tests/test-runner-report-test.cc
+        tests/test-known-issues-test.cc
         tests/test-thorough-test.cc
         tests/test-registry-test.cc
         tests/test-section-test.cc

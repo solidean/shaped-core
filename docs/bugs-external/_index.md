@@ -29,6 +29,9 @@ So each entry carries the answer as something runnable.
 - **Isolate the variable.** Two compilers, two optimization levels, two vendors' drivers — whatever separates "the tool is wrong" from "we are wrong".
   That table is usually the most valuable thing in the entry.
 - **Link both ways.** The workaround in the tree names this directory; this directory names the workaround.
+- **A driver bug a test trips over gets an entry in sg's [known_issues.cc](../../libs/graphics/shaped-graphics/src/shaped-graphics/context/known_issues.cc)**, keyed to what was measured.
+  The test skips through `nx::skip_known_issue` under `sg::known_issue_affecting`, rather than spelling the condition out.
+  `uv run dev.py test --known-issues` runs those tests anyway, and a pass says the entry may retire.
 - **A bug a machine can carry gets a probe** in [known_issues.py](../../tools/dev/lib/toolchain/known_issues.py), when a version or a path gives it away without running anything.
   `dev.py doctor` then warns about it, and so does every command that runs our code, before the failure it explains.
 
@@ -48,6 +51,7 @@ So each entry carries the answer as something runnable.
 | [intel-d3d12-view-instancing-draws-nothing](intel-d3d12-view-instancing-draws-nothing/readme.md) | Intel D3D12 driver 32.0.101.9150, Arc B580 | not yet filed, worked around in the shaders that draw by view |
 | [intel-d3d12-view-instanced-cached-blob-crashes](intel-d3d12-view-instanced-cached-blob-crashes/readme.md) | Intel D3D12 driver 32.0.101.9150, Arc B580 | reproduced standalone, not yet filed, worked around in shaped-graphics |
 | [intel-d3d12-strict-reciprocal-product-folds-to-one](intel-d3d12-strict-reciprocal-product-folds-to-one/readme.md) | Intel D3D12 driver 32.0.101.9150, Arc B580 | not yet filed, its one check skipped in shaped-graphics |
+| [intel-float-half-round-trip-folds-away](intel-float-half-round-trip-folds-away/readme.md) | Intel D3D12 and vulkan driver 32.0.101.9150, Arc B580 | not yet filed, logged through `half_math.sgl`'s `known` lines |
 | [nonuniform-indexed-atomics-count-other-lanes](nonuniform-indexed-atomics-count-other-lanes/readme.md) | Intel driver 32.0.101.9150, Arc B580, and AMD driver 32.0.21042.62, Radeon iGPU (RDNA 2), D3D12 and vulkan | reproduced standalone, not yet filed, worked around in SGL where sg reports `nonuniform_atomic_workaround` |
 | [intel-d3d12-hit-object-pipeline-removes-device](intel-d3d12-hit-object-pipeline-removes-device/readme.md) | Intel D3D12 driver 32.0.101.9150, Arc B580, Agility SDK 1.620.1 | not yet filed, its one test skipped in shaped-graphics |
 | [intel-agility-process-recompiles-acceleration-structure-kernels](intel-agility-process-recompiles-acceleration-structure-kernels/readme.md) | Intel driver 32.0.101.9150, Arc B580, Agility SDK 1.620.1, dx12 and vulkan | reproduced standalone, not yet filed, test processes on Intel keep to the system runtime |
@@ -55,6 +59,7 @@ So each entry carries the answer as something runnable.
 | [amd-d3d12-inline-ray-query-crashes-compiler](amd-d3d12-inline-ray-query-crashes-compiler/readme.md) | AMD D3D12 driver 32.0.21042.62, Radeon iGPU (RDNA 2) | reproduced standalone, not yet filed, worked around by signing SGL's DXIL |
 | [amd-vulkan-nonuniform-array-length-reads-first-lane](amd-vulkan-nonuniform-array-length-reads-first-lane/readme.md) | AMD vulkan driver 2.0.353, Radeon iGPU (RDNA 2) | reproduced standalone, not yet filed, worked around in SGL |
 | [amd-vulkan-variable-count-layout-size-omits-binding](amd-vulkan-variable-count-layout-size-omits-binding/readme.md) | AMD vulkan driver 2.0.353, Radeon iGPU (RDNA 2) | reproduced standalone, not yet filed, worked around in shaped-graphics |
+| [radv-aco-scheduler-wrong-bc7-indices](radv-aco-scheduler-wrong-bc7-indices/readme.md) | RADV, Mesa 26.2.0-devel, NAVI33 (RDNA 3) | reproduced standalone, not yet filed, its one test skipped on that driver |
 | [dxc-mesh-output-counts-duplicated-past-branch](dxc-mesh-output-counts-duplicated-past-branch/readme.md) | DXC 1.9.2602.24, 1.9.2602.17 and 1.9.0.5512, `ms_6_6` and above | reproduced standalone, not yet filed, a test shader written around it in shaped-graphics |
 | [vulkan-syncval-wait-before-signal-false-race](vulkan-syncval-wait-before-signal-false-race/readme.md) | Khronos validation layer, SDK 1.4.304–1.4.341 | fixed upstream in 1.4.350, flagged by `dev.py doctor` |
 | [webgpu-timestamp-write-index-sentinel](webgpu-timestamp-write-index-sentinel/readme.md) | emdawnwebgpu + Dawn, against wgpu | not yet filed, worked around in shaped-graphics |
@@ -67,5 +72,5 @@ So each entry carries the answer as something runnable.
 ## Retiring one
 
 When a vendor ships a fix, `run.py` is what says so.
-If it reports the bug gone on every configuration we care about, drop the workaround in the tree and this directory with it, in the same change.
+If it reports the bug gone on every configuration we care about, drop the workaround in the tree, its `known_issues.cc` entry and this directory with it, in the same change.
 An entry nobody can retire because nobody knows what "fixed" looks like is the failure this format exists to prevent.

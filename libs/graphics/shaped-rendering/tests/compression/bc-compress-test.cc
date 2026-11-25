@@ -419,6 +419,10 @@ ASYNC_INVOCABLE_TEST("sr - BC1 and BC7 compress any mip level, a partial block a
     for (auto const t : {target_case{.format = sg::pixel_format::bc1_rgba_unorm, .channels = 3, .min_psnr = 32.0f},
                          target_case{.format = sg::pixel_format::bc7_rgba_unorm, .channels = 4, .min_psnr = 38.0f}})
     {
+        // BC1 above has been checked by then; this bug's wrong blocks here vary with what ran before.
+        if (t.format == sg::pixel_format::bc7_rgba_unorm)
+            if (auto const* issue = sg::known_issue_affecting(ctx, "radv-aco-scheduler-wrong-bc7-indices"))
+                nx::skip_known_issue(issue->id, issue->symptom);
         auto const compressed = ctx.persistent.create_texture_2d(
             {.format = t.format, .width = size, .height = size, .mip_levels = mips, .usage = target_usage});
         for (auto const level : {1, 4, 6})
@@ -473,6 +477,8 @@ ASYNC_INVOCABLE_TEST("sr - BC7 compression reproduces every two-subset partition
     auto constexpr bc7 = sg::pixel_format::bc7_rgba_unorm;
     if (!sr::bc_compress_routine::can_compress(ctx, sg::pixel_format::rgba8_unorm, bc7))
         SKIP("this device has no BC textures");
+    if (auto const* issue = sg::known_issue_affecting(ctx, "radv-aco-scheduler-wrong-bc7-indices"))
+        nx::skip_known_issue(issue->id, issue->symptom);
     co_await prewarm(ctx, {bc7});
 
     // Two ramps per block that only partition p fits: a mode 3 endpoint holds 8 bits with its p-bit, so at most that

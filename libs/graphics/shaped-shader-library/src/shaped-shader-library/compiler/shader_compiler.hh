@@ -127,6 +127,11 @@ inline constexpr cc::string_view k_native_debug_info_option = "native_debug_info
 /// The host's call, never the shader's, and the cache keys on it as on any option.
 inline constexpr cc::string_view k_weakens_float_option = "weakens_float";
 
+/// The option a caller passes to `shader_asset::acquire` to raise every SGL entry point to a float guarantee, valued
+/// `fast`, `specials`, `precise` or `ieee`: the compile's floor, as if each entry point stated it (CHK-435).
+/// A target that cannot keep it refuses the compile (EMIT-185); the cache keys on it as on any option.
+inline constexpr cc::string_view k_float_floor_option = "float_floor";
+
 /// The option a polyfilled pipeline's acquire passes for an SGL mesh stage, valued `compute` or `vertex`: the half of
 /// its polyfill to compile, which is then that stage (SGL's CHK-524).
 /// It passes `vertex` for the pipeline's pixel stage too, which then takes what the mesh stage wrote per primitive
