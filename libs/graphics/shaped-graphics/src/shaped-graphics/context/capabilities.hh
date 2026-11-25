@@ -299,7 +299,7 @@ enum class sg::feature
     /// Not a capability: this device's driver folds a float converted to a narrower float and straight back into the
     /// float itself, so SGL writes such a conversion where the driver cannot fold it at `.precise` and `.ieee`.
     /// vulkan sets it where the driver is Mesa's, whose NIR folds the pair; every other device converts as written.
-    /// See libs/graphics/shaped-graphics/docs/issues/bug-sg-diff-half-round-trip-folded-on-radv.md.
+    /// See SGL's EMIT-282, libs/graphics/shaped-graphics-language/docs/spec/semantics/emitting.md.
     float_round_trip_workaround,
 
     /// An image of a 16-bit normalized format, `r16_unorm` through `rgba16_snorm`, may be `read_write`; `extended_image_formats` grants the format.

@@ -658,13 +658,6 @@ constexpr cc::string_view k_products
     return text.value();
 }
 
-// DXC's compile to DXIL ends in reflection through d3d12shader.h, which the Linux release does not ship.
-#ifdef CC_OS_WINDOWS
-constexpr bool k_dxc_writes_dxil = true;
-#else
-constexpr bool k_dxc_writes_dxil = false;
-#endif
-
 /// The disassembly of DXC's DXIL of SGL's HLSL of `entry`, with the compile's own arguments and `-Gis` from `.specials`
 /// on, as slib hands it (EMIT-185).
 [[nodiscard]] cc::string text_dxil_of(ssc::dxc::compiler& compiler, cc::string_view source, cc::string_view entry)
@@ -687,8 +680,6 @@ constexpr bool k_dxc_writes_dxil = false;
 
 TEST("slib - at .precise both DXIL routes write a product as its scalar sums, and neither fuses one (EMIT-281)")
 {
-    if constexpr (!k_dxc_writes_dxil)
-        SKIP("DXC writes DXIL on Windows alone");
     auto compiler = ssc::dxc::compiler::create();
     if (compiler.has_error())
         SKIP("no DXC");
@@ -719,8 +710,6 @@ TEST("slib - at .precise both DXIL routes write a product as its scalar sums, an
 
 TEST("slib - at .precise both DXIL routes write the geometry and mix as one form, with no rsqrt or dot (EMIT-281)")
 {
-    if constexpr (!k_dxc_writes_dxil)
-        SKIP("DXC writes DXIL on Windows alone");
     auto compiler = ssc::dxc::compiler::create();
     if (compiler.has_error())
         SKIP("no DXC");
