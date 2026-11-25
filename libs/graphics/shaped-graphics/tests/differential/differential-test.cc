@@ -295,13 +295,19 @@ ASYNC_TEST("sg differential - every corpus entry point computes on the GPU what 
         if (oracle.value().unbounded > 0)
             CC_LOG_INFO("differential: {} {}: the interpreter bounds {} output elements by nothing", w.file, w.entry,
                         oracle.value().unbounded);
+        auto used = 0.0;
         for (auto const& c : configurations)
         {
             auto const result = co_await sg_diff::run(c.ctx.get(), &w, c.route);
             if (result.skipped.has_value())
                 continue;
+            if (w.known_on(*c.ctx) == nullptr)
+                used = cc::max(used, sg_diff::tolerance_used(oracle.value(), result, w.across));
             judge(w, c, "the interpreter", sg_diff::differences(oracle.value(), result, w.across));
         }
+        if (w.across.kind != sg_diff::tolerance::measure::exact)
+            CC_LOG_INFO("differential: {} {} uses {} of its across {} against the interpreter", w.file, w.entry, used,
+                        w.across.to_string());
     }
     CC_LOG_INFO("differential: {} of {} entry points interpreted", interpreted, corpus.workloads.size());
 }

@@ -127,13 +127,19 @@ The interpreter runs bounding (`run_limits::bounds_floats`), so each float it st
 The range is what the entry point's `@float` level licenses, operation by operation (EVAL-6):
 - a half operation kept at a float's precision at `.fast`;
 - a product left unrounded as a fused multiply-add keeps it, at `.fast` and `.specials`;
+- a sum of `+` and `-` added in any order, at `.fast` and `.specials`: Higham's γ(k) times the terms' magnitudes;
+- a `dot` or a matrix product rounded step by step in any order, at every level, by the same bound;
 - a denormal taken as zero, below `.ieee`.
+
+A sum's chain carries through a `let`, since a compiler reassociates through one, and a chain of two terms adds in one order alone.
 
 A license applies to each operation and a tolerance to the result, so no tolerance can stand in for one.
 `half_arithmetic.sgl`'s `a * b - a` is the case: with `b` near 1 the subtraction cancels, and a product Intel's Arc keeps at a float's precision lands 3% from binary16's answer, inside its range.
 
 Every configuration is held to that range, and the file's `across` bound applies from its nearer end, for what the range leaves out:
-reassociation, a builtin's own precision, and a texture read, a subgroup operation, a derivative or an atomic, each of which takes its arguments exactly.
+a builtin's own precision, and a texture read, a subgroup operation, a derivative or an atomic, each of which takes its arguments exactly.
+The test says at info how much of `across` each file used against the interpreter, beyond its ranges, over every configuration it holds no known divergence for.
+That number is how far a file's tolerance carries what the ranges leave out, and 0 says the ranges hold everything.
 So does a construct a device runs natively, the trace above all: its emulated form is the interpreter's stand-in for the hardware, whose precision is its own.
 
 A condition the range leaves open, one a GPU may decide either way, is run both ways and the stores joined, up to six of them in an invocation.

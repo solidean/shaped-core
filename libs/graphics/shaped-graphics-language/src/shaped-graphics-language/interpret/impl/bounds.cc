@@ -85,6 +85,10 @@ struct call_shape
 {
     bool is_conversion = false;
     bool is_product = false;
+    /// 1 for an elementwise `+`, -1 for an elementwise `-` of two operands, 0 for anything else.
+    i32 sum_sign = 0;
+    /// A sum of products a GPU may round step by step and in any order: a `dot`, a matrix product.
+    bool is_dot = false;
 };
 
 [[nodiscard]] call_shape shape_of(builtins::function_record const& record)
@@ -92,9 +96,14 @@ struct call_shape
     auto const signature = cc::string_view(record.signature);
     auto shape = call_shape{.is_conversion = signature.contains("@operator(\"as\")") || record.takes_literal_at_default};
     // a matrix product sums products, which a contraction may keep unrounded beyond one ulp of each lane
-    shape.is_product = signature.contains("@operator(\"*\")");
+    auto const is_times = signature.contains("@operator(\"*\")");
+    auto has_matrix = false;
     for (auto const& p : record.parameters)
-        shape.is_product = shape.is_product && !cc::string_view(p).starts_with("mat");
+        has_matrix = has_matrix || cc::string_view(p).starts_with("mat");
+    shape.is_product = is_times && !has_matrix;
+    shape.is_dot = record.name == "dot" || (is_times && has_matrix);
+    if (record.parameters.size() == 2)
+        shape.sum_sign = signature.contains("@operator(\"+\")") ? 1 : signature.contains("@operator(\"-\")") ? -1 : 0;
     return shape;
 }
 
@@ -103,17 +112,79 @@ struct call_shape
     return name == "float" || name == "half";
 }
 
+/// The two operand leaves result `j` of an elementwise operation of two operands takes, of `lanes` lanes; false where
+/// `count` leaves are no such pair.
+[[nodiscard]] bool operands_of(builtins::function_record const& record, isize count, isize j, isize lanes, isize& a, isize& b)
+{
+    if (record.parameters.size() != 2)
+        return false;
+    a = is_scalar_type(record.parameters[0]) ? 0 : j;
+    b = (is_scalar_type(record.parameters[0]) ? 1 : lanes) + (is_scalar_type(record.parameters[1]) ? 0 : j);
+    return b < count;
+}
+
 /// Result `j` of the elementwise product `record` over `in`, exact in a double, as a contraction keeps it; NaN for a
 /// product of another shape.
 [[nodiscard]] f64 exact_product(builtins::function_record const& record, cc::span<scalar const> in, isize j, isize lanes)
 {
-    if (record.parameters.size() != 2)
-        return cc::bit_cast<f64>(0x7ff8'0000'0000'0000ull);
-    auto const a = is_scalar_type(record.parameters[0]) ? 0 : j;
-    auto const b = (is_scalar_type(record.parameters[0]) ? 1 : lanes) + (is_scalar_type(record.parameters[1]) ? 0 : j);
-    if (b >= in.size())
+    auto a = isize(0);
+    auto b = isize(0);
+    if (!operands_of(record, in.size(), j, lanes, a, b))
         return cc::bit_cast<f64>(0x7ff8'0000'0000'0000ull);
     return f64(in[a].as_float()) * f64(in[b].as_float());
+}
+
+/// A sum a reassociating target may add in any order, as `scalar::terms` and its neighbors keep it, in doubles.
+struct sum_chain
+{
+    i32 terms = 0;
+    bool has_products = false;
+    f64 magnitude = 0;
+    f64 least = 0;
+    f64 most = 0;
+};
+
+/// `leaf` as a chain's term, or the chain it already is; negated for the right side of a `-`.
+[[nodiscard]] sum_chain term_of(scalar leaf, bool is_negated)
+{
+    auto c = sum_chain{.terms = leaf.terms,
+                       .has_products = leaf.has_products,
+                       .magnitude = leaf.magnitude,
+                       .least = leaf.sum_least,
+                       .most = leaf.sum_most};
+    if (leaf.terms == 0)
+    {
+        auto const v = value_of(leaf);
+        c.terms = 1;
+        c.least = leaf.is_ranged ? leaf.least : v;
+        c.most = leaf.is_ranged ? leaf.most : v;
+        c.magnitude = cc::max(c.least < 0 ? -c.least : c.least, c.most < 0 ? -c.most : c.most);
+    }
+    if (is_negated)
+        c = {.terms = c.terms, .has_products = c.has_products, .magnitude = c.magnitude, .least = -c.most, .most = -c.least};
+    return c;
+}
+
+/// Higham's γ(k) = k·u / (1 - k·u): any order of summing k + 1 terms, or a sum of k products, rounds to within
+/// γ(k) times the sum of the terms' magnitudes of the exact sum.
+[[nodiscard]] f64 gamma_of(i32 k, value_kind kind)
+{
+    auto const u = kind == value_kind::scalar_half ? 1.0 / 2048.0 : 1.0 / 16777216.0;
+    auto const ku = f64(k) * u;
+    return ku < 1 ? ku / (1 - ku) : cc::bit_cast<f64>(0x7ff0'0000'0000'0000ull);
+}
+
+/// The float at or below `x`, and at or above it.
+[[nodiscard]] f32 float_below(f64 x)
+{
+    auto const nearest = f32(x);
+    return f64(nearest) > x ? next_down(nearest) : nearest;
+}
+
+[[nodiscard]] f32 float_above(f64 x)
+{
+    auto const nearest = f32(x);
+    return f64(nearest) < x ? next_up(nearest) : nearest;
 }
 
 /// Adds to `h` what a GPU may give for a result the evaluator gave as `wide`, a 32-bit leaf, narrowed to `kind`.
@@ -129,9 +200,8 @@ void add_result(hull& h, f32 wide, f64 product, value_kind kind, call_shape shap
     if (kind == value_kind::scalar_float && licenses.contracts && product == product && is_finite(wide))
     {
         // the exact product, rounded outward to the floats on either side of it
-        auto const nearest = f32(product);
-        h.add(f64(nearest) > product ? next_down(nearest) : nearest);
-        h.add(f64(nearest) < product ? next_up(nearest) : nearest);
+        h.add(float_below(product));
+        h.add(float_above(product));
     }
     if (licenses.flushes_denormals && is_finite(rounded) && rounded != 0
         && (rounded < 0 ? -rounded : rounded) < least_normal_of(kind))
@@ -171,7 +241,8 @@ impl::float_licenses impl::licenses_of(float_level level)
 {
     return {.keeps_half_at_float = level == float_level::fast,
             .contracts = level == float_level::fast || level == float_level::specials,
-            .flushes_denormals = level != float_level::ieee};
+            .flushes_denormals = level != float_level::ieee,
+            .reassociates = level == float_level::fast || level == float_level::specials};
 }
 
 bool sgl::check::scalar::is_unbounded() const
@@ -245,7 +316,7 @@ void impl::bound_call(builtins::function_record const& record,
         if (end.count > 1)
             ends.push_back(cc::move(end));
     }
-    if (ends.empty() && !licenses.is_any())
+    if (ends.empty() && !licenses.is_any() && !shape.is_dot)
         return;
 
     auto hulls = cc::vector<hull>::create_filled(results.size(), hull{});
@@ -325,6 +396,27 @@ void impl::bound_call(builtins::function_record const& record,
         }
     }
 
+    // a sum of products' terms and their magnitudes per result: the evaluator over ones, and over the arguments'
+    // largest magnitudes, so no builtin's layout needs writing down
+    auto counts = cc::vector<scalar>();
+    auto magnitudes = cc::vector<scalar>();
+    if (shape.is_dot)
+    {
+        auto ones = exact;
+        auto largest = exact;
+        for (auto i = isize(0); i < args.size(); ++i)
+        {
+            if (!is_float_like(args[i].kind))
+                continue;
+            ones[i] = scalar::of(1.0f);
+            auto const least = args[i].is_ranged ? args[i].least : value_of(args[i]);
+            auto const most = args[i].is_ranged ? args[i].most : value_of(args[i]);
+            largest[i] = scalar::of(cc::max(least < 0 ? -least : least, most < 0 ? -most : most));
+        }
+        record.evaluate(ones, counts);
+        record.evaluate(largest, magnitudes);
+    }
+
     for (auto j = isize(0); j < results.size(); ++j)
     {
         auto& r = results[j];
@@ -337,6 +429,58 @@ void impl::bound_call(builtins::function_record const& record,
             continue;
         auto h = hulls[j];
         h.add(value_of(r));
+
+        // the chain this result sums, and what adding its terms in another order, or rounding each step, may cost
+        auto chain = sum_chain();
+        auto a = isize(0);
+        auto b = isize(0);
+        auto rounds = 0;
+        if (shape.sum_sign != 0 && licenses.reassociates && operands_of(record, args.size(), j, results.size(), a, b))
+        {
+            auto const left = term_of(args[a], false);
+            auto const right = term_of(args[b], shape.sum_sign < 0);
+            chain = {.terms = left.terms + right.terms,
+                     .has_products = left.has_products || right.has_products,
+                     .magnitude = left.magnitude + right.magnitude,
+                     .least = left.least + right.least,
+                     .most = left.most + right.most};
+            rounds = chain.has_products ? chain.terms : chain.terms - 1;
+            // two terms of no products add in one order alone
+            rounds = rounds >= 2 ? rounds : 0;
+        }
+        else if (shape.is_dot && j < counts.size() && j < magnitudes.size())
+        {
+            auto const n = i32(counts[j].as_float());
+            auto const magnitude = f64(magnitudes[j].as_float());
+            auto const g = gamma_of(n, r.kind) * magnitude;
+            // the exact sum of products is within γ(n) of what the evaluator's order gave
+            chain = {.terms = n,
+                     .has_products = true,
+                     .magnitude = magnitude,
+                     .least = f64(h.least) - g,
+                     .most = f64(h.most) + g};
+            rounds = n;
+        }
+        if (chain.terms > 0 && rounds > 0)
+        {
+            auto const slack = gamma_of(rounds, r.kind) * chain.magnitude
+                             + (licenses.flushes_denormals ? f64(rounds) * f64(least_normal_of(r.kind)) : 0.0);
+            h.add(float_below(chain.least - slack));
+            h.add(float_above(chain.most + slack));
+        }
+        if (chain.terms > 0)
+        {
+            r.terms = u16(chain.terms < 65535 ? chain.terms : 65535);
+            r.has_products = chain.has_products;
+            r.magnitude = float_above(chain.magnitude);
+            r.sum_least = float_below(chain.least);
+            r.sum_most = float_above(chain.most);
+        }
+        if (h.is_unbounded)
+        {
+            r = r.unbounded();
+            continue;
+        }
         if (h.least == h.most)
             continue;
         r.is_ranged = true;
