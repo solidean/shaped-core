@@ -28,6 +28,8 @@ A known line matches by PCI vendor, so RADV and AMD's own vulkan driver are one 
 - The `RoundingModeRTE 16` execution mode does not keep the pair: RADV still folds it.
 - `UnpackHalf2x16(PackHalf2x16(x))` in place of the pair is rounded on RADV, which lowers it to `pack_half_2x16_rtz_split`, toward zero as EVAL-96 allows.
   DXC writes HLSL's `f16tof32(f32tof16(x))` as that pair, so one HLSL spelling would serve both vulkan routes; NVIDIA's vulkan is not measured.
+- On RDNA 3 `(x * 0.1) as half as float` is one instruction folded, `v_mul_f32`, and two rounded through `NoContraction`, `v_fma_mixlo_f16` and `v_fma_mix_f32`.
+  The pack and unpack is three, since `v_cvt_pkrtz_f16_f32` takes no multiply into it: one more than a driver that rounds as it should.
 
 ## Open
 
