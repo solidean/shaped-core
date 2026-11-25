@@ -668,6 +668,37 @@ TEST("sgl emit - emit is total: a module with errors and a position out of range
     CHECK(sgl::emit::dump_errors(sgl::emit::emit(cube.module, -1, target::hlsl_dx12)) == "unknown-entry-point -1 of 2\n");
 }
 
+TEST("sgl emit - a tree decided by one target is written for it alone, and one decided by none for every target "
+     "(EMIT-283)")
+{
+    auto const by_api = cc::string_view("binding work:\n"
+                                        "    values: mut buffer[int]\n"
+                                        "\n"
+                                        "fun api_code() -> int:\n"
+                                        "    const if target_api == .vulkan:\n"
+                                        "        return 11\n"
+                                        "    return 14\n"
+                                        "\n"
+                                        "@compute(64) fun main_cs(@thread_id id: int3){work}:\n"
+                                        "    work.values[id.x] = api_code()\n");
+    auto const for_vulkan = check_sources(read_prelude(), by_api, sgl::emit::compile_target_of(target::hlsl_vulkan));
+    CHECK(sgl::emit::dump_errors(sgl::emit::emit(for_vulkan.module, 0, target::hlsl_vulkan)) == "");
+    CHECK(sgl::emit::dump_errors(sgl::emit::emit(for_vulkan.module, 0, target::hlsl_dx12))
+          == "flattened-for-another-target main_cs was flattened for vulkan hlsl, and is asked for dx12 hlsl\n");
+    // a check with no target decides for .sgl, which no emitter writes
+    auto const for_none = check_sources(read_prelude(), by_api);
+    CHECK(sgl::emit::dump_errors(sgl::emit::emit(for_none.module, 0, target::wgsl))
+          == "flattened-for-another-target main_cs was flattened for none sgl, and is asked for webgpu wgsl\n");
+
+    auto const plain = check_sources(read_prelude(), "binding work:\n"
+                                                     "    values: mut buffer[int]\n"
+                                                     "\n"
+                                                     "@compute(64) fun main_cs(@thread_id id: int3){work}:\n"
+                                                     "    work.values[id.x] = 14\n");
+    for (auto const t : sgl::emit::all_targets())
+        CHECK(sgl::emit::dump_errors(sgl::emit::emit(plain.module, 0, t)) == "").dump("target", sgl::emit::to_string(t));
+}
+
 TEST("sgl emit - the reserved words differ by target and hold no word twice")
 {
     CHECK(sgl::emit::is_reserved(target::wgsl, "target"));

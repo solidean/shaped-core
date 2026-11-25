@@ -211,6 +211,11 @@ TEST("sgl ir - with no feature granted and the 6.6 fills, every dx12 entry of th
         for (auto const& entry : all.value())
             for (auto const native : {sgl::emit::native_route::text, sgl::emit::native_route::prefer})
             {
+                // EMIT-284: a traversal and the empty closest hit are metal's, which every dx12 route refuses
+                if (entry.text.has_error()
+                    && (entry.text.error().contains("which only metal writes")
+                        || entry.text.error().contains("which only metal builds")))
+                    continue;
                 auto const e = sgl::compile_to_text({.source = source,
                                                      .source_name = file,
                                                      .library = library.files,

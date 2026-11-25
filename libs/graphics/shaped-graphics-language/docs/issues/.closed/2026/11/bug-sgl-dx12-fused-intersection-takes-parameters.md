@@ -2,6 +2,8 @@
 created: 2026-11-13
 refs:
   - file: libs/graphics/shaped-shader-library/tests/sgl-shader-model-floor-test.cc
+closed: 2026-11-25
+resolution: fixed
 ---
 
 # SGL writes a dx12 intersection fused with its any hit, which DXC refuses: an intersection takes no parameters

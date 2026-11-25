@@ -8,7 +8,7 @@ namespace
 /// `source`'s entry point `name`, written for `t`.
 cc::string text_of_entry(cc::string_view source, cc::string_view name, target t)
 {
-    auto const checked = check_sources(read_prelude(), source);
+    auto const checked = check_sources(read_prelude(), source, sgl::emit::compile_target_of(t));
     CHECK(reports_of(checked) == "");
     for (auto i = isize(0); i < checked.module.entry_points.size(); ++i)
         if (checked.module.entry_points[i].name == name)

@@ -2,6 +2,8 @@
 created: 2026-11-13
 refs:
   - file: libs/graphics/shaped-shader-library/tests/sgl-shader-model-floor-test.cc
+closed: 2026-11-25
+resolution: fixed
 ---
 
 # SGL writes sgl_empty_closest_hit for dx12 with a signature DXC cannot parse

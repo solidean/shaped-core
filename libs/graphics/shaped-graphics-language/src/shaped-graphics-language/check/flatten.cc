@@ -1426,10 +1426,13 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
     judge_local_indices(f.entry);
     auto legalized = judge_uniformity(f.entry);
     f.entry.options = options_reached(id, traversal != nullptr ? traversal->any_hit : symbol_id::none);
+    if (f.reads_target)
+        f.entry.flattened_for = compiled_target;
     // legalizing copies the entry point's own fields, so the copy takes what was set after it
     if (legalized.has_value())
     {
         legalized.value().options = f.entry.options;
+        legalized.value().flattened_for = f.entry.flattened_for;
         f.entry.legalized = cc::make_shared<flat_entry_point const>(cc::move(legalized.value()));
     }
     // CHK-527: the prelude's own entry points are no program's, and only a polyfill compiles them, by name

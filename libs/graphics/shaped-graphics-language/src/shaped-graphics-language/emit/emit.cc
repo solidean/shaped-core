@@ -95,6 +95,8 @@ cc::string_view sgl::emit::to_string(error_kind kind)
     {
     case error_kind::module_has_errors:
         return "module-has-errors";
+    case error_kind::flattened_for_another_target:
+        return "flattened-for-another-target";
     case error_kind::unknown_entry_point:
         return "unknown-entry-point";
     case error_kind::reserved_entry_point_name:
@@ -273,6 +275,41 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
                                                     target t,
                                                     options const& sources)
 {
+    // EMIT-283: a tree that took a target's branches is that target's alone
+    if (e.flattened_for.has_value())
+    {
+        auto const& flattened = e.flattened_for.value();
+        auto const asked = compile_target_of(t);
+        if (flattened.api != asked.api || flattened.language != asked.language)
+        {
+            auto const target_name = [](check::compile_target const& c)
+            {
+                return cc::format("{} {}", check::k_graphics_api_names[isize(c.api)],
+                                  check::k_shading_language_names[isize(c.language)]);
+            };
+            auto result = emitted_text();
+            result.errors.push_back({.kind = error_kind::flattened_for_another_target,
+                                     .symbol = e.function,
+                                     .detail = cc::format("{} was flattened for {}, and is asked for {}", e.name,
+                                                          target_name(flattened), target_name(asked))});
+            return result;
+        }
+    }
+    // EMIT-284: CHK-345's traversal and empty closest hit are metal's, and no HLSL stage takes their signatures
+    if (t == target::hlsl_dx12 || t == target::hlsl_vulkan)
+    {
+        auto const is_hit = e.entry_stage == check::stage::closest_hit || e.entry_stage == check::stage::any_hit;
+        auto const refused = [&](cc::string_view what)
+        {
+            auto result = emitted_text();
+            result.errors.push_back({.kind = error_kind::unsupported, .symbol = e.function, .detail = cc::string(what)});
+            return result;
+        };
+        if (e.entry_stage == check::stage::intersection && check::is_valid(e.input))
+            return refused("an intersection fused with its any hit, which only metal writes");
+        if (is_hit && !check::is_valid(e.input))
+            return refused("a hit stage that takes no payload, which only metal builds");
+    }
     // CHK-491: dx12 and vulkan read an unbounded array's length from the block sg writes per dispatch or draw
     if ((t == target::hlsl_dx12 || t == target::hlsl_vulkan) && check::reads_array_lengths(m, e))
     {

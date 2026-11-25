@@ -15,7 +15,7 @@ namespace
 /// Every entry point of `source` written as MSL, by name; each must write.
 cc::vector<cc::pair<cc::string, cc::string>> msl_stages_of(cc::string_view source)
 {
-    auto const checked = check_sources(read_prelude(), source);
+    auto const checked = check_sources(read_prelude(), source, sgl::emit::compile_target_of(target::msl));
     CHECK(reports_of(checked) == "");
     auto result = cc::vector<cc::pair<cc::string, cc::string>>();
     for (auto i = isize(0); i < checked.module.entry_points.size(); ++i)
@@ -91,6 +91,28 @@ TEST("sgl emit msl - every stage of sg's ray-tracing pipeline writes, and all ag
     CHECK(tagged == "");
     // a traversal's payload is the ray set's, which only the ray data carries into it
     CHECK(text_of(stages, "sgl_spheres_occlusion").contains("ray_data sgl_ray_data& sgl_data [[payload]]"));
+}
+
+TEST("sgl emit - HLSL refuses metal's traversals and empty closest hit, and writes every other stage (EMIT-284)")
+{
+    auto const source = read_text(nx::source_path(SGL_SG_SHADERS_DIR) + "/raytracing_pipeline.sgl");
+    for (auto const t : {target::hlsl_dx12, target::hlsl_vulkan})
+    {
+        auto const checked = check_sources(read_prelude(), source, sgl::emit::compile_target_of(t));
+        CHECK(reports_of(checked) == "");
+        auto refused = cc::string();
+        for (auto i = isize(0); i < checked.module.entry_points.size(); ++i)
+        {
+            auto const e = sgl::emit::emit(checked.module, i, t);
+            if (!e.errors.empty())
+                refused.appendf("{}: {}", checked.module.entry_points[i].name, sgl::emit::dump_errors(e));
+        }
+        CHECK(refused
+              == "sgl_spheres_surface: unsupported an intersection fused with its any hit, which only metal writes\n"
+                 "sgl_spheres_occlusion: unsupported an intersection fused with its any hit, which only metal writes\n"
+                 "sgl_empty_closest_hit: unsupported a hit stage that takes no payload, which only metal builds\n")
+            .dump("target", sgl::emit::to_string(t));
+    }
 }
 
 TEST("sgl emit msl - every stage of sg's callables pipeline writes, and a callable takes no hit record")
@@ -240,14 +262,15 @@ hit_group narrow_group for narrow_rays:
 hit_group wide_group for wide_rays:
     primary = (any_hit = keep)
 )");
-    auto const checked = check_sources(read_prelude(), source);
+    auto const checked = check_sources(read_prelude(), source, sgl::emit::compile_target_of(target::msl));
     CHECK(reports_of(checked) == "");
     auto const e = sgl::emit::emit(checked.module, 0, target::msl);
     CHECK(sgl::emit::dump_errors(e)
           == "ray-data-conflict keep is linked with ray sets 'narrow_rays' and 'wide_rays', whose payloads size "
              "Metal's ray data differently\n");
     // DXR sizes nothing in the text, so the other targets write it
-    CHECK(sgl::emit::emit(checked.module, 0, target::hlsl_dx12).has_text());
+    auto const dx12 = check_sources(read_prelude(), source, sgl::emit::compile_target_of(target::hlsl_dx12));
+    CHECK(sgl::emit::emit(dx12.module, 0, target::hlsl_dx12).has_text());
 }
 
 TEST("sgl emit msl - an inline trace outside a ray-tracing stage reaches metal::raytracing, and no member hides its "

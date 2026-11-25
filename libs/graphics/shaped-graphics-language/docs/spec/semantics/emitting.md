@@ -31,9 +31,14 @@ Back to the [semantics](_index.md); the reasons are in [why/emitting.md](why/emi
 * **EMIT-9** Emitting is total: its result is the text, or a list of errors and no text.
 * **EMIT-10** A module that reported an error is the error `module-has-errors`, whichever entry point is asked for.
 * **EMIT-11** An entry point the module does not hold is `unknown-entry-point`.
+* **EMIT-283** An entry point whose tree the check decided by its target is written for that target alone, and for any other is `flattened-for-another-target`, naming both.
+  A decision is a `const if` on `target_api` or `target_language`, a `has`, a text type or a target's text (CHK-426); a check with no target decides them for `.sgl`.
+  A tree that decided none of them is every target's.
 * **EMIT-12** A construct that no emitter carries yet is `unsupported`, and its detail names the construct; an emitter never guesses an address.
 * **EMIT-13** An entry point is written for every target or for none ([why](why/emitting.md#emit-13)).
-  No error depends on the target but EMIT-109's, EMIT-122's, EMIT-128's, EMIT-261's and EMIT-265's.
+  No error depends on the target but EMIT-109's, EMIT-122's, EMIT-128's, EMIT-261's, EMIT-265's, EMIT-283's and EMIT-284's.
+* **EMIT-284** CHK-345's traversal entry points and `sgl_empty_closest_hit` are metal's: HLSL for dx12 and for vulkan refuses each as `unsupported`, as SGL's own DXIL and SPIR-V do.
+  An HLSL intersection takes no parameters, and an HLSL hit stage takes its payload; sg builds these groups there from their own intersection and any hit.
 * **EMIT-109** An entry point that needs a feature no device of the target has is `target-lacks-feature`, and its detail names the feature.
   Today that is `wgsl` against `binding_arrays`, `multisampled_array_textures`, `raytracing_pipeline`, `geometry_shader` and `tessellation_shader`.
   It is also `wgsl` against `shader_int16`, `device_coherence`, `image_atomics`, `first_instance` and `helper_lane_query`, which core WebGPU has none of.
@@ -1153,7 +1158,7 @@ The C++ struct a package generates is that layout byte for byte, padding include
 |---|---|
 | `module-has-errors` | EMIT-10 |
 | `unknown-entry-point` | EMIT-11 |
-| `unsupported` | EMIT-12, EMIT-33, EMIT-34, EMIT-38, EMIT-39, EMIT-67, EMIT-81, EMIT-107, EMIT-128, EMIT-154, EMIT-265, EMIT-274 |
+| `unsupported` | EMIT-12, EMIT-33, EMIT-34, EMIT-38, EMIT-39, EMIT-67, EMIT-81, EMIT-107, EMIT-128, EMIT-154, EMIT-265, EMIT-274, EMIT-284 |
 | `reserved-entry-point-name` | none: retired by EMIT-21 |
 | `system-value-semantic` | EMIT-32 |
 | `layout-mismatch` | none: retired by EMIT-41 |
@@ -1166,6 +1171,7 @@ The C++ struct a package generates is that layout byte for byte, padding include
 | `too-many-samplers` | EMIT-133 |
 | `too-many-acceleration-structures` | EMIT-135 |
 | `ray-data-conflict` | EMIT-139 |
+| `flattened-for-another-target` | EMIT-283 |
 | `target-lacks-feature` | EMIT-109, EMIT-122, EMIT-206, EMIT-261 |
 
 ## Open

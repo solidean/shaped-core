@@ -80,6 +80,9 @@ enum class sgl::emit::error_kind : sgl::u8
     too_many_acceleration_structures,
     /// A metal ray-tracing stage held by pipelines or hit groups whose ray sets size the ray data differently.
     ray_data_conflict,
+    /// An entry point whose tree decided something by another target than the one asked for, which the detail names
+    /// (EMIT-283).
+    flattened_for_another_target,
 };
 
 struct sgl::emit::error

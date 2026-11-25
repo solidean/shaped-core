@@ -1150,7 +1150,6 @@ void sgl::check::impl::flattener::judge_text_types()
 {
     if (c.out.target_type_branches.empty())
         return;
-    auto const target = compiled_for();
     // what each text type this tree holds is on this compile: -1 for not yet seen, -2 for fields, else its spelling's
     // position in `entry.text_types`, or -3 where it has none
     auto decided = cc::vector<cc::pair<type_id, i32>>();
@@ -1171,6 +1170,7 @@ void sgl::check::impl::flattener::judge_text_types()
             if (d.first == type)
                 return d.second;
         auto const& name = c.out.name_of(type);
+        auto const target = compiled_for();
         auto const chosen = chosen_type_branch(c.out, c.out.at(type).symbol, target);
         // EMIT-266: what every branch's condition consults is a variant of the type, taken or not (CHK-432)
         for (auto const& branch : c.out.target_type_branches)

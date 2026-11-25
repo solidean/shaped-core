@@ -6,11 +6,11 @@
 
 namespace sgl_test
 {
-/// `user` checked against the library's prelude, and its entry point `index` written for `t`.
+/// `user` checked against the library's prelude for `t`, and its entry point `index` written for `t`.
 /// The program must check without a diagnostic: a test of the emitters is no test of the check pass.
 inline sgl::emit::emitted_text emit_source(cc::string_view user, isize index, sgl::emit::target t)
 {
-    auto const checked = check_sources(read_prelude(), user);
+    auto const checked = check_sources(read_prelude(), user, sgl::emit::compile_target_of(t));
     CHECK(reports_of(checked) == "");
     return sgl::emit::emit(checked.module, index, t);
 }
@@ -21,7 +21,7 @@ inline sgl::emit::emitted_text emit_source(cc::string_view user,
                                            sgl::emit::target t,
                                            sgl::emit::options const& options)
 {
-    auto const checked = check_sources(read_prelude(), user);
+    auto const checked = check_sources(read_prelude(), user, sgl::emit::compile_target_of(t, options.device_features));
     CHECK(reports_of(checked) == "");
     return sgl::emit::emit(checked.module, index, t, options);
 }

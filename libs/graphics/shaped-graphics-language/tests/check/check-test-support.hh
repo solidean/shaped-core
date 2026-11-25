@@ -133,8 +133,10 @@ inline library_prelude read_prelude()
 }
 
 /// `shared` files of the library's prelude in front, then `sources` parsed here, the user file last.
+/// `target` is what the compile writes for, none for a test of the check pass.
 inline checked_sources check_behind(cc::span<sgl::parsed_prelude_file const> shared,
-                                    cc::span<cc::string_view const> sources)
+                                    cc::span<cc::string_view const> sources,
+                                    sgl::check::compile_target const& target = {})
 {
     auto result = checked_sources();
     for (auto const& f : shared)
@@ -157,7 +159,8 @@ inline checked_sources check_behind(cc::span<sgl::parsed_prelude_file const> sha
     // the library's prelude alone in front is what every compile continues from
     auto const is_library = sources.size() == 1 && shared.data() == sgl::parsed_prelude().data()
                          && shared.size() == sgl::parsed_prelude().size() && sgl::checked_prelude() != nullptr;
-    result.module = is_library ? sgl::check::check(*sgl::checked_prelude(), user) : sgl::check::check(prelude, user);
+    result.module = is_library ? sgl::check::check(*sgl::checked_prelude(), user, {}, target)
+                               : sgl::check::check(prelude, user, {}, target);
 
     result.user = *result.files.back();
     result.user_ast = *result.asts.back();
@@ -178,10 +181,10 @@ inline checked_sources check_sources(cc::string_view prelude, cc::string_view us
 }
 
 /// `user` behind the library's prelude, so the user file is file 4.
-inline checked_sources check_sources(library_prelude, cc::string_view user)
+inline checked_sources check_sources(library_prelude, cc::string_view user, sgl::check::compile_target const& target = {})
 {
     cc::string_view const sources[] = {user};
-    return check_behind(sgl::parsed_prelude(), sources);
+    return check_behind(sgl::parsed_prelude(), sources, target);
 }
 
 /// `program` behind the library's prelude and the modules of `library` it reaches through `use`.

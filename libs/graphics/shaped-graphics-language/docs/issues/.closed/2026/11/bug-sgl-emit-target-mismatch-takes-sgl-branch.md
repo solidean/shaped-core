@@ -2,6 +2,8 @@
 created: 2026-11-07
 refs:
   - file: libs/graphics/shaped-graphics-language/prelude/core.sgl
+closed: 2026-11-25
+resolution: fixed
 ---
 
 # A module checked without a target and emitted for one takes the prelude's .sgl branch silently

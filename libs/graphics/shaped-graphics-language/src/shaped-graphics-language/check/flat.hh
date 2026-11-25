@@ -7,6 +7,7 @@
 #include <clean-core/container/span.hh>
 #include <clean-core/container/variant.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/error/optional.hh>
 #include <clean-core/memory/shared_ptr.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
@@ -885,6 +886,10 @@ struct sgl::check::flat_entry_point
     /// (CHK-433) and a ray query's micromaps (EMIT-184), each before the branch it decided was discarded.
     /// These are a bake's variant axes (EMIT-266).
     feature_set consulted;
+    /// The target its tree was flattened for, where something in it decided by the target: a `const if` on
+    /// `target_api` or `target_language`, a `has`, a text type or a target's text; none where nothing did, so that every
+    /// target may write it (EMIT-283).
+    cc::optional<compile_target> flattened_for;
     /// The strictest `@float` of every function it reaches, itself included (CHK-435), and the first function that
     /// stated it; `none` at `fast`.
     float_level float_guarantee = float_level::fast;

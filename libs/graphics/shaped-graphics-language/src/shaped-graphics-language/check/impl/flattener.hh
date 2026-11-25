@@ -652,7 +652,14 @@ struct flattener
                                      cc::span<flat_expr_id const> values);
 
     /// What the tree is written for: the compile's target, and none for a test, which the interpreter runs (CHK-426).
-    [[nodiscard]] compile_target compiled_for() const { return is_test ? compile_target() : c.compiled_target; }
+    /// Reading it is a decision the tree takes for that target, which `reads_target` keeps.
+    [[nodiscard]] compile_target compiled_for() const
+    {
+        reads_target = true;
+        return is_test ? compile_target() : c.compiled_target;
+    }
+    /// Whether the tree decided anything by its target, which makes it that target's alone (EMIT-283).
+    mutable bool reads_target = false;
     /// `target_api` and `target_language` of the prelude, which a compile stands for (CHK-426): the position of the case
     /// the compile names, or -1 for every other symbol.
     [[nodiscard]] i32 target_case_of(symbol_id constant) const;
