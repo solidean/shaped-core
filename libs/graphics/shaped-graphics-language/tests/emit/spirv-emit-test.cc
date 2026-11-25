@@ -320,7 +320,7 @@ TEST("sgl spirv - an entry point's guarantee stands on each float operation it k
     CHECK(decorated(floored.value().spirv, 42) == 2);
 }
 
-TEST("sgl spirv - a pixel stage's position keeps its guarantee on the reciprocal it writes of w (EMIT-NEW)")
+TEST("sgl spirv - a pixel stage's position keeps its guarantee on the reciprocal it writes of w (EMIT-281)")
 {
     // FragCoord's w is 1/w where the program reads w, so its one division is the program's own arithmetic
     constexpr cc::string_view source
@@ -370,7 +370,7 @@ constexpr cc::string_view k_products
 } // namespace
 
 TEST("sgl spirv - at .precise a product is its scalar sums in the fixed order, and smoothstep DXC's grouping "
-     "(EMIT-NEW)")
+     "(EMIT-281)")
 {
     auto const loose = written(k_products, "loose", sgl::emit::native_route::require);
     auto const strict = written(k_products, "strict", sgl::emit::native_route::require);
@@ -397,7 +397,7 @@ TEST("sgl spirv - at .precise a product is its scalar sums in the fixed order, a
 }
 
 TEST("sgl spirv - at .precise the geometry and mix are their fixed forms, and no extended instruction of them "
-     "(EMIT-NEW)")
+     "(EMIT-281)")
 {
     constexpr cc::string_view source
         = "binding work:\n"

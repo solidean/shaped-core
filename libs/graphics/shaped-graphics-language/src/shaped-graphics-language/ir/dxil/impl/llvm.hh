@@ -283,7 +283,7 @@ public:
     [[nodiscard]] ll_value select(ll_value condition, ll_value yes, ll_value no);
     [[nodiscard]] ll_value extract_value(ll_value aggregate, u32 index);
     /// `is_stable` says a call that reads memory reads what never changes, so two of it are one.
-    /// `is_precise` attaches `dx.precise` where the call gives a float, the calls DXC marks under `-Gis` (EMIT-NEW).
+    /// `is_precise` attaches `dx.precise` where the call gives a float, the calls DXC marks under `-Gis` (EMIT-281).
     [[nodiscard]] ll_value call(ll_value callee,
                                 ll_type type,
                                 cc::span<ll_value const> args,

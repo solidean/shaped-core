@@ -569,7 +569,7 @@ struct call_marks
 } // namespace
 
 TEST("slib - SGL's DXIL marks each float call of a strict entry point `!dx.precise`, as DXC does, and no other "
-     "(EMIT-NEW)")
+     "(EMIT-281)")
 {
     auto compiler = ssc::dxc::compiler::create();
     if (compiler.has_error())
@@ -678,7 +678,7 @@ constexpr cc::string_view k_products
 }
 } // namespace
 
-TEST("slib - at .precise both DXIL routes write a product as its scalar sums, and neither fuses one (EMIT-NEW)")
+TEST("slib - at .precise both DXIL routes write a product as its scalar sums, and neither fuses one (EMIT-281)")
 {
     auto compiler = ssc::dxc::compiler::create();
     if (compiler.has_error())
@@ -705,7 +705,7 @@ TEST("slib - at .precise both DXIL routes write a product as its scalar sums, an
     }
 }
 
-TEST("slib - at .precise both DXIL routes write the geometry and mix as one form, with no rsqrt or dot (EMIT-NEW)")
+TEST("slib - at .precise both DXIL routes write the geometry and mix as one form, with no rsqrt or dot (EMIT-281)")
 {
     auto compiler = ssc::dxc::compiler::create();
     if (compiler.has_error())

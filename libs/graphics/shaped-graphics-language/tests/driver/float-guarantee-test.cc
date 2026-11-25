@@ -396,7 +396,7 @@ isize bare_calls(cc::string_view text, cc::string_view name)
 }
 } // namespace
 
-TEST("sgl float - a text at .precise writes its products and smoothstep as helpers in the fixed order (EMIT-NEW)")
+TEST("sgl float - a text at .precise writes its products and smoothstep as helpers in the fixed order (EMIT-281)")
 {
     for (auto const t : {target::hlsl_dx12, target::hlsl_vulkan, target::msl})
     {
@@ -458,7 +458,7 @@ constexpr cc::string_view k_geometry
       "    work.values[id.x] = shaped(id)\n";
 } // namespace
 
-TEST("sgl float - a text at .precise writes the geometry and mix as helpers of their fixed forms (EMIT-NEW)")
+TEST("sgl float - a text at .precise writes the geometry and mix as helpers of their fixed forms (EMIT-281)")
 {
     for (auto const t : {target::hlsl_dx12, target::hlsl_vulkan, target::msl})
     {
@@ -485,7 +485,7 @@ TEST("sgl float - a text at .precise writes the geometry and mix as helpers of t
         }
         CHECK(!loose.contains("sgl_ordered_"));
 
-        // each form as EMIT-NEW states it
+        // each form as EMIT-281 states it
         CHECK(strict.contains("    return a + t * (b - a);\n")).dump("text", strict);
         CHECK(strict.contains("    float s = (float)1.0 / sqrt((((v[0] * v[0] + v[1] * v[1]) + v[2] * v[2]) + v[3] * "
                               "v[3]));\n    return v * s;\n"))
@@ -522,7 +522,7 @@ constexpr cc::string_view k_shapes = "binding work:\n"
                                      "    work.values[id.x] = float4(s.x + t.x, u.x, u.y, u.z)\n";
 } // namespace
 
-TEST("sgl float - a text at .precise indexes each matrix shape's elements as its target holds them (EMIT-NEW)")
+TEST("sgl float - a text at .precise indexes each matrix shape's elements as its target holds them (EMIT-281)")
 {
     for (auto const t : {target::hlsl_dx12, target::msl})
     {
@@ -546,7 +546,7 @@ TEST("sgl float - a text at .precise indexes each matrix shape's elements as its
     }
 }
 
-TEST("sgl float - a text at .precise spells a half vector's helpers in halves, every lane summed (EMIT-NEW)")
+TEST("sgl float - a text at .precise spells a half vector's helpers in halves, every lane summed (EMIT-281)")
 {
     constexpr cc::string_view source = "require shader_f16\n"
                                        "\n"
@@ -582,7 +582,7 @@ TEST("sgl float - a text at .precise spells a half vector's helpers in halves, e
 }
 
 TEST("sgl float - a text's cross is each lane's a_p * b_q - a_q * b_p at .precise, and the target's at .fast "
-     "(EMIT-NEW)")
+     "(EMIT-281)")
 {
     constexpr cc::string_view source = "require shader_f16\n"
                                        "\n"

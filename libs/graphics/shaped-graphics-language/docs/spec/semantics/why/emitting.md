@@ -464,7 +464,7 @@ Nothing reads a query after its loop but its committed hit, which an abort keeps
 It does tell the driver the traversal is over, and it keeps one rule for every early exit instead of a judgement of which exits a target needs it for.
 A commit that ends the search marks the search ended rather than aborting at once, since the body may still read its candidate, and a candidate read after an abort is one no target defines.
 
-## EMIT-NEW
+## EMIT-281
 
 A port is checked against its original by comparing what the two compute, and a strict scope is where that comparison is asked to hold bit for bit.
 Every route of one scope therefore computes the one sequence of operations the rule names, rather than what each target's compiler or driver picks.

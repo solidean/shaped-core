@@ -831,7 +831,7 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
   Each mode needs its device property, so a vulkan entry point needs the feature `float_specials` from `.specials` on, and `float_denormals` at `.ieee`.
   `wgsl` keeps `.fast` alone.
   A host may weaken a guarantee on WGSL alone, which compiles at `.fast` with the warning `float-guarantee-weakened`.
-* **EMIT-NEW** Where the float guarantee is `.precise` or `.ieee` (CHK-435), every route computes the same operations in the same order ([why](why/emitting.md#emit-new)).
+* **EMIT-281** Where the float guarantee is `.precise` or `.ieee` (CHK-435), every route computes the same operations in the same order ([why](why/emitting.md#emit-281)).
   Each `+`, `-`, `*` and `/` of floats is one IEEE operation of its type, in source order, rounded on its own: none is fused, reassociated or folded into another.
   A dot product, and each component of a matrix product, is its scalar products summed left to right, `((a0*b0 + a1*b1) + a2*b2) + a3*b3`.
   So no route writes a target's `mul`, `dot`, `OpDot`, `OpMatrixTimesVector` or `OpMatrixTimesMatrix` there.

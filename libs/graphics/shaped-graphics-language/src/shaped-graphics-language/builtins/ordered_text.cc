@@ -4,7 +4,7 @@
 using namespace sgl;
 using namespace sgl::builtins;
 
-// EMIT-NEW: a strict scope's products and smoothstep on the text route.
+// EMIT-281: a strict scope's products and smoothstep on the text route.
 // DXC lowers HLSL's `mul` to chains of `FMad` even under `-Gis`, which NVIDIA evaluates fused, and `dot` to DXIL's
 // `dot` operation and SPIR-V's `OpDot`, whose order of summation is the driver's; Metal's are its own as well.
 // A product written out as `*` and `+` stays the separate operations it names, so the helpers below write each one.

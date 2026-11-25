@@ -159,7 +159,7 @@ cc::string_view spread_check(cc::span<check::scalar const> in)
 /// The arguments of `c` with the scalar at `at` written as a vector of the type `c.data` names, `vec3i(s)`.
 /// It is for a target that takes no vector beside a scalar for the operator at hand, as WGSL's `&` and its shifts.
 [[nodiscard]] cc::vector<written> spread_arguments(call_context const& c, isize at);
-/// EMIT-NEW: what a text writes of a dot or matrix product and of a smoothstep where the entry point's guarantee is
+/// EMIT-281: what a text writes of a dot or matrix product and of a smoothstep where the entry point's guarantee is
 /// `.precise` or stricter: a call of a helper that spells out each scalar operation in the fixed order, since HLSL's
 /// `mul` and `dot` reach DXIL as fused or driver-ordered operations and SPIR-V's and Metal's smoothstep as the driver's.
 /// Each writes the target's own call where the entry point is looser, and each helper writes nothing there.

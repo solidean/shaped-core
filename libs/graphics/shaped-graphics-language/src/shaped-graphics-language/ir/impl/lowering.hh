@@ -49,7 +49,7 @@ private:
     void set_merge(merge_kind kind, block_ref merge, block_ref continue_to = block_ref::none);
     value_ref add(op code, type_ref type, cc::span<u32 const> operands, u8 sub = 0, u8 aux = 0);
     value_ref add(op code, type_ref type, std::initializer_list<value_ref> operands, u8 sub = 0, u8 aux = 0);
-    /// EMIT-NEW: a dot or matrix product, or a smoothstep, at `.precise` or stricter, as the scalar operations of its
+    /// EMIT-281: a dot or matrix product, or a smoothstep, at `.precise` or stricter, as the scalar operations of its
     /// fixed order, which no target may then reorder; `none` for any other operation, which `add` writes as it is.
     [[nodiscard]] value_ref strict_form(op code, type_ref type, cc::span<u32 const> operands, u8 sub);
     /// `strict_form` of a `math`: smoothstep, and the geometry and blend that hide a dot or a sum.
