@@ -15,7 +15,8 @@ add_subdirectory(extern/shaped-core EXCLUDE_FROM_ALL)
 - `EXCLUDE_FROM_ALL` keeps `all` to what your targets link; every library is still configured.
 - `SC_BUILD_TESTS`, `SC_BUILD_TOOLS` and `SC_BUILD_EXAMPLES` default to OFF here.
   Set `SC_BUILD_LINTER` ON before the call to build shaped-linter into your tree for `dev.py lint shaped`, a `SC_LIBRARIES` subset included.
-  `SC_BUILD_TOOLS` builds every shaped-core tool, and the ones carrying tests would join your `dev.py test`.
+  `SC_BUILD_TOOLS` configures every shaped-core tool, which an SGL shader package needs for `sgl`.
+  Under `EXCLUDE_FROM_ALL` a tool is built only when something depends on it, so the tests one carries (`lod-probe`'s) stay out of your `dev.py test`.
 - **The repo-wide build flags reach you through clean-core.**
   The x86-64 level's flag, floating-point contraction, sanitizers, coverage, PGO and the wasm flags are recorded on `shaped-core::build-config`, which clean-core links `PUBLIC`.
   [tools/cmake/BuildConfig.cmake](../../tools/cmake/BuildConfig.cmake) is the mechanism.

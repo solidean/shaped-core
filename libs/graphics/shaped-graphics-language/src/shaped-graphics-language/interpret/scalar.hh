@@ -26,9 +26,27 @@ enum class sgl::check::value_kind : sgl::u8
 struct sgl::check::scalar
 {
     value_kind kind = value_kind::none;
+    /// Set only in a bounding run (`run_limits::bounds_floats`): every value a GPU may give for this leaf lies in
+    /// `[least, most]`, which holds `bits` too.
+    /// A float or a half leaf has float bounds; a leaf of any kind is unbounded at `-inf` to `inf`, a NaN included.
+    bool is_ranged = false;
     u32 bits = 0;
     /// The high 32 bits of a 64-bit leaf, and 0 for every other, so equality stays exact either way.
     u32 high = 0;
+    f32 least = 0;
+    f32 most = 0;
+    /// Two ranged leaves of one nonzero origin are one value, which a GPU computes once, so a bounding run varies them
+    /// together: `x < x` is decided even where `x` is not.
+    u32 origin = 0;
+    /// A bounding run's sum chain, for a leaf a `+`, a `-` or a sum of products gave: how many terms it sums, which a
+    /// reassociating target may add in any order; 0 for a leaf that is no sum.
+    /// `sum_least` to `sum_most` holds the exact sum, `magnitude` is the sum of the terms' magnitudes, and
+    /// `has_products` says some terms are products rounded inside the sum, as a `dot`'s are.
+    u16 terms = 0;
+    bool has_products = false;
+    f32 magnitude = 0;
+    f32 sum_least = 0;
+    f32 sum_most = 0;
 
     [[nodiscard]] static scalar of(f32 v);
     [[nodiscard]] static scalar of(i32 v);
@@ -63,6 +81,11 @@ struct sgl::check::scalar
     /// integer cut to its low 16 bits.
     /// Any other pair is the leaf itself.
     [[nodiscard]] scalar narrowed_to(value_kind to) const;
+
+    /// What a bounding run knows no bound for: any value, a NaN included.
+    [[nodiscard]] bool is_unbounded() const;
+    /// This leaf, unbounded.
+    [[nodiscard]] scalar unbounded() const;
 
     constexpr bool operator==(scalar const&) const = default;
 };

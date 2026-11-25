@@ -231,7 +231,11 @@ The test binaries are `.wasm` plus a `.js` loader; dev.py runs them under emsdk'
 
 **A cross preset builds a native `sgl` first.**
 A shader package's SGL entries are read by the SGL compiler while the build runs, and a wasm build's own `sgl` is wasm, which the build machine cannot run.
-So dev.py builds `sgl` in the platform's default preset, hands its path to the cross build as `SC_SGL_TOOL`, and rebuilds it before every cross build so a compiler change reaches the generated code.
+So dev.py builds `sgl` in the platform's default preset, deploys a copy to `build/host-tools/`, and hands the copy's path to the cross build as `SC_SGL_TOOL`.
+It rebuilds and redeploys it before every cross build, so a compiler change reaches the generated code.
+A copy, because the build server rebuilds a watched cross build in the background, outside every graph the native build knows of.
+Run in place, the native build's own `sgl` would be held open by those runs, and on Windows its next link would fail.
+A cross build configured before the copy existed reconfigures onto it at its next dev.py run.
 The same applies to the Android and iOS presets.
 A build driven by CMake alone sets `SC_SGL_TOOL` itself; see [ShaderPackage.cmake](../../libs/graphics/shaped-shader-library/cmake/ShaderPackage.cmake).
 `uv run dev.py doctor` validates the toolchain, and the full setup and feature knobs are [requirements.md](../requirements.md#emscripten--wasm)'s.
@@ -308,7 +312,9 @@ Everything dev.py starts runs under a memory guard, so a runaway process or a pi
 ## An output the linker cannot replace
 
 On Windows a linker cannot replace an executable another process holds open, and it says only "permission denied".
-- **dev.py names the holders** under the failed build: each process's executable, and what started it, asked of Windows' Restart Manager when the failure is reported.
+- **dev.py names the holders** under the failed build, asked of Windows' Restart Manager when the failure is reported.
+  Each holder's executable and command line, then every process that started it up to a root or one that has exited.
+  A chain that ends in `ccs.exe serve` is the build server's own background build, and a command line names the build directory it is for.
 - **"Nothing holds it now"** means the holder let go before the report: a process that ran briefly, which the next occurrence may catch.
 - The VS Code extension runs `sgl lsp` from a copy of its own, so an editor never holds the build's `sgl`.
 

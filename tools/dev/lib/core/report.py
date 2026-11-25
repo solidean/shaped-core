@@ -91,7 +91,8 @@ def _print_unwritable_outputs(results: list[StepResult], presets: list[Preset], 
             else:
                 ui.write_line(console.yellow(f"\n{rel(output, root)} could not be written: it is held open by"))
                 for h in holders:
-                    ui.write_line(console.yellow(f"  {file_holders.describe(h)}"))
+                    for line in file_holders.describe(h).splitlines():
+                        ui.write_line(console.yellow(f"  {line}"))
 
 
 def summarize_build(

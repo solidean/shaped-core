@@ -69,6 +69,41 @@ constexpr isize k_named_elements = 4;
     return (delta < 0 ? -delta : delta) <= t.amount * scale;
 }
 
+/// How much of a tolerance of `measure` holding `b` to `a` takes: 0 where they are equal, infinity where none does.
+[[nodiscard]] double needed(u32 a, u32 b, sg_diff::tolerance::measure measure)
+{
+    if (a == b)
+        return 0;
+    auto const never = cc::bit_cast<f64>(0x7ff0'0000'0000'0000ull);
+    if (measure == sg_diff::tolerance::measure::exact || is_nan_bits(a) || is_nan_bits(b))
+        return is_nan_bits(a) && is_nan_bits(b) ? 0 : never;
+    if (measure == sg_diff::tolerance::measure::ulps)
+    {
+        auto const apart = ordered(a) - ordered(b);
+        return double(apart < 0 ? -apart : apart);
+    }
+    auto const fa = double(cc::bit_cast<f32>(a));
+    auto const fb = double(cc::bit_cast<f32>(b));
+    if (fa - fa != 0.0 || fb - fb != 0.0)
+        return never;
+    auto const scale = cc::max(1.0, cc::max(fa < 0 ? -fa : fa, fb < 0 ? -fb : fb));
+    auto const delta = fa - fb;
+    return (delta < 0 ? -delta : delta) / scale;
+}
+
+/// Whether `b` is within `t` of the range `least` to `most`; a range with an infinite end bounds nothing.
+[[nodiscard]] bool within_range(f32 least, f32 most, u32 b, sg_diff::tolerance t)
+{
+    if (least - least != 0.0f || most - most != 0.0f)
+        return true;
+    if (is_nan_bits(b))
+        return false;
+    auto const fb = cc::bit_cast<f32>(b);
+    if (fb >= least && fb <= most)
+        return true;
+    return within(cc::bit_cast<u32>(fb < least ? least : most), b, t);
+}
+
 [[nodiscard]] cc::string text_of(u32 bits, sg_diff::tolerance t)
 {
     if (t.kind == sg_diff::tolerance::measure::exact)
@@ -91,10 +126,12 @@ namespace
         words.push_back(text.subview({.offset = 0, .size = end}));
         text = trimmed(end < text.size() ? text.subview(end) : cc::string_view());
     }
-    if (words.size() != 3)
+    if (words.size() != 3 && !(words.size() == 4 && words[3] == "precise"))
         return cc::nullopt;
 
     auto result = sg_diff::known_divergence{.issue = cc::string(words[2])};
+    if (words.size() == 4)
+        result.floor = cc::string(words[3]);
     if (words[0] == "amd")
         result.vendor_id = 0x1002;
     else if (words[0] == "apple")
@@ -120,10 +157,10 @@ namespace
 }
 } // namespace
 
-sg_diff::known_divergence const* sg_diff::workload::known_on(sg::context const& ctx) const
+sg_diff::known_divergence const* sg_diff::workload::known_on(sg::context const& ctx, cc::string_view floor) const
 {
     for (auto const& k : known)
-        if (k.vendor_id == ctx.metrics.adapter().vendor_id && k.backend == ctx.backend())
+        if (k.vendor_id == ctx.metrics.adapter().vendor_id && k.backend == ctx.backend() && k.floor == floor)
             return &k;
     return nullptr;
 }
@@ -256,8 +293,8 @@ sg_diff::corpus sg_diff::read_corpus()
                     known.push_back(parsed.value());
                 else
                     problem = cc::format("'{}' is no known divergence; one is `known <vendor> <backend> <issue>`, the "
-                                         "vendor "
-                                         "amd, apple, intel or nvidia and the backend dx12, vulkan, metal or webgpu",
+                                         "vendor amd, apple, intel or nvidia, the backend dx12, vulkan, metal or "
+                                         "webgpu, and a trailing `precise` for the strict-floor twin alone",
                                          value);
             }
             else
@@ -358,6 +395,8 @@ sg::async_compiled_shader sg_diff::compiled_on(sg::context const& ctx, route con
         kept.push_back({.name = cc::string(r.format == sg::shader_format::dxil ? slib::k_native_dxil_option
                                                                                : slib::k_native_spirv_option),
                         .value = cc::string("true")});
+    if (!r.float_floor.empty())
+        kept.push_back({.name = cc::string(slib::k_float_floor_option), .value = r.float_floor});
     return asset.acquire(r.format, kept);
 }
 
@@ -386,13 +425,17 @@ cc::vector<cc::string> sg_diff::differences(run_result const& a, run_result cons
         auto const* const ys = reinterpret_cast<u32 const*>(y.bytes.data());
         auto named = cc::string();
         auto differing = isize(0);
+        auto const is_bounded = x.bounds.size() == 2 * count;
         for (auto e = isize(0); e < count; ++e)
         {
-            if (within(xs[e], ys[e], kept))
+            auto const least = is_bounded ? x.bounds[2 * e] : 0.0f;
+            auto const most = is_bounded ? x.bounds[2 * e + 1] : 0.0f;
+            auto const is_ranged = is_bounded && least == least && most == most;
+            if (is_ranged ? within_range(least, most, ys[e], kept) : within(xs[e], ys[e], kept))
                 continue;
             if (differing < k_named_elements)
-                named.appendf("{}[{}] {} against {}", named.empty() ? "" : ", ", e, text_of(ys[e], kept),
-                              text_of(xs[e], kept));
+                named.appendf("{}[{}] {} against {}{}", named.empty() ? "" : ", ", e, text_of(ys[e], kept),
+                              text_of(xs[e], kept), is_ranged ? cc::format(" within [{}, {}]", least, most) : "");
             ++differing;
         }
         if (differing > 0)
@@ -400,6 +443,41 @@ cc::vector<cc::string> sg_diff::differences(run_result const& a, run_result cons
                                        kept.to_string(), named, differing > k_named_elements ? ", ..." : ""));
     }
     return lines;
+}
+
+double sg_diff::tolerance_used(run_result const& a, run_result const& b, tolerance t)
+{
+    auto most = 0.0;
+    for (auto i = isize(0); i < a.outputs.size() && i < b.outputs.size(); ++i)
+    {
+        auto const& x = a.outputs[i];
+        auto const& y = b.outputs[i];
+        if (x.is_exact || y.is_exact || x.bytes.size() != y.bytes.size())
+            continue;
+        auto const count = x.bytes.size() / 4;
+        auto const* const xs = reinterpret_cast<u32 const*>(x.bytes.data());
+        auto const* const ys = reinterpret_cast<u32 const*>(y.bytes.data());
+        auto const is_bounded = x.bounds.size() == 2 * count;
+        for (auto e = isize(0); e < count; ++e)
+        {
+            auto const least = is_bounded ? x.bounds[2 * e] : 0.0f;
+            auto const end = is_bounded ? x.bounds[2 * e + 1] : 0.0f;
+            auto used = 0.0;
+            if (!is_bounded || least != least)
+                used = needed(xs[e], ys[e], t.kind);
+            else if (least - least != 0.0f || end - end != 0.0f)
+                used = 0;
+            else
+            {
+                auto const fy = cc::bit_cast<f32>(ys[e]);
+                used = is_nan_bits(ys[e])       ? needed(cc::bit_cast<u32>(least), ys[e], t.kind)
+                     : fy >= least && fy <= end ? 0.0
+                                                : needed(cc::bit_cast<u32>(fy < least ? least : end), ys[e], t.kind);
+            }
+            most = used > most ? used : most;
+        }
+    }
+    return most;
 }
 
 namespace

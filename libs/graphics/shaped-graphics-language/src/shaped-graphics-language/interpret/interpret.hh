@@ -14,7 +14,8 @@
 ///
 /// Operands and arguments are evaluated left to right, each exactly once, and a `print` is the one effect besides the result.
 /// It exists to compare two trees, so it is exact about order and indifferent to speed.
-/// Its arithmetic is `f32` and wrapping `i32`; a target's own rounding is not modelled, and `normalize` takes its root by iteration.
+/// Its arithmetic is `f32` and wrapping `i32`, and `normalize` takes its root by iteration.
+/// A target's own rounding is not modeled; a bounding run gives the range a float level allows instead (`run_limits::bounds_floats`).
 
 /// A value of any type as its scalars in field order, nested structs included; a `mat4` is 16 of them, column by column.
 struct sgl::check::value
@@ -161,6 +162,10 @@ struct sgl::check::member_data
     cc::pinned_data<byte const> bytes;
     /// For a `mut buffer[T]`, in place of `bytes`: what the run stored is written back into it (`write_back`).
     cc::pinned_data<byte> mutable_bytes;
+    /// For a bounding run's `mut buffer[T]`, beside `mutable_bytes`: two floats per 4-byte word, the least and the most
+    /// a GPU may store there, which `write_back` writes and `resolve_inputs` reads back.
+    /// Two NaNs are the word's exact value; empty is every word's.
+    cc::pinned_data<f32> bounds;
     /// For an acceleration member: the pool unit of its TLAS, where 0 is the empty one.
     u32 acceleration_root = 0;
     /// For a texture or an image: one, or one per element of a binding array of them, in order.
@@ -200,6 +205,15 @@ struct sgl::check::run_limits
     /// Read every few thousand steps when set, and a raised flag ends the run as `stopped`.
     /// It is how an editor abandons a test whose document changed, and raising it from another thread is enough.
     cc::atomic<bool> const* stop = nullptr;
+    /// A bounding run: each float and half leaf also carries the range a GPU may give for it under the entry point's
+    /// `@float` level (EVAL-6), `scalar::is_ranged`; the exact values are those of a run without it.
+    /// Modeled are a half operation kept at a float's precision, contraction, reassociation, a sum of products rounded
+    /// step by step, and flushed denormals.
+    /// A builtin's own precision is not, nor what a texture read, a subgroup operation, a derivative or an atomic does
+    /// to a range: each takes its arguments' exact values and gives exact results.
+    bool bounds_floats = false;
+    /// The level a bounding run takes where the entry point states a laxer one, as a compile's floor does (CHK-435).
+    float_level float_floor = float_level::fast;
 };
 
 /// One check or `assert` that was false where it ran.
@@ -274,6 +288,13 @@ struct sgl::check::outcome
     i32 failures_dropped = 0;
     /// Parallel to the tree's `check_sites`, and counted past `max_failures`, since it holds no values.
     cc::vector<site_tally> sites;
+    /// In a bounding run, how many branches, arms and indices went by an unbounded value, which a GPU may decide the
+    /// other way: from the first, everything the lane stores or returns is unbounded.
+    i32 undecided = 0;
+    /// In a bounding run of one lane, how many conditions went by a value the range leaves open, up to 6: the run took
+    /// every way through them, and what it stored and returned is the hull of what each way did.
+    /// Past 6 they are `undecided`.
+    i32 explored = 0;
 
     /// Same status, same result in every lane, same trace, same buffers.
     [[nodiscard]] bool operator==(outcome const& rhs) const

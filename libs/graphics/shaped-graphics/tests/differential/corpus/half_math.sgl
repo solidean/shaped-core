@@ -3,6 +3,7 @@
 // differential: known amd dx12 bug-sgl-half-conversion-rounds-toward-zero-on-amd
 // differential: known amd vulkan bug-sgl-half-conversion-rounds-toward-zero-on-amd
 // differential: known intel dx12 bug-sg-diff-half-corpus-fails-on-intel
+// differential: known intel dx12 bug-sg-diff-intel-ignores-precise-on-halves precise
 // differential: known nvidia vulkan bug-sg-diff-half-math-unrounded-on-nvidia-vulkan
 // EVAL-96 rounds a float converted to a half once, to nearest, ties to even, at every level, so a conversion agrees to the bit everywhere.
 // AMD's drivers convert a float to a half toward zero instead, and Intel's dx12 and NVIDIA's vulkan fold the round trip away.

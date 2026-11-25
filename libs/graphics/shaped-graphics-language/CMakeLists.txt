@@ -161,6 +161,7 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/legalize/legalize_onces.cc
 
     src/shaped-graphics-language/interpret/interpret.cc
+    src/shaped-graphics-language/interpret/impl/bounds.cc
     src/shaped-graphics-language/interpret/textures.cc
 
     src/shaped-graphics-language/test/run_tests.cc
@@ -347,6 +348,7 @@ target_sources(shaped-graphics-language
     src/shaped-graphics-language/legalize/impl/legalizer.hh
     src/shaped-graphics-language/legalize/impl/walk.hh
 
+    src/shaped-graphics-language/interpret/impl/bounds.hh
     src/shaped-graphics-language/interpret/impl/textures.hh
     src/shaped-graphics-language/interpret/interpret.hh
     src/shaped-graphics-language/interpret/scalar.hh
@@ -515,6 +517,7 @@ if(SC_BUILD_TESTS)
 
         tests/interpret/autodiff-buffer-test.cc
         tests/interpret/autodiff-texture-test.cc
+        tests/interpret/bounds-test.cc
         tests/interpret/check-run-test.cc
         tests/interpret/driver-bindings-test.cc
         tests/interpret/driver-test-support.hh

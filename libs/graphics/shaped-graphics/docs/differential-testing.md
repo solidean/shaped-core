@@ -91,6 +91,7 @@ A `known` line names the vendor, the backend and the issue:
 The vendor is `amd`, `apple`, `intel` or `nvidia`, matched by the adapter's PCI vendor id, and the backend is `dx12`, `vulkan`, `metal` or `webgpu`.
 On a matching context a difference logs at info, naming the issue, where it would fail.
 **A known line that stops diverging fails**, against the reference and against the interpreter: a fixed driver retires its line, and the issue gets checked.
+A trailing `precise` scopes a line to [the strict-floor twin](#the-strict-floor-twin) alone.
 A matching context is never what the others are held to, and a refresh writes no reference from it.
 Two routes of one matching context are not held to each other, since one driver folding both alike proves nothing.
 
@@ -120,7 +121,45 @@ The engine checks the corpus file against the setups' modules and runs the dispa
 A pixel stage runs as 2 by 2 quads, each pixel a lane with its own interpolated varyings (EVAL-148), so its derivatives and the level a sample picks are a quad's.
 The raster setup's half gives the varyings at each pixel's center, as its vertex stage writes them; the vertex stage itself is not interpreted.
 The scene's half builds the world with `accel_build_flag::software_trace` too and binds the context's software pool, so the interpreter traces it as sg's software walk does.
-Every configuration is held to the result at the file's `across` bound, since the interpreter rounds as plain `f32` and models no target.
+
+### What a GPU may compute
+
+The interpreter runs bounding (`run_limits::bounds_floats`), so each float it stores carries the range of values a GPU may give for it, besides the exact one.
+The range is what the entry point's `@float` level licenses, operation by operation (EVAL-6):
+- a half operation kept at a float's precision at `.fast`;
+- a product left unrounded as a fused multiply-add keeps it, at `.fast` and `.specials`;
+- a sum of `+` and `-` added in any order, at `.fast` and `.specials`: Higham's γ(k) times the terms' magnitudes;
+- a `dot` or a matrix product rounded step by step in any order, at every level, by the same bound;
+- a denormal taken as zero, below `.ieee`.
+
+A sum's chain carries through a `let`, since a compiler reassociates through one, and a chain of two terms adds in one order alone.
+
+A license applies to each operation and a tolerance to the result, so no tolerance can stand in for one.
+`half_arithmetic.sgl`'s `a * b - a` is the case: with `b` near 1 the subtraction cancels, and a product Intel's Arc keeps at a float's precision lands 3% from binary16's answer, inside its range.
+
+Every configuration is held to that range, and the file's `across` bound applies from its nearer end, for what the range leaves out:
+a builtin's own precision, and a texture read, a subgroup operation, a derivative or an atomic, each of which takes its arguments exactly.
+The test says at info how much of `across` each file used against the interpreter, beyond its ranges, over every configuration it holds no known divergence for.
+That number is how far a file's tolerance carries what the ranges leave out, and 0 says the ranges hold everything.
+So does a construct a device runs natively, the trace above all: its emulated form is the interpreter's stand-in for the hardware, whose precision is its own.
+
+### The strict-floor twin
+
+`sg differential - every corpus entry point computes at a precise floor what SGL's interpreter says` is the twin.
+It compiles every entry point again at a `.precise` floor (`slib::k_float_floor_option`), and runs the interpreter at the same floor.
+There a target may no longer reassociate, contract or keep a half at a float's precision, so the ranges shrink to rounding, denormals and a sum of products' steps.
+It checks that a driver keeps what it is asked to keep, which the file's own level, usually `.fast`, cannot.
+WGSL keeps only `.fast` (EMIT-185), so a webgpu context runs no twin.
+
+A file's `known` lines describe its own level, so in the twin they only log, whether the driver diverges there or not.
+A `known` line that ends in `precise` is the twin's own, held as the other tests hold theirs.
+The first is Intel's Arc, which keeps halves at a float's precision whatever the floor: [bug-sg-diff-intel-ignores-precise-on-halves](issues/bug-sg-diff-intel-ignores-precise-on-halves.md).
+
+### Open conditions
+
+A condition the range leaves open, one a GPU may decide either way, is run both ways and the stores joined, up to six of them in an invocation.
+Past that, and at an index or a `switch` the range leaves open, what the invocation stores after it is bounded by nothing, and the test says at info how many elements are.
+The corpus has none today.
 
 It cannot run everything, and says so at info rather than failing.
 **Workgroup memory** spans the invocations of a workgroup, which the interpreter runs one at a time, so `workgroup_reduction.sgl` is left out.

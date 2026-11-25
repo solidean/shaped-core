@@ -1,8 +1,12 @@
 // differential: setup floats
 // differential: across relative 0.001
+// differential: known intel dx12 bug-sg-diff-intel-ignores-precise-on-halves precise
+// differential: known intel vulkan bug-sg-diff-intel-ignores-precise-on-halves precise
 // EVAL-96 rounds each operation of halves once, to nearest, ties to even; at `.fast` a GPU may keep a float's precision instead (CHK-435).
-// Apple's compiler does under Metal's fast math, so a result lies within about an ulp of binary16's, under 2^-10 relative: hence 0.001.
-// That holds an operation to roughly its rounding, not to the bit; a conversion's direction is half_math.sgl's to hold exactly.
+// Apple's compiler does under Metal's fast math, and Intel's does too; the interpreter's range for each result holds both answers.
+// 0.001, about an ulp of a half, is the slack around that range, and what two GPUs that round differently are held to.
+// `a * b - a` cancels where `b` is near 1, and there two such GPUs may differ by more, which only the interpreter's range allows for.
+// A conversion's direction is half_math.sgl's to hold exactly.
 require shader_f16
 use diff_floats
 

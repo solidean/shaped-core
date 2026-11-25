@@ -5,6 +5,7 @@
 #include <clean-core/string/format.hh>
 #include <shaped-graphics-language/builtins/impl/soft_math.hh>
 #include <shaped-graphics-language/builtins/subgroup_calls.hh>
+#include <shaped-graphics-language/interpret/impl/bounds.hh>
 #include <shaped-graphics-language/interpret/impl/textures.hh>
 #include <shaped-graphics-language/legalize/impl/walk.hh>
 
@@ -271,6 +272,43 @@ struct machine
     /// The value a `leave` or a `return` under way carries.
     value carried;
     int depth = 0;
+    /// A bounding run's licenses, from the entry point's level and the floor.
+    float_licenses licenses;
+    /// Whether a branch, an arm or an index went by an unbounded value, after which no store is bounded.
+    bool follows_undecided = false;
+    /// A bounding run that explores: each condition the range leaves open goes the way `forced` says, in the order
+    /// the run meets them, and the exact way past them; `interpret` runs every way and joins them.
+    bool explores = false;
+    cc::span<bool const> forced;
+    /// How deep the run is in the emulated form of a construct a device runs natively, which it computes exactly.
+    int exact_depth = 0;
+
+    /// Whether this run bounds what it computes here.
+    [[nodiscard]] bool bounds_here() const { return limits.bounds_floats && exact_depth == 0; }
+
+    /// Notes that the run goes by `leaf`, which a GPU may decide otherwise where it is unbounded.
+    void decide_by(scalar const& leaf)
+    {
+        if (!leaf.is_unbounded() || !bounds_here())
+            return;
+        follows_undecided = true;
+        ++out.undecided;
+    }
+
+    /// The way the run goes by the condition `leaf`.
+    bool decided(scalar const& leaf)
+    {
+        if (!leaf.is_unbounded() || !bounds_here() || !explores)
+        {
+            decide_by(leaf);
+            return leaf.as_bool();
+        }
+        auto const k = out.explored++;
+        return k < forced.size() ? forced[k] : leaf.as_bool();
+    }
+
+    /// `leaf` as the run stores it: unbounded once the run went by an undecided value.
+    [[nodiscard]] scalar settled(scalar const& leaf) const { return follows_undecided ? leaf.unbounded() : leaf; }
 
     flow fail(run_status status, cc::string detail)
     {
@@ -353,6 +391,7 @@ struct machine
     {
         if (!is_index(index))
             return type_error("an array index that is no int and no uint");
+        decide_by(index.leaves[0]);
         // a lane of a vector, one scalar per field, past whose last lane is the same program error (CHK-395)
         if (is_valid(type) && m.at(type).kind == type_kind::structure && m.at(type).has_swizzles)
         {
@@ -504,7 +543,7 @@ struct machine
         }
         else
         {
-            out.buffers[buffer].leaves[offset] = after[0];
+            out.buffers[buffer].leaves[offset] = settled(after[0]);
             is_stored[buffer] = true;
         }
 
@@ -556,7 +595,7 @@ struct machine
             if (stored.leaves.size() != words)
                 return type_error(cc::format("a call of '{}' storing a value of the wrong width", record.name));
             for (auto k = isize(0); k < words; ++k)
-                memory[at / 4 + k] = stored.leaves[k];
+                memory[at / 4 + k] = settled(stored.leaves[k]);
             is_stored[buffer] = true;
         }
         else
@@ -1041,6 +1080,16 @@ struct machine
         }
         if (!is_typed || !is_result_typed || result.leaves.size() != leaf_count_of(m, x.type))
             return type_error(cc::format("a call of '{}' with arguments or a result of the wrong type", record->name));
+        if (bounds_here() && is_valid(record->result))
+        {
+            auto leaves = cc::vector<scalar>();
+            for (auto const& a : args)
+                leaves.push_back_range(a.leaves);
+            bound_call(*record, leaves, licenses, result.leaves);
+        }
+        else if (limits.bounds_floats)
+            for (auto& leaf : result.leaves)
+                leaf = {.kind = leaf.kind, .bits = leaf.bits, .high = leaf.high};
         // The one way to see WHEN a call with an effect ran: its value joins the trace where the call happened.
         if (!c.is_pure)
             out.trace.push_back(result);
@@ -1089,6 +1138,7 @@ struct machine
             return f;
         if (!is_index(index))
             return type_error("a buffer index that is no int and no uint");
+        decide_by(index.leaves[0]);
         if (auto const f = buffer_named(b.buffer, buffer); !f.is_normal())
             return f;
 
@@ -1113,7 +1163,7 @@ struct machine
             return f;
         if (v.leaves.size() != 1 || v.leaves[0].kind != value_kind::boolean)
             return type_error("a condition or a logical operand that is no bool");
-        result = v.leaves[0].as_bool();
+        result = decided(v.leaves[0]);
         return {};
     }
 
@@ -1290,8 +1340,14 @@ struct machine
         if (auto const* const c = x.node.try_as<flat_call>())
             return call(x, *c, result);
         // the interpreter has no device, so it runs what a device without the construct would: the emulated form
+        // A bounding run computes it exactly, as the construct's own precision, which a device's is, bounds nothing.
         if (auto const* const both = x.node.try_as<flat_by_target>())
-            return eval(both->emulated, result);
+        {
+            ++exact_depth;
+            auto const f = eval(both->emulated, result);
+            --exact_depth;
+            return f;
+        }
         if (auto const* const n = x.node.try_as<flat_not>())
         {
             auto operand = false;
@@ -1532,7 +1588,7 @@ struct machine
             if (v.leaves.size() != place.letters.count)
                 return type_error("a store of a value of the wrong size");
             for (auto i = 0; i < place.letters.count; ++i)
-                out.buffers[buffer].leaves[offset + field_offset(place.letters.fields[i])] = v.leaves[i];
+                out.buffers[buffer].leaves[offset + field_offset(place.letters.fields[i])] = settled(v.leaves[i]);
             is_stored[buffer] = true;
             return {};
         }
@@ -1572,7 +1628,7 @@ struct machine
         if (v.leaves.size() != count)
             return type_error("a store of a value of the wrong size");
         for (auto i = isize(0); i < count; ++i)
-            out.buffers[buffer].leaves[offset + i] = v.leaves[i];
+            out.buffers[buffer].leaves[offset + i] = settled(v.leaves[i]);
         is_stored[buffer] = true;
         return {};
     }
@@ -1605,6 +1661,8 @@ struct machine
         auto chosen = value();
         if (auto const f = eval(scrutinee, chosen); !f.is_normal())
             return f;
+        for (auto const& leaf : chosen.leaves)
+            decide_by(leaf);
         if (!is_known(e, arms))
             return type_error("a case whose arms reach outside the tree");
 
@@ -2011,9 +2069,13 @@ outcome run_lane(checked_module const& m,
                  shared_memory& memory,
                  i32 lane,
                  exchange_table const& previous,
-                 exchange_table& current)
+                 exchange_table& current,
+                 cc::span<bool const> forced,
+                 bool explores)
 {
     auto run = machine{.m = m, .e = e, .inputs = inputs, .limits = limits, .fuel = limits.fuel};
+    run.forced = forced;
+    run.explores = explores;
     run.out.buffers = cc::move(memory.buffers);
     run.is_stored = cc::move(memory.is_stored);
     run.textures = cc::move(memory.textures);
@@ -2024,6 +2086,9 @@ outcome run_lane(checked_module const& m,
     run.lane_count = inputs.lane_count < 1 ? 1 : inputs.lane_count;
     run.previous = &previous;
     run.current = &current;
+    if (limits.bounds_floats)
+        run.licenses
+            = licenses_of(u8(limits.float_floor) > u8(e.float_guarantee) ? limits.float_floor : e.float_guarantee);
     run.out.sites.resize_to_defaulted(e.check_sites.size());
     run.locals.resize_to_defaulted(e.locals.size());
     run.is_set.resize_to_filled(e.locals.size(), false);
@@ -2048,6 +2113,8 @@ outcome run_lane(checked_module const& m,
     {
         run.out.result = cc::move(run.carried);
         run.out.result.type = e.result;
+        for (auto& leaf : run.out.result.leaves)
+            leaf = run.settled(leaf);
     }
     else if (f.is_normal())
     {
@@ -2114,6 +2181,8 @@ outcome merged(checked_module const& m,
         out.failures_dropped += r.failures_dropped;
         out.checks_run += r.checks_run;
         out.asserts_run += r.asserts_run;
+        out.undecided += r.undecided;
+        out.explored += r.explored;
         for (auto s = isize(0); s < out.sites.size() && s < r.sites.size(); ++s)
         {
             out.sites[s].passed += r.sites[s].passed;
@@ -2146,10 +2215,15 @@ outcome merged(checked_module const& m,
 }
 } // namespace
 
-outcome sgl::check::interpret(checked_module const& m,
-                              flat_entry_point const& e,
-                              run_inputs const& inputs,
-                              run_limits const& limits)
+namespace
+{
+/// One run of every lane, each open condition of a bounding run that `explores` going the way `forced` says.
+outcome run_rounds(checked_module const& m,
+                   flat_entry_point const& e,
+                   run_inputs const& inputs,
+                   run_limits const& limits,
+                   cc::span<bool const> forced,
+                   bool explores)
 {
     // EVAL-143: each round runs every lane with what the round before exchanged, until nothing a lane gives changes
     auto const lanes = inputs.lane_count < 1 ? 1 : inputs.lane_count;
@@ -2169,7 +2243,7 @@ outcome sgl::check::interpret(checked_module const& m,
         auto is_stopped = false;
         for (auto lane = i32(0); lane < lanes && !is_stopped; ++lane)
         {
-            runs.push_back(run_lane(m, e, inputs, limits, memory, lane, previous, current));
+            runs.push_back(run_lane(m, e, inputs, limits, memory, lane, previous, current, forced, explores));
             is_stopped = runs.back().status == run_status::stopped;
         }
         if (is_stopped)
@@ -2181,6 +2255,39 @@ outcome sgl::check::interpret(checked_module const& m,
         previous = cc::move(current);
     }
 }
+
+/// The most open conditions a bounding run runs every way through, which is 2 to this many runs.
+constexpr i32 k_max_explored = 6;
+} // namespace
+
+outcome sgl::check::interpret(checked_module const& m,
+                              flat_entry_point const& e,
+                              run_inputs const& inputs,
+                              run_limits const& limits)
+{
+    // a bounding run of one lane takes every way the open conditions allow, and joins what they stored
+    if (!limits.bounds_floats || inputs.lane_count > 1)
+        return run_rounds(m, e, inputs, limits, {}, false);
+    auto first = run_rounds(m, e, inputs, limits, {}, true);
+    if (first.status != run_status::ok || first.explored == 0)
+        return first;
+    if (first.explored > k_max_explored)
+        return run_rounds(m, e, inputs, limits, {}, false);
+    auto const ways = first.explored;
+    auto forced = cc::vector<bool>::create_filled(ways, false);
+    for (auto mask = 1; mask < (1 << ways); ++mask)
+    {
+        for (auto k = 0; k < ways; ++k)
+            forced[k] = ((mask >> k) & 1) != 0;
+        auto const other = run_rounds(m, e, inputs, limits, forced, true);
+        // a way that meets more open conditions, or fails, is one this run does not bound
+        if (other.status != run_status::ok || other.explored > ways)
+            return run_rounds(m, e, inputs, limits, {}, false);
+        join_into(first, other, inputs);
+    }
+    return first;
+}
+
 namespace
 {
 /// The bytes `member_data` gives a leaf of `kind`: a word, and two for a 64-bit leaf, its low word first.
@@ -2216,6 +2323,24 @@ void read_leaves(cc::span<byte const> bytes, cc::span<scalar> leaves)
         leaf.bits = leaf.kind == value_kind::boolean ? u32(word != 0) : is_16_bit(leaf.kind) ? word & 0xffffu : word;
         if (is_64_bit(leaf.kind))
             leaf.high = word_at();
+    }
+}
+
+/// Gives each of `leaves` the range `bounds` holds for its first word, as `member_data::bounds` lays them out.
+void read_bounds(cc::span<f32 const> bounds, cc::span<scalar> leaves)
+{
+    auto word = isize(0);
+    for (auto& leaf : leaves)
+    {
+        auto const least = bounds[2 * word];
+        auto const most = bounds[2 * word + 1];
+        if (least == least && most == most)
+        {
+            leaf.is_ranged = true;
+            leaf.least = least;
+            leaf.most = most;
+        }
+        word += leaf_bytes(leaf.kind) / 4;
     }
 }
 
@@ -2362,6 +2487,8 @@ cc::result<run_inputs> sgl::check::resolve_inputs(checked_module const& m,
                 for (auto k = isize(0); k < bytes.size() / stride; ++k)
                     contents.leaves.push_back_range(element.leaves);
                 read_leaves(bytes, contents.leaves);
+                if (d != nullptr && d->bounds.size() * 2 == bytes.size())
+                    read_bounds(d->bounds.span(), contents.leaves);
                 inputs.buffers.push_back(cc::move(contents));
                 continue;
             }
@@ -2394,6 +2521,19 @@ void sgl::check::write_back(checked_module const& m, outcome const& o, driver_bi
         for (auto const& leaf : b.leaves)
             for (auto k = 0; k < leaf_bytes(leaf.kind); ++k)
                 d->mutable_bytes[at++] = byte(u8(leaf.wide_bits() >> (8 * k)));
+        if (d->bounds.size() * 2 != d->mutable_bytes.size())
+            continue;
+        auto word = isize(0);
+        auto const nan = cc::bit_cast<f32>(0x7fc0'0000u);
+        for (auto const& leaf : b.leaves)
+        {
+            for (auto k = isize(0); k < leaf_bytes(leaf.kind) / 4; ++k)
+            {
+                d->bounds[2 * (word + k)] = leaf.is_ranged ? leaf.least : nan;
+                d->bounds[2 * (word + k) + 1] = leaf.is_ranged ? leaf.most : nan;
+            }
+            word += leaf_bytes(leaf.kind) / 4;
+        }
     }
     for (auto const& image : o.images)
     {

@@ -60,6 +60,10 @@ struct sg_diff::output
     cc::vector<byte> bytes;
     /// Compared byte for byte whatever the file's tolerance, as an integer output must be, and committed as a hash.
     bool is_exact = false;
+    /// The interpreter's alone: two floats per 4-byte element, the least and the most a GPU may give for it under the
+    /// entry point's float level, around which the tolerance applies; two NaNs are the exact value, empty is every
+    /// element's, and `-inf` to `inf` is any value.
+    cc::vector<f32> bounds;
 };
 
 /// What a setup does with a corpus entry point: build its pipeline over the setup's module, fill the inputs, run it, read back.
@@ -89,6 +93,9 @@ struct sg_diff::known_divergence
     u32 vendor_id = 0;
     sg::backend_kind backend = sg::backend_kind::dx12;
     cc::string issue;
+    /// `precise` for a divergence the strict-floor twin shows, which the file's own level may not; empty for the file's
+    /// own level.
+    cc::string floor = {};
 };
 
 /// One corpus entry point, under the setup and tolerances its file's comment block states.
@@ -105,8 +112,9 @@ struct sg_diff::workload
     /// Its file's `known <vendor> <backend> <issue>` lines: a vendor's driver on a backend computes it wrongly, as the issue says.
     cc::vector<known_divergence> known;
 
-    /// The issue that explains a divergence on `ctx`, or nullptr where this file expects it to agree.
-    [[nodiscard]] known_divergence const* known_on(sg::context const& ctx) const;
+    /// The issue that explains a divergence on `ctx` at `floor`, empty for the file's own level, or nullptr where this
+    /// file expects it to agree there.
+    [[nodiscard]] known_divergence const* known_on(sg::context const& ctx, cc::string_view floor = {}) const;
 };
 
 /// Every compute entry point of the corpus package.
@@ -123,6 +131,9 @@ struct sg_diff::route
     cc::string name; ///< `dxc`, `native`, `wgsl` or `msl`
     sg::shader_format format;
     bool native = false;
+    /// The float guarantee the corpus entry point is compiled at as a floor, `precise` say, `slib::k_float_floor_option`'s;
+    /// empty for the level the entry point states.
+    cc::string float_floor = {};
 };
 
 /// What a setup is handed for one run: the corpus entry point compiled on the route, and the route, which the setup's own stages compile on too.
@@ -138,6 +149,9 @@ struct sg_diff::run_result
     cc::vector<output> outputs;
     /// Set where the native route fell back to DXC, which a comparison with the DXC route would hold to itself.
     cc::optional<cc::string> skipped;
+    /// The interpreter's alone: how many output elements it bounds by nothing, after a branch or an index it could not
+    /// decide, which any GPU result passes.
+    isize unbounded = 0;
 };
 
 /// What a setup binds for SGL's interpreter, which runs a dispatch one invocation after another.
@@ -187,12 +201,22 @@ bool register_setup(setup s);
 [[nodiscard]] cc::shared_async<run_result> run(sg::context* ctx, workload const* w, route r);
 
 /// Where `b` strays from `a` beyond `t`: one line per output that differs, naming the first elements that do.
+/// An element `a` bounds is held to its range, `t` measured from the nearer end.
 [[nodiscard]] cc::vector<cc::string> differences(run_result const& a, run_result const& b, tolerance t);
 
+/// The most of `t`'s measure any element of `b` takes to be held to `a`, from the nearer end of a range `a` bounds;
+/// 0 where `b` is `a`, or inside its ranges, everywhere.
+/// It is how much of a file's tolerance a comparison really uses, which says how far that tolerance could tighten.
+[[nodiscard]] double tolerance_used(run_result const& a, run_result const& b, tolerance t);
+
 /// `w` run on SGL's interpreter: the outputs, `skipped` where it cannot model the run, an error where the run fails.
-/// The interpreter takes no target's rounding, so it is a third opinion beside the GPUs and held to them at `across`.
+/// A bounding run, so each float output carries the range its entry point's float level allows a GPU (EVAL-6).
+/// A builtin's own precision and reassociation are not in those ranges, so a GPU is held to them at `across`.
 /// Built on `ctx` where the setup's half needs a device; called on its device home.
-[[nodiscard]] cc::result<run_result> interpreted(workload const& w, sg::context& ctx);
+/// `floor` raises the entry point's float level as a route's `float_floor` does.
+[[nodiscard]] cc::result<run_result> interpreted(workload const& w,
+                                                 sg::context& ctx,
+                                                 sgl::check::float_level floor = sgl::check::float_level::fast);
 
 /// The name of `w`'s file's committed reference, `integer_bits.ref` for `integer_bits.sgl`.
 [[nodiscard]] cc::string reference_name(workload const& w);
