@@ -6,6 +6,7 @@
 **Tracked by:** [bug-sr-bc7-two-subset-radv-aco-scheduler](../../../libs/graphics/shaped-rendering/docs/issues/bug-sr-bc7-two-subset-radv-aco-scheduler.md).
 
 The directory keeps the name it was filed under, from the BC7 encoder that found it; the encoder is not part of the reproduction any more.
+[mesa-issue.md](mesa-issue.md) is the upstream issue, ready to paste, with what to attach.
 
 ## The cause
 
@@ -63,9 +64,11 @@ That encoder, 2,452 lines of generated HLSL, is this entry's first version in gi
 
 ## Reproducing it
 
-    uv run run.py [--vulkan-sdk <dir>] [--vendor <hex PCI id>]
+    uv run run.py [--vulkan-sdk <dir>] [--vendor <hex PCI id>] [--prebuilt] [--ir <dir>]
 
 It compiles `shader.hlsl` with the SDK's `dxc`, checks it with `spirv-val`, builds `repro.cc` with clang against the SDK, and runs it twice.
+`shader.spv` is that compile, committed for a machine without DXC: `--prebuilt` runs it, and so does a machine with no SDK, building against the system's Vulkan.
+`--ir <dir>` writes each arm's `RADV_DEBUG=shaders` output there, the attachments the issue wants.
 Both runs set `RADV_DEBUG=nocache`; the second also sets `ACO_DEBUG=nosched`.
 It exits 1 when threads are wrong only with the scheduler on, and 0 when every thread is right.
 On the machine above it prints, the thread lists shortened:
