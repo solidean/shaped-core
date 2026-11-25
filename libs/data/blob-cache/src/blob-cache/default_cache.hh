@@ -1,6 +1,7 @@
 #pragma once
 
 #include <blob-cache/fwd.hh>
+#include <clean-core/memory/unique_ptr.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
 
@@ -59,5 +60,29 @@ struct bcache::scoped_default_cache
     scoped_default_cache& operator=(scoped_default_cache&&) = delete;
 
 private:
+    blob_cache* _previous = nullptr;
+};
+
+/// A test binary's own default cache for the scope of its run, at `<user cache dir>/shaped-core/tests/<name>.db`.
+///
+/// What a test binary's main installs around `nx::run`.
+/// The file outlives the run, so a binary's next run finds its shaders compiled, and no other binary or the user's cache shares it.
+/// `cache_mode_env_var` still applies: `off` installs a cache with no storage, and `temp` a file of this run's alone, removed after.
+/// Without threads it is a cache with no storage too, since a store's actor would be a pump still registered when nexus checks.
+/// The cache closes while it is still installed, so nothing late reaches another.
+struct bcache::scoped_test_cache
+{
+    explicit scoped_test_cache(cc::string_view name);
+    ~scoped_test_cache();
+
+    scoped_test_cache(scoped_test_cache const&) = delete;
+    scoped_test_cache(scoped_test_cache&&) = delete;
+    scoped_test_cache& operator=(scoped_test_cache const&) = delete;
+    scoped_test_cache& operator=(scoped_test_cache&&) = delete;
+
+private:
+    cc::unique_ptr<blob_cache> _cache;
+    /// The file the scope removes after, a `temp` run's alone.
+    cc::string _removed;
     blob_cache* _previous = nullptr;
 };

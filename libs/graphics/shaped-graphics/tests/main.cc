@@ -1,3 +1,4 @@
+#include <blob-cache/default_cache.hh>
 #include <nexus/run.hh>
 
 #ifdef SG_TEST_HAS_METAL
@@ -14,5 +15,6 @@ int main(int argc, char** argv)
     sg::backend::metal::arm_validation_layer();
 #endif
 
+    auto const cache = bcache::scoped_test_cache("shaped-graphics-test");
     return nx::run(argc, argv);
 }

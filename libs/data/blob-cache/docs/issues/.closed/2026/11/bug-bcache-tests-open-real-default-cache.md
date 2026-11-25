@@ -7,8 +7,8 @@ refs:
   - symbol: bcache::scoped_default_cache
   - test: shaped-rendering-test
   - test: shaped-viewer-test
-claimed-by: Claude (for Philip Trettner)
-claimed-at: 2026-11-25T19:46Z
+closed: 2026-11-25
+resolution: fixed
 ---
 
 # Test binaries that compile shaders open the real default cache, and keep it past the run

@@ -1,3 +1,4 @@
+#include <blob-cache/default_cache.hh>
 #include <nexus/run.hh>
 #include <shaped-graphics/backends/metal/metal_common.hh>
 
@@ -9,5 +10,6 @@ int main(int argc, char** argv)
     // abort is what stops a violation being a log line nobody reads.
     sg::backend::metal::arm_validation_layer();
 
+    auto const cache = bcache::scoped_test_cache("shaped-graphics-metal-test");
     return nx::run(argc, argv);
 }

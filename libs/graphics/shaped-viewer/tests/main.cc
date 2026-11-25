@@ -1,3 +1,4 @@
+#include <blob-cache/default_cache.hh>
 #include <nexus/run.hh>
 
 #if SV_TEST_HAS_METAL
@@ -31,5 +32,6 @@ int main(int argc, char** argv)
         });
 #endif
 
+    auto const cache = bcache::scoped_test_cache("shaped-viewer-test");
     return nx::run(argc, argv);
 }

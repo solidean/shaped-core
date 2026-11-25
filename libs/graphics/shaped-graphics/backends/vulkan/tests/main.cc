@@ -1,3 +1,4 @@
+#include <blob-cache/default_cache.hh>
 #include <clean-core/platform/leak_annotations.hh> // CC_HAS_LEAK_ANNOTATIONS — whether a LeakSanitizer is there to tell
 #include <nexus/run.hh>
 
@@ -18,5 +19,6 @@ extern "C" char const* __lsan_default_suppressions()
 
 int main(int argc, char** argv)
 {
+    auto const cache = bcache::scoped_test_cache("shaped-graphics-vulkan-test");
     return nx::run(argc, argv);
 }

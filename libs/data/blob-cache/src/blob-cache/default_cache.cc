@@ -1,6 +1,7 @@
 #include <blob-cache/blob_cache.hh>
 #include <blob-cache/default_cache.hh>
 #include <blob-cache/impl/cache_paths.hh>
+#include <clean-core/common/macros.hh>
 #include <clean-core/platform/environment.hh>
 #include <clean-core/platform/file_path.hh>
 #include <clean-core/string/format.hh>
@@ -77,5 +78,37 @@ scoped_default_cache::scoped_default_cache(blob_cache* cache) : _previous(g_inst
 scoped_default_cache::~scoped_default_cache()
 {
     g_installed.store(_previous);
+}
+
+scoped_test_cache::scoped_test_cache(cc::string_view name) : _previous(g_installed.load())
+{
+    auto const mode = cc::environment_variable(cache_mode_env_var);
+    if (!CC_HAS_THREADS || (mode.has_value() && mode.value() == "off"))
+        _cache = blob_cache::create_disabled();
+    else if (mode.has_value() && mode.value() == "temp")
+    {
+        _removed = cc::temp_file_path(name, ".db");
+        _cache = blob_cache::create({.path = _removed});
+    }
+    else
+    {
+        auto const directory = cc::format("{}/tests", default_cache_directory());
+        (void)impl::create_directories(directory);
+        _cache = blob_cache::create({.path = cc::format("{}/{}.db", directory, name)});
+    }
+    g_installed.store(_cache.get());
+}
+
+scoped_test_cache::~scoped_test_cache()
+{
+    _cache->close();
+    g_installed.store(_previous);
+    if (!_removed.empty())
+    {
+        // the WAL and shm siblings go with the file
+        (void)cc::remove_file(_removed);
+        (void)cc::remove_file(cc::format("{}-wal", _removed));
+        (void)cc::remove_file(cc::format("{}-shm", _removed));
+    }
 }
 } // namespace bcache

@@ -41,6 +41,9 @@ struct cache_limits;
 
 /// Installs a process-wide default cache for a scope and restores the previous one after.
 struct scoped_default_cache;
+
+/// Installs a test binary's own default cache for its run: warm across runs, apart from the user's cache.
+struct scoped_test_cache;
 } // namespace bcache
 
 // ---- identity ----------------------------------------------------------------------------------
