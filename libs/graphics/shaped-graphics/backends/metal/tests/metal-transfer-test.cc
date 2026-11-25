@@ -366,7 +366,7 @@ ASYNC_TEST("sg metal - concurrent submits on one buffer see each other's writes"
 // Off-frame uploads back to back, so the feedback handlers of the first run while later ones commit.
 // Each handler takes its staging buffer out of the residency set and releases it, on a queue Apple owns.
 // Metal's GPU validation layer reads that set inside every commit, which is where a staging buffer released mid-read
-// crashed it; see readme.md's "Running under Metal's GPU validation".
+// crashed it; see ../readme.md's "Running under Metal's GPU validation".
 // One buffer per upload, since uploads to one resource queue behind each other and would leave little to overlap.
 ASYNC_TEST("sg metal - async uploads commit while earlier ones settle")
 {

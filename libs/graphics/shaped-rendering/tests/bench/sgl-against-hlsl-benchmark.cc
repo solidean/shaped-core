@@ -27,8 +27,9 @@ using namespace cc::primitive_defines;
 
 // What sr ships in SGL against the hand-written HLSL each shader was ported from, in GPU time per dispatch.
 //
-// The HLSL under tests/bench/shaders is the shader as it stood before 733d3c4ed ported it, so each pair is one
-// kernel written twice by the same hand, which is the comparison readme.md's performance aspiration is about.
+// The HLSL under tests/bench/shaders is the shader as it stood before 733d3c4ed ported it.
+// So each pair is one kernel written twice by the same hand.
+// That is the comparison the performance aspiration in ../../../shaped-graphics-language/readme.md is about.
 // Both read the same inputs and write a target of the same format, and are dispatched with the same grid.
 //
 // The two of a pair alternate dispatch by dispatch, each bracketed by its own timestamps, so a GPU whose clocks drift
