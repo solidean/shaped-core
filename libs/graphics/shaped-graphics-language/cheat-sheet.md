@@ -484,6 +484,12 @@ o.sites                                    // site_tally { passed, failed } para
                                            // both zero: the run never reached that check
 {.stop = &flag}                            // run_limits: a raised cc::atomic<bool> ends the run as `stopped`, read every
                                            // 4096 steps; how an editor abandons a test whose document changed
+{.bounds_floats = true}                    // a bounding run: each float leaf's .least / .most is what a GPU may give under
+                                           // the entry point's @float level (EVAL-6); .float_floor raises that level
+leaf.is_ranged  leaf.is_unbounded()        // a range beside the exact bits; -inf..inf is any value; points stay unranged
+o.explored  o.undecided                    // open conditions run both ways and joined; ones past that, after which stores
+                                           // are unbounded
+member_data{.mutable_bytes = b, .bounds = r}  // r: two floats per word, NaN NaN is exact; write_back fills, resolve reads
 o == other                                 // status, result and trace; NOT the detail
 sgl::check::zero_value(m, type)  sgl::check::leaf_count_of(m, type)   // a value is its scalars in field order; mat4 is 16
 sgl::check::scalar::of(0.5f)  .as_float()  .as_int()  .as_bool()      // equality is on the BITS

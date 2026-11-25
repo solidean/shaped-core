@@ -402,3 +402,26 @@ TEST("sgl emulated trace - moving vertices in a moving instance take the same ti
                             "    i.kind == hit_kind.triangle and is_near(i.t, 6.0)\n")
           == "");
 }
+
+TEST("sgl emulated trace - a bounding run takes a trace exactly, as a device's own trace is its own precision")
+{
+    auto output = cc::pinned_data<byte>::create_filled(8, byte(0));
+    auto bounds = cc::pinned_data<f32>::create_filled(4, cc::bit_cast<f32>(0x7fc0'0000u));
+    auto bindings = bindings_of(build_scenes());
+    bindings.groups.push_back({.name = "io",
+                               .members = {{.name = "input", .bytes = floats(0.3f, 0.7f)},
+                                           {.name = "output", .mutable_bytes = output, .bounds = bounds}}});
+    auto source = cc::string(k_declarations);
+    // 0.3 * 0.7 is no float, so a contraction may keep it unrounded, and the ray's x is ranged
+    source += "binding io:\n    input: buffer[float]\n    output: mut buffer[float]\n"
+              "test {scenes, io}:\n"
+              "    let x = io.input[0] * io.input[1]\n"
+              "    let h = scenes.pair.trace(along_z(x, 0.25))\n"
+              "    io.output[0] = x\n"
+              "    io.output[1] = h.t\n"
+              "    h.is_hit\n";
+    CHECK(driven_failures_of(source, bindings, {.bounds_floats = true}) == "");
+    CHECK(bounds[0] < bounds[1]);
+    CHECK(float_at(output, 1) == 3.0f);
+    CHECK(bounds[2] != bounds[2]);
+}

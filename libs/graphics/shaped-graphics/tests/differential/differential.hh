@@ -60,6 +60,10 @@ struct sg_diff::output
     cc::vector<byte> bytes;
     /// Compared byte for byte whatever the file's tolerance, as an integer output must be, and committed as a hash.
     bool is_exact = false;
+    /// The interpreter's alone: two floats per 4-byte element, the least and the most a GPU may give for it under the
+    /// entry point's float level, around which the tolerance applies; two NaNs are the exact value, empty is every
+    /// element's, and `-inf` to `inf` is any value.
+    cc::vector<f32> bounds;
 };
 
 /// What a setup does with a corpus entry point: build its pipeline over the setup's module, fill the inputs, run it, read back.
@@ -138,6 +142,9 @@ struct sg_diff::run_result
     cc::vector<output> outputs;
     /// Set where the native route fell back to DXC, which a comparison with the DXC route would hold to itself.
     cc::optional<cc::string> skipped;
+    /// The interpreter's alone: how many output elements it bounds by nothing, after a branch or an index it could not
+    /// decide, which any GPU result passes.
+    isize unbounded = 0;
 };
 
 /// What a setup binds for SGL's interpreter, which runs a dispatch one invocation after another.
@@ -187,10 +194,12 @@ bool register_setup(setup s);
 [[nodiscard]] cc::shared_async<run_result> run(sg::context* ctx, workload const* w, route r);
 
 /// Where `b` strays from `a` beyond `t`: one line per output that differs, naming the first elements that do.
+/// An element `a` bounds is held to its range, `t` measured from the nearer end.
 [[nodiscard]] cc::vector<cc::string> differences(run_result const& a, run_result const& b, tolerance t);
 
 /// `w` run on SGL's interpreter: the outputs, `skipped` where it cannot model the run, an error where the run fails.
-/// The interpreter takes no target's rounding, so it is a third opinion beside the GPUs and held to them at `across`.
+/// A bounding run, so each float output carries the range its entry point's float level allows a GPU (EVAL-6).
+/// A builtin's own precision and reassociation are not in those ranges, so a GPU is held to them at `across`.
 /// Built on `ctx` where the setup's half needs a device; called on its device home.
 [[nodiscard]] cc::result<run_result> interpreted(workload const& w, sg::context& ctx);
 

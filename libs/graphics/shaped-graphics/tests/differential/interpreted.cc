@@ -1,5 +1,6 @@
 #include "differential.hh"
 
+#include <clean-core/math/bit.hh>
 #include <clean-core/streams/file_stream.hh>
 #include <clean-core/string/format.hh>
 #include <nexus/source_root.hh>
@@ -54,6 +55,18 @@ struct setup_library
     return library;
 }
 
+/// What `sg_diff::output::bounds` holds for an element the interpreter gives exactly.
+f32 const k_nan = cc::bit_cast<f32>(0x7fc0'0000u);
+
+/// How many elements of `bounds`, laid out as `sg_diff::output::bounds`, any value passes.
+[[nodiscard]] isize unbounded_in(cc::span<f32 const> bounds)
+{
+    auto count = isize(0);
+    for (auto i = isize(0); i + 1 < bounds.size(); i += 2)
+        count += bounds[i] < -3.4e38f ? 1 : 0;
+    return count;
+}
+
 /// Sets `v`'s first `parts.size()` scalars, each of the kind its type gives it.
 void fill_value(sgl::check::value& v, cc::span<i64 const> parts)
 {
@@ -76,6 +89,7 @@ cc::result<sg_diff::run_result> pixels_interpreted(sg_diff::workload const& w,
 
     auto const leaves_per_pixel = leaf_count_of(m, e.result);
     auto texels = cc::vector<u32>::create_filled(half.extent * half.extent * leaves_per_pixel, 0u);
+    auto bounds = cc::vector<f32>::create_filled(2 * texels.size(), k_nan);
     auto scalars = cc::vector<f32>::create_filled(leaf_count_of(m, e.input), 0.0f);
     for (auto qy = isize(0); qy < half.extent; qy += 2)
         for (auto qx = isize(0); qx < half.extent; qx += 2)
@@ -94,7 +108,7 @@ cc::result<sg_diff::run_result> pixels_interpreted(sg_diff::workload const& w,
                 inputs.value().lane_parameters.push_back(cc::move(v));
             }
 
-            auto const o = interpret(m, e, inputs.value());
+            auto const o = interpret(m, e, inputs.value(), {.bounds_floats = true});
             if (o.status != run_status::ok)
                 return cc::error(cc::format("{} {}: the quad at ({}, {}) ends {}: {}", w.file, w.entry, qx, qy,
                                             to_string(o.status), o.detail));
@@ -105,13 +119,23 @@ cc::result<sg_diff::run_result> pixels_interpreted(sg_diff::workload const& w,
                 auto const pixel = (qy + lane / 2) * half.extent + qx + lane % 2;
                 auto const& leaves = o.lane_results[lane].leaves;
                 for (auto k = isize(0); k < leaves_per_pixel && k < leaves.size(); ++k)
-                    texels[pixel * leaves_per_pixel + k] = leaves[k].bits;
+                {
+                    auto const at = pixel * leaves_per_pixel + k;
+                    texels[at] = leaves[k].bits;
+                    if (leaves[k].is_ranged)
+                    {
+                        bounds[2 * at] = leaves[k].least;
+                        bounds[2 * at + 1] = leaves[k].most;
+                    }
+                }
             }
         }
 
     auto result = sg_diff::run_result();
+    result.unbounded = unbounded_in(bounds);
     result.outputs.push_back({.name = half.outputs.empty() ? cc::string("color") : half.outputs[0].name,
-                              .bytes = cc::vector<byte>::create_copy_of(cc::span<u32 const>(texels).as_bytes())});
+                              .bytes = cc::vector<byte>::create_copy_of(cc::span<u32 const>(texels).as_bytes()),
+                              .bounds = cc::move(bounds)});
     return result;
 }
 } // namespace
@@ -149,6 +173,16 @@ cc::result<sg_diff::run_result> sg_diff::interpreted(workload const& w, sg::cont
     if (e->entry_stage == stage::pixel)
         return pixels_interpreted(w, m, *e, half);
     auto const width = i64(e->workgroup[0] > 0 ? e->workgroup[0] : 1);
+    // each output's ranges, carried from one invocation to the next beside its bytes
+    for (auto& g : half.bindings.groups)
+        for (auto& d : g.members)
+            for (auto const& out : half.outputs)
+                if (!d.mutable_bytes.empty() && d.mutable_bytes.data() == out.bytes.data())
+                {
+                    d.bounds = cc::pinned_data<f32>::create_defaulted(out.bytes.size() / 2);
+                    for (auto& b : d.bounds)
+                        b = k_nan;
+                }
     for (auto i = i64(0); i < i64(half.threads); ++i)
     {
         auto inputs = resolve_inputs(m, *e, half.bindings);
@@ -178,7 +212,7 @@ cc::result<sg_diff::run_result> sg_diff::interpreted(workload const& w, sg::cont
             inputs.value().stage_inputs.push_back(cc::move(v));
         }
 
-        auto const o = interpret(m, *e, inputs.value());
+        auto const o = interpret(m, *e, inputs.value(), {.bounds_floats = true});
         if (o.status != run_status::ok)
             return cc::error(
                 cc::format("{} {}: invocation {} ends {}: {}", w.file, w.entry, i, to_string(o.status), o.detail));
@@ -189,6 +223,14 @@ cc::result<sg_diff::run_result> sg_diff::interpreted(workload const& w, sg::cont
 
     auto result = run_result();
     for (auto const& out : half.outputs)
-        result.outputs.push_back({.name = out.name, .bytes = cc::vector<byte>::create_copy_of(out.bytes)});
+    {
+        auto made = sg_diff::output{.name = out.name, .bytes = cc::vector<byte>::create_copy_of(out.bytes)};
+        for (auto const& g : half.bindings.groups)
+            for (auto const& d : g.members)
+                if (!d.bounds.empty() && d.mutable_bytes.data() == out.bytes.data())
+                    made.bounds = cc::vector<f32>::create_copy_of(d.bounds.span());
+        result.unbounded += unbounded_in(made.bounds);
+        result.outputs.push_back(cc::move(made));
+    }
     return result;
 }

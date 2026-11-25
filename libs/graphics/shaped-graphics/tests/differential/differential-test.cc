@@ -292,6 +292,9 @@ ASYNC_TEST("sg differential - every corpus entry point computes on the GPU what 
             continue;
         }
         ++interpreted;
+        if (oracle.value().unbounded > 0)
+            CC_LOG_INFO("differential: {} {}: the interpreter bounds {} output elements by nothing", w.file, w.entry,
+                        oracle.value().unbounded);
         for (auto const& c : configurations)
         {
             auto const result = co_await sg_diff::run(c.ctx.get(), &w, c.route);

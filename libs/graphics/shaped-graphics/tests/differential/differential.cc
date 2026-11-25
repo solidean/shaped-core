@@ -69,6 +69,19 @@ constexpr isize k_named_elements = 4;
     return (delta < 0 ? -delta : delta) <= t.amount * scale;
 }
 
+/// Whether `b` is within `t` of the range `least` to `most`; a range with an infinite end bounds nothing.
+[[nodiscard]] bool within_range(f32 least, f32 most, u32 b, sg_diff::tolerance t)
+{
+    if (least - least != 0.0f || most - most != 0.0f)
+        return true;
+    if (is_nan_bits(b))
+        return false;
+    auto const fb = cc::bit_cast<f32>(b);
+    if (fb >= least && fb <= most)
+        return true;
+    return within(cc::bit_cast<u32>(fb < least ? least : most), b, t);
+}
+
 [[nodiscard]] cc::string text_of(u32 bits, sg_diff::tolerance t)
 {
     if (t.kind == sg_diff::tolerance::measure::exact)
@@ -386,13 +399,17 @@ cc::vector<cc::string> sg_diff::differences(run_result const& a, run_result cons
         auto const* const ys = reinterpret_cast<u32 const*>(y.bytes.data());
         auto named = cc::string();
         auto differing = isize(0);
+        auto const is_bounded = x.bounds.size() == 2 * count;
         for (auto e = isize(0); e < count; ++e)
         {
-            if (within(xs[e], ys[e], kept))
+            auto const least = is_bounded ? x.bounds[2 * e] : 0.0f;
+            auto const most = is_bounded ? x.bounds[2 * e + 1] : 0.0f;
+            auto const is_ranged = is_bounded && least == least && most == most;
+            if (is_ranged ? within_range(least, most, ys[e], kept) : within(xs[e], ys[e], kept))
                 continue;
             if (differing < k_named_elements)
-                named.appendf("{}[{}] {} against {}", named.empty() ? "" : ", ", e, text_of(ys[e], kept),
-                              text_of(xs[e], kept));
+                named.appendf("{}[{}] {} against {}{}", named.empty() ? "" : ", ", e, text_of(ys[e], kept),
+                              text_of(xs[e], kept), is_ranged ? cc::format(" within [{}, {}]", least, most) : "");
             ++differing;
         }
         if (differing > 0)
