@@ -180,7 +180,9 @@ ctx.set_hit_record_checks(bool)                    // dispatch_rays checks the h
 ctx.threading()                                    // sg::thread_model — which ops are concurrency-safe
 ctx.is_on_device_thread()                          // -> bool; may this thread make a bound call (always true under multi_threaded)
 ctx.device_home()                                  // cc::async_scheduler* — where sg's asyncs move before touching the device; main under main_thread
-ctx.metrics.adapter()                              // sg::adapter_info const& — { name, vendor_id, device_id, driver_version, luid, is_software }, fixed at creation
+ctx.metrics.adapter()                              // sg::adapter_info const& — { name, vendor_id, device_id, driver_version, driver_name, driver_info, luid, is_software }, fixed at creation
+ctx.metrics.adapter().driver_name                  // cc::string — vulkan's driverName ("radv", "NVIDIA"); empty on dx12, metal, webgpu
+ctx.metrics.adapter().driver_info                  // cc::string — vulkan's driverInfo ("Mesa 26.2.0-devel (git-…)"); free text, match a prefix, never parse
 ctx.metrics.adapter().luid                         // optional<u64> — the GPU's id across dx12, vulkan and XR runtimes; Windows only, never persist it
                                                    // driver_version is OPAQUE: compare for equality, never parse. Empty = unknown. Key any driver-produced blob on this
 ctx.metrics.adapter().dedicated_video_memory_bytes // optional<i64> — what the BOARD has; 0 is real on an integrated GPU
@@ -316,6 +318,14 @@ metal_ctx.wrap_metal_texture(MTL::Texture*, desc)  // -> result<metal_texture_ha
 //   it must be activated before the process's FIRST device: a later activation is refused, because performing it
 //   resets the adapter on some NVIDIA drivers (DXGI_ERROR_DEVICE_RESET on a healthy GPU). ask on the first context.
 // create errors on environment failure (no adapter, device refused); misuse asserts
+```
+
+```cpp
+#include <shaped-graphics/context/known_issues.hh>   // driver bugs docs/bugs-external reproduces, as sg recognizes them
+sg::known_issue_affecting(ctx, "<id>")            // known_issue const* — the entry when it affects ctx, else nullptr; an unknown id asserts
+sg::known_issues()                                 // span<known_issue const> — every entry: { id, symptom, affects(ctx) }
+if (auto const* issue = sg::known_issue_affecting(ctx, "radv-aco-scheduler-wrong-bc7-indices"))
+    nx::skip_known_issue(issue->id, issue->symptom); // how a test skips for one; `dev.py test --known-issues` tries it anyway
 ```
 
 ## exceptions — thrown by the create_* façades + submit/advance  (see docs/error-handling.md)

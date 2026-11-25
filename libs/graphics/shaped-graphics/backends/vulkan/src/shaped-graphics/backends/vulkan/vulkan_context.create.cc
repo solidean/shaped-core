@@ -288,7 +288,8 @@ cc::optional<selected_physical_device> chosen_physical_device(VkPhysicalDevice d
 
 void log_adapter(sg::adapter_info const& info)
 {
-    CC_LOG_INFO("vulkan context on '{}', driver {}", info.name, info.driver_version);
+    CC_LOG_INFO("vulkan context on '{}', {} {} (driver {})", info.name, info.driver_name, info.driver_info,
+                info.driver_version);
 }
 
 // Appends each name of `extra` that `enabled` does not hold yet, terminated in place so `enabled` can point into it.
@@ -331,9 +332,12 @@ sg::adapter_info describe_adapter(VkPhysicalDevice device)
     info.driver_version = cc::format("{}", props.driverVersion);
     info.is_software = props.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU;
 
-    auto ids = VkPhysicalDeviceIDProperties{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES};
+    auto driver = VkPhysicalDeviceDriverProperties{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES};
+    auto ids = VkPhysicalDeviceIDProperties{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES, .pNext = &driver};
     auto props2 = VkPhysicalDeviceProperties2{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, .pNext = &ids};
     vkGetPhysicalDeviceProperties2(device, &props2);
+    info.driver_name = cc::string(driver.driverName);
+    info.driver_info = cc::string(driver.driverInfo);
     if (ids.deviceLUIDValid == VK_TRUE)
     {
         static_assert(VK_LUID_SIZE == sizeof(u64));
