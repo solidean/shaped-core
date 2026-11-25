@@ -337,6 +337,12 @@ if(SC_BUILD_TESTS)
     if(APPLE AND TARGET shaped-graphics-metal)
         set(_sv_test_metal ON)
     endif()
+    # Where neither runs, the cross-backend trace test still holds SGL's SPIR-V to DXC's on a vulkan device of its own.
+    if(NOT _sv_test_dx12 AND NOT _sv_test_metal AND SC_HAS_DXC_COMPILER AND TARGET shaped-graphics-vulkan)
+        target_sources(shaped-viewer-test PRIVATE tests/cross-backend-trace-test.cc)
+        target_link_libraries(shaped-viewer-test PRIVATE shaped-graphics-vulkan)
+        target_compile_definitions(shaped-viewer-test PRIVATE SV_TEST_HAS_VULKAN=1)
+    endif()
 
     if(_sv_test_dx12 OR _sv_test_metal)
         target_sources(shaped-viewer-test PRIVATE

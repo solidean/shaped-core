@@ -82,7 +82,7 @@ namespace sv_test
 {
 
 /// The one shader library for this test binary — sv's own, reached through the same hook a viewer uses.
-/// `has_compiler` says whether SGL reaches this platform's backend here: DXIL, which needs DXC, or Metal.
+/// `has_compiler` says whether SGL reaches this platform's backend here: DXIL, which needs DXC, Metal, or SPIR-V.
 /// A caller SKIPs without it, since nothing compiles.
 ///
 /// Built by `sv::impl::acquire_default_shader_library`, so a test compiles through exactly what a viewer compiles through rather
@@ -93,7 +93,8 @@ inline env const& shared_env()
     {
         auto lib = sv::acquire_shader_library();
         CC_ASSERT(lib.has_value(), "the default shader library must come up for the GPU tests");
-        for (auto const format : {sg::shader_format::dxil, sg::shader_format::metal_lib, sg::shader_format::msl})
+        for (auto const format :
+             {sg::shader_format::dxil, sg::shader_format::metal_lib, sg::shader_format::msl, sg::shader_format::spirv})
             if (lib.value()->can_compile(slib::shader_language::sgl, format))
                 return env{.lib = lib.value(), .has_compiler = true, .format = format};
         return env{.lib = lib.value()};

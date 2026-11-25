@@ -17,3 +17,9 @@ Both routes default to SGL's binary there, so AMD's vulkan `cutout` disagrees wi
 Likely suspects are what differs between the two modules there: the LOD the any-hit samples at, the comparison's float flags, or how `ignore_hit` lowers.
 `native-parity.py diff` on the viewer's cutout any-hit is the first step; nothing has been compared yet.
 This is SGL's to fix or to explain, since both routes run one source on one driver.
+
+## Log
+
+2026-11-25: it does not reproduce on RADV (Steam Deck, RDNA 2, Mesa's ACO), now that the test also builds on Linux with vulkan alone.
+`--thorough`, every case on the native SPIR-V route agrees with DXC's: cutout differs in 64 of 2304 pixels, by up to 2.8e-7 absolute and 1.5e-6 relative.
+So the same SPIR-V traces alike on another RDNA 2 compiler, which points at AMD's own Windows compiler rather than at what SGL writes; the module diff is still the next step.

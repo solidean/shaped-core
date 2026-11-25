@@ -12,8 +12,10 @@
 #include <shaped-viewer/all.hh>
 #include <typed-geometry/scalar/scalar.hh> // tg::abs
 
+#if SV_TEST_HAS_DX12
+#include <shaped-graphics/backends/dx12/dx12_context.hh> // sg::create_dx12_context, the reference beside vulkan
+#endif
 #if SV_TEST_HAS_VULKAN
-#include <shaped-graphics/backends/dx12/dx12_context.hh>     // sg::create_dx12_context, the reference beside vulkan
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh> // sg::create_vulkan_context
 #endif
 
@@ -560,6 +562,8 @@ constexpr trace_case default_cases[] = {trace_case::cutout};
 }
 } // namespace
 
+// an entry driver per backend invokes it, which a build with vulkan alone has none of
+#if SV_TEST_HAS_DX12 || SV_TEST_HAS_METAL
 ASYNC_INVOCABLE_TEST("sv::pathtrace_routine - every material spelling traces a lit, finite image",
                      (sg::context_handle const& ctx_h))
 {
@@ -574,6 +578,7 @@ ASYNC_INVOCABLE_TEST("sv::pathtrace_routine - every material spelling traces a l
         CHECK(mean > 0.05f).context(cc::format("{}: the scene is lit, or nothing traced; mean {}", name_of(c), mean));
     }
 }
+#endif
 
 #if SV_TEST_HAS_VULKAN
 // The same scenes on vulkan, whose context this test brings up itself: sv's other GPU tests are dx12's alone.
@@ -591,11 +596,16 @@ ASYNC_TEST("sv vulkan - the path tracer traces what it traces on dx12, to roundi
     if (auto const reason = cannot_trace(*ctx.value()); reason.has_value())
         SKIP(reason.value());
 
+    auto reference = cc::optional<sg::context_handle>();
+#if SV_TEST_HAS_DX12
     // The debug layer has to be active before the process's first dx12 device, and this test may race dx12-entry.cc's
     // drivers to it, so the reference asks for the layer exactly as they do.
-    auto reference = sg::create_dx12_context(
+    auto made = sg::create_dx12_context(
         {.activate_global_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::hardware});
-    auto const has_reference = reference.has_value() && !cannot_trace(*reference.value()).has_value();
+    if (made.has_value() && !cannot_trace(*made.value()).has_value())
+        reference.emplace_value(made.value());
+#endif
+    auto const has_reference = reference.has_value();
     auto resources = sv::gpu_resource_manager::create(*ctx.value());
     auto reference_resources = cc::optional<sv::gpu_resource_manager>();
     if (has_reference)
@@ -655,12 +665,14 @@ ASYNC_TEST("sv - the path tracer through SGL's binary traces what DXC's traces, 
 {
     if (nx::is_smoke())
         SKIP("a smoke run: the default preset holds the routes to each other");
+#if SV_TEST_HAS_DX12
     auto dx12_reference = sg::create_dx12_context(
         {.activate_global_debug_layer = true, .native_dxil = false, .adapter = sg::backend::dx12::dx12_adapter::hardware});
     auto dx12_native = sg::create_dx12_context(
         {.activate_global_debug_layer = true, .native_dxil = true, .adapter = sg::backend::dx12::dx12_adapter::hardware});
     if (dx12_reference.has_value() && dx12_native.has_value() && !cannot_trace(*dx12_native.value()).has_value())
         co_await held_to_dxc(dx12_native.value(), dx12_reference.value(), "DXIL");
+#endif
 
     auto vulkan_reference = sg::create_vulkan_context({.enable_validation_layers = true, .native_spirv = false});
     auto vulkan_native = sg::create_vulkan_context({.enable_validation_layers = true, .native_spirv = true});
