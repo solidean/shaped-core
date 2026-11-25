@@ -16,6 +16,7 @@ Kept out of `dev.py test`, which drives the C++ nexus suites; this is Python too
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import tempfile
@@ -58,7 +59,13 @@ if sys.platform == "win32":
             holders = file_holders.holders_of(held) or []
             check(any(Path(h.path).name.lower().startswith("python") for h in holders),
                   f"a python is named among {holders}")
-            check(all(h.parent for h in holders), f"each holder names what started it: {holders}")
+            check(all(h.ancestors for h in holders), f"each holder names what started it: {holders}")
+            # this test is among the child's ancestors, so the chain reaches past the child's own starter
+            check(any(any(a.pid == os.getpid() for a in h.ancestors) for h in holders),
+                  f"the chain reaches the process that started the child: {holders}")
+            check(any(h.command and "held.bin" in h.command for h in holders), f"the holder's command line is named: {holders}")
+            described = "\n".join(file_holders.describe(h) for h in holders)
+            check(described.count("<-") >= 1, f"describe prints the chain: {described}")
         finally:
             child.stdin.close()
             child.wait()

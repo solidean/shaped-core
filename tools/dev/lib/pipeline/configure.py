@@ -129,11 +129,22 @@ def configure(
     """
     results: list[StepResult] = []
     for preset in presets:
-        if not force and fingerprint.is_current(preset.build_dir, root):
+        if not force and _is_current(preset, root):
             ui.write_line(console.dim(f"configure: fingerprint unchanged for {preset.name!r}, skipping"))
             continue
         results.append(_configure_one(preset, root=root, mirror=mirror, verbose=verbose, emsdk_path=emsdk_path))
     return results
+
+
+def _is_current(preset: Preset, root: Path) -> bool:
+    """Whether `preset` needs no configure: its fingerprint matches, and a cross build runs the deployed host `sgl`."""
+    if not fingerprint.is_current(preset.build_dir, root):
+        return False
+    if not preset.is_cross_compiling:
+        return True
+    from .host_tools import is_tool_current
+
+    return is_tool_current(preset.build_dir, root)
 
 
 def ensure_configured(
@@ -144,7 +155,7 @@ def ensure_configured(
 
     Returns the result, or None when the configure was skipped.
     """
-    if fingerprint.is_current(preset.build_dir, root):
+    if _is_current(preset, root):
         return None
     return _configure_one(preset, root=root, mirror=mirror, verbose=verbose, emsdk_path=emsdk_path)
 
@@ -160,7 +171,7 @@ def ensure_configured_all(
     The configures are independent — separate build dirs, separate CMakeFiles/CMakeTmp for try_compile — and CMake is single-threaded, so running them at once is close to free next to the serial cost.
     Two things are deliberately NOT concurrent: the prerequisite fetches, which share extern/, and publishing build/compile_commands.json, which is one shared file and must land deterministically.
     """
-    stale = [p for p in presets if not fingerprint.is_current(p.build_dir, root)]
+    stale = [p for p in presets if not _is_current(p, root)]
     if not stale:
         return []
 
