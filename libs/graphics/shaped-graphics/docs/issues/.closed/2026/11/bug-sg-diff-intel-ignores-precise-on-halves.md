@@ -4,6 +4,8 @@ refs:
   - file: libs/graphics/shaped-shader-library/src/shaped-shader-library/shader_asset.cc
   - test: "sg differential - a compile at a precise floor keeps the floor through slib"
   - issue: bug-sg-diff-half-corpus-fails-on-intel
+closed: 2026-11-25
+resolution: fixed
 ---
 
 # Intel's Arc keeps half operations at a float's precision under a precise floor, on dx12 and vulkan alike
