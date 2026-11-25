@@ -375,7 +375,7 @@ cc::shared_async<sg_diff::run_result> sg_diff::run(sg::context* ctx, workload co
             co_return run_result{.skipped
                                  = cc::format("this context lacks {}, which {} requires", sg::to_string(f), w->file)};
     auto const shader = co_await compiled_on(*ctx, r, *w->asset);
-    // the bytecode each route ran, to run in a standalone reproduction (differential-testing.md)
+    // the bytecode each route ran, to run in a standalone reproduction (../../docs/differential-testing.md)
     if (auto const dir = cc::environment_variable("SC_DIFFERENTIAL_SHADER_DUMP"); dir.has_value())
         if (auto f = cc::file_write_stream_adapter::create(cc::format(
                 "{}/{}-{}-{}{}.bin", dir.value(), w->entry, ctx->backend() == sg::backend_kind::dx12 ? "dx12" : "vulkan",

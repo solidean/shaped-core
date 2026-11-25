@@ -18,7 +18,7 @@ On the Arc B580, driver 32.0.101.9150, all three differential tests failed on th
 
 - **`half_math.sgl` on dx12, DXC and native routes alike:** 1023 of 1024 elements differ from the interpreter and from `half_math.ref`.
   `(x as half) as float` comes back as `0x3efe7280` where a half holds `0x3efe8000`: the value never lost a float's precision.
-- **Confirmed the driver's, standalone:** [intel-float-half-round-trip-folds-away](../../../../docs/bugs-external/intel-float-half-round-trip-folds-away/readme.md).
+- **Confirmed the driver's, standalone:** [intel-float-half-round-trip-folds-away](../../../../../docs/bugs-external/intel-float-half-round-trip-folds-away/readme.md).
   On D3D12 the cast pair comes back unrounded for all 256 inputs, under `-Gis` too, from DXIL on which WARP rounds every one.
   `f32tof16` and `f16tof32` do round there, toward zero as WARP's casts do.
   Intel's vulkan driver folds the other spelling, `PackHalf2x16` and `UnpackHalf2x16`, which SGL never writes.
