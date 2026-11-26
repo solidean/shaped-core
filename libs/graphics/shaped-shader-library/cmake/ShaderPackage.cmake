@@ -235,10 +235,10 @@ function(sc_add_shader_package)
             message(FATAL_ERROR
                 "sc_add_shader_package(${PKG_NAME}): an SGL package needs a runnable `sgl`, and this "
                 "build compiles for another machine. Set SC_SGL_TOOL to a natively built one.")
-        elseif(NOT SC_BUILD_TOOLS)
+        elseif(NOT SC_BUILD_TOOLS AND NOT SC_BUILD_SGL)
             message(FATAL_ERROR
                 "sc_add_shader_package(${PKG_NAME}): an SGL package needs `sgl`, which "
-                "SC_BUILD_TOOLS=OFF does not build. Set SC_SGL_TOOL to one.")
+                "this build does not build. Set SC_BUILD_SGL to ON, or SC_SGL_TOOL to one built elsewhere.")
         else()
             # A target defined after this call, which is legal: the generator expression and the edge resolve at generate time.
             set(_sgl_args --sgl-tool "$<TARGET_FILE:sgl>")

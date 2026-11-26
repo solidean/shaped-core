@@ -93,6 +93,8 @@ The generated `dev.py` is policy only; every command is shaped-core's.
 The graphics stack builds in a project as in shaped-core, with a few lines of its own:
 
 - **`SC_LIBRARIES` names the top it uses**, `shaped-rendering` or `shaped-viewer`, which bring shaped-graphics, the shader library and SGL with them.
+- **`SC_BUILD_SGL` is ON**: every SGL shader package, shaped-rendering's own among them, compiles with the `sgl` tool at build time, and a consuming project builds no tools otherwise.
+  Configure refuses an SGL package without it.
 - **A backend is a target to link**, `shaped-graphics-dx12`, `-vulkan`, `-metal` or `-webgpu`, each present only where it builds: test for it with `if(TARGET ...)`.
   `SC_HAS_DXC_COMPILER` and `SC_HAS_METAL_COMPILER` say whether the compiler behind an SGL package exists.
 - **Shaders are a package on the executable**: `sc_add_shader_package(TARGET <exe> NAME <pkg> NAMESPACE shaders SOURCE_DIR shaders LANGUAGE sgl SHADERS <file>.sgl:*)`.

@@ -51,6 +51,8 @@ class Policy:
     # The `check` registry, `(ctx, standard, *, memo, all_presets) -> list[Check]` over cmd/check.py's standard gates by name.
     # None runs every standard gate in order, which is what a project with no gates of its own wants.
     checks: Callable[..., list] | None = None
+    # The project's own prerequisites, ensured before every configure after shaped-core's (lib/pipeline/prereqs.py).
+    prerequisites: tuple[dev.Prerequisite, ...] = ()
 
 
 @dataclass
@@ -68,6 +70,8 @@ class Context:
         # Every binary a command starts finds the source tree's data here (nexus/source_root.hh), not in a path compiled in;
         # `dev.py test` names it again for each binary it runs.
         os.environ["SC_SOURCE_ROOT"] = str(self.root)
+        # The configure pipeline and its fingerprint read them without a Policy in reach.
+        dev.register_project_prerequisites(self.policy.prerequisites)
 
     def die(self, msg: str) -> None:
         print(console.red(f"ERROR: {msg}"), file=sys.stderr)

@@ -9,6 +9,9 @@ Zydis and the FSR sources are Windows-only, and DXC is fetched on Windows and Li
 SDL3, SQLite and the OIDN weights run everywhere, which is what makes a cold Linux or macOS configure do real work.
 An `install: on-request` dependency has no `ensure_*` here at all: a person runs its fetch script by hand, and OIDN itself is one.
 Each dep's own docs own its pin, its size and what is missing without it — for Zydis that is tools/instruction-tracer/readme.md, not a libs/ doc.
+
+A project consuming shaped-core adds its own through `Policy.prerequisites`, which run after these at the same points.
+Each also contributes to the configure fingerprint, since a project's inputs (a path in its dev.toml, a file outside its tree) are none the fingerprint walks.
 """
 
 from __future__ import annotations
@@ -17,12 +20,50 @@ import os
 import platform
 import shutil
 import subprocess
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 from ..core import profile, ui
 from ..core.layout import DRIVER_ROOT
 from ..core.process import emsdk_env
 from ..project.pins import is_current
+
+@dataclass(frozen=True)
+class Prerequisite:
+    """A project's own prerequisite, brought up to date before every configure as shaped-core's are."""
+
+    name: str
+    # Called with (root, preset name) before each stale preset configures, serially, never concurrently with another.
+    # A failure is the prerequisite's own to report: it must not raise, and configure proceeds without it.
+    ensure: Callable[[Path, str], None]
+    # A short string over whatever the install is made from, mixed into the configure fingerprint, so a change to it reconfigures.
+    # Runs on every fingerprint check, so it must be cheap — a stat, never a hash of a large file — and must not raise.
+    fingerprint: Callable[[Path], str] = lambda root: ""
+
+
+# The project's prerequisites, which cmd.Context registers from its Policy once per invocation.
+# Process state rather than a parameter: the configure pipeline and the fingerprint take a root and nothing of the Policy.
+_project_prereqs: tuple[Prerequisite, ...] = ()
+
+
+def register_project_prerequisites(prereqs: tuple[Prerequisite, ...]) -> None:
+    global _project_prereqs
+    _project_prereqs = tuple(prereqs)
+
+
+def project_fingerprint(root: Path) -> str:
+    """Each registered prerequisite's fingerprint, named, one per line; empty when the project registers none."""
+    return "".join(f"{p.name}:{p.fingerprint(root)}\n" for p in _project_prereqs)
+
+
+def ensure_project(root: Path, preset_name: str) -> None:
+    """Run each registered prerequisite's `ensure`, in registration order."""
+    for p in _project_prereqs:
+        # It may narrate itself to this terminal, so the region parks as it does for shaped-core's fetch scripts.
+        with profile.span(p.name, type="prereq"), ui.suspend():
+            p.ensure(root, preset_name)
+
 
 # Preset name fragments for cross-targets that never use these (host-side) dependencies.
 _NON_NATIVE = ("wasm", "emscripten", "web", "android", "ios")

@@ -80,7 +80,7 @@ function(sc_library_closure out)
 endfunction()
 
 # Whether this build adds a library's tests, tools or examples, which link nexus and their TEST_DEPENDS.
-if(SC_BUILD_TESTS OR SC_BUILD_TOOLS OR SC_BUILD_EXAMPLES OR SC_BUILD_LINTER)
+if(SC_BUILD_TESTS OR SC_BUILD_TOOLS OR SC_BUILD_EXAMPLES OR SC_BUILD_LINTER OR SC_BUILD_SGL)
     set(_sc_closure_tests TESTS)
 else()
     set(_sc_closure_tests "")
