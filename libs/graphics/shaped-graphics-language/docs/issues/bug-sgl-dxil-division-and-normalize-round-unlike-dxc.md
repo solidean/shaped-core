@@ -5,6 +5,8 @@ refs:
   - file: libs/graphics/shaped-graphics/tests/differential/corpus/float_arithmetic.sgl
   - file: libs/graphics/shaped-graphics/tests/differential/corpus/vector_math.sgl
   - test: sg differential - every corpus entry point computes alike on each route this context takes
+claimed-by: Claude (for Philip Trettner)
+claimed-at: 2026-11-26T06:57Z
 ---
 
 # SGL's DXIL divides and normalizes unlike DXC's, so one dx12 driver rounds the two routes apart
