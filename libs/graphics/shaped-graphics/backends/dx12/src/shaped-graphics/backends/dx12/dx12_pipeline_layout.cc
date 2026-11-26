@@ -244,6 +244,20 @@ cc::result<dx12_pipeline_layout_handle> dx12_pipeline_layout::create(ID3D12Devic
 
     pl->has_static_samplers = !static_sampler_descs.empty();
 
+    // A root signature of no parameter holds one constant no shader declares, and nothing sets.
+    // Intel's dx12 driver hangs a mesh stage that reads a constant table under a root signature of none:
+    // docs/bugs-external/intel-d3d12-mesh-table-without-root-parameters-hangs.
+    if (params.empty())
+    {
+        D3D12_ROOT_PARAMETER param = {};
+        param.ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+        param.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+        param.Constants.Num32BitValues = 1;
+        param.Constants.ShaderRegister = 0;
+        param.Constants.RegisterSpace = 0x7fff0000u; // far above any group's space and sg's reserved ones
+        params.push_back(param);
+    }
+
     D3D12_ROOT_SIGNATURE_DESC desc = {};
     desc.NumParameters = UINT(params.size());
     desc.pParameters = params.empty() ? nullptr : params.data();

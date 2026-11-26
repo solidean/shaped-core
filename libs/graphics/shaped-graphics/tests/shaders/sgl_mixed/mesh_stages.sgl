@@ -55,6 +55,30 @@ fun quad_ms(@local_thread_index k: int, output: mut mesh_output[mesh_link]):
         output.triangle(0u, uint3(0u, 1u, 2u))
         output.triangle(1u, uint3(0u, 2u, 3u))
 
+// The quad's corners read from tables at the loop's index, which DXIL states as constants of the module.
+@mesh(1, vertices = 4, triangles = 2)
+fun tabled_ms(output: mut mesh_output[mesh_link]):
+    output.set_counts(4u, 2u)
+    let xs = [-0.75, 0.75, 0.75, -0.75]
+    let ys = [-0.75, -0.75, 0.75, 0.75]
+    for k in 0 ..< 4:
+        output.vertex(k as uint, corner(xs[k], ys[k], 5 + k))
+    output.triangle(0u, uint3(0u, 1u, 2u))
+    output.triangle(1u, uint3(0u, 2u, 3u))
+
+// A task stage that reads its payload's steps from a table at the workgroup's index.
+@task(1) fun tabled_ts(@workgroup_id group: int3):
+    let lows = [0u, 1u, 0u, 1u]
+    let h: handed = {
+        blue = 0.5
+        shift = float2(0.25, 1.0)
+        steps = [-1.0, 0.0, 1.0, 2.0]
+        id = 9
+        corner = float3(1.0, 2.0, 3.0)
+        low = lows[group.x + 1]
+    }
+    dispatch_mesh(2u, 1u, 1u, h)
+
 // Two triangles that each state their own values.
 @mesh(1, vertices = 4, triangles = 2)
 fun faces_ms(output: mut mesh_output[mesh_link, mesh_face]):

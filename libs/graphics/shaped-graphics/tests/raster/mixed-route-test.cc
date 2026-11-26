@@ -577,6 +577,8 @@ ASYNC_INVOCABLE_TEST("sg - mesh and task stages of SGL's binary link against DXC
 
     auto const quad_mesh = co_await SG_ROUTES(quad_ms);
     (void)co_await compared_mesh(*ctx, {.name = "quad", .mesh = quad_mesh, .pixel = plain});
+    auto const tabled_mesh = co_await SG_ROUTES(tabled_ms);
+    (void)co_await compared_mesh(*ctx, {.name = "tabled", .mesh = tabled_mesh, .pixel = plain});
     auto const lines_mesh = co_await SG_ROUTES(lines_ms);
     (void)co_await compared_mesh(*ctx, {.name = "lines", .mesh = lines_mesh, .pixel = plain});
     auto const split_task = co_await SG_ROUTES(split_ts);
@@ -587,6 +589,8 @@ ASYNC_INVOCABLE_TEST("sg - mesh and task stages of SGL's binary link against DXC
     CHECK(split[1].rgba_float(1, 1)[2] == 9.0f);
     CHECK(split[1].rgba_float(k_size - 2, 1)[2] == 10.0f);
     CHECK(split[1].rgba_float(1, k_size - 1)[3] == 0.0f);
+    auto const tabled_task = co_await SG_ROUTES(tabled_ts);
+    (void)co_await compared_mesh(*ctx, {.name = "tabled task", .task = tabled_task, .mesh = split_mesh, .pixel = plain});
     auto const many_task = co_await SG_ROUTES(many_ts);
     auto const many_mesh = co_await SG_ROUTES(many_ms);
     (void)co_await compared_mesh(*ctx,

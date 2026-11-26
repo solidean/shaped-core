@@ -29,7 +29,7 @@ struct primitive_out
 void ms(out vertices vertex_out verts[4], out indices uint3 tris[2], out primitives primitive_out prims[2])
 {
     SetMeshOutputCounts(4, 2);
-    // written one by one: a loop over a local array of the corners hangs Intel's Arc, which is not this bug
+    // written one by one: a table of the corners hangs Intel's Arc, intel-d3d12-mesh-table-without-root-parameters-hangs
     verts[0].position = float4(-1, -1, 0.5, 1);
     verts[1].position = float4(1, -1, 0.5, 1);
     verts[2].position = float4(1, 1, 0.5, 1);
