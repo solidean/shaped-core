@@ -3,6 +3,8 @@ created: 2026-11-07
 refs:
   - file: libs/graphics/shaped-graphics/tests/shaders/sgl_mixed/double_routes.sgl
   - file: libs/graphics/shaped-graphics/tests/compute/compute-double-maths-test.cc
+claimed-by: Claude (for Philip Trettner)
+claimed-at: 2026-11-26T06:57Z
 ---
 
 # On AMD's dx12 driver, a double's inverse_sqrt differs by an ULP between SGL's DXIL and DXC's
