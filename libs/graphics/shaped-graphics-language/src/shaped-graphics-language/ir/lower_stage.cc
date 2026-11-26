@@ -114,6 +114,8 @@ void lowering::elements_of_struct(check::type_id t, stage_part part, u32 array_s
             e.system = built_in::layer;
         else if (member.is_viewport_index)
             e.system = built_in::viewport_index;
+        else if (member.is_clip_distances)
+            e.system = built_in::clip_distance;
         else if (member.factor == check::tessellation_factor::edge)
             e.system = built_in::tess_edge;
         else if (member.factor == check::tessellation_factor::inside)
@@ -161,6 +163,9 @@ void lowering::elements_of_struct(check::type_id t, stage_part part, u32 array_s
             e.interpolate = interpolation::noperspective;
         else if (member.is_layer || member.is_viewport_index)
             e.interpolate = interpolation::flat;
+        // EMIT-290: DXC states a clip distance linear, as the rasterizer interpolates it
+        else if (member.is_clip_distances)
+            e.interpolate = interpolation::perspective;
         add_stage_element(e, semantic, member.source_name);
     }
 }
@@ -205,8 +210,23 @@ value_ref lowering::read_struct(check::type_id t, u32& element, value_ref index)
     if (found == nullptr || found->members.empty())
         return null_of(type);
     auto parts = cc::vector<u32>();
+    // a member the link leaves out, a pixel stage's clip distances (CHK-574), is a value nobody reads
+    auto const sgl_members = _m.at(_m.at(t).members);
+    // each one that stands before planned member `planned`, or after the last where `planned` is their count
+    auto const fill_left_out = [&](isize planned)
+    {
+        auto kept = isize(0);
+        for (auto i = isize(0); i < sgl_members.size() && i < found->member_of.size(); ++i)
+        {
+            if (found->member_of[i] >= 0)
+                ++kept;
+            else if (sgl_members[i].type != check::checked_module::void_type && kept == planned)
+                parts.push_back(u32(null_of(value_type(sgl_members[i].type))));
+        }
+    };
     for (auto const& member : found->members)
     {
+        fill_left_out(&member - found->members.data());
         // a factor crosses as one element per factor, where every other array crosses as pieces
         if (member.factor != check::tessellation_factor::none && _m.at(member.type).kind == check::type_kind::array)
         {
@@ -241,6 +261,7 @@ value_ref lowering::read_struct(check::type_id t, u32& element, value_ref index)
             pieces.push_back(u32(read_element(element++, index)));
         parts.push_back(u32(add(op::construct, value_type(member.type), pieces)));
     }
+    fill_left_out(found->members.size());
     return add(op::construct, type, parts);
 }
 

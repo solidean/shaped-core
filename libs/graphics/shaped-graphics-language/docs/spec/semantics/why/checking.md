@@ -445,6 +445,24 @@ A pixel stage's output is its return value, all of it, which is SGL's model for 
 `@position` is the precedent: a marked member of a stage's struct that the stage link treats specially.
 A struct holding only `@depth` is how a depth-only pixel stage is written, which is what a shadow pass with a cut-out needs.
 
+## CHK-571
+
+An array is what SPIR-V's `ClipDistance`, Metal's `[[clip_distance]]` and WGSL's `clip_distances` built-in are, so the field is written as it is on three targets.
+A shader fills it in a loop over its planes.
+HLSL's semantics are a spelling the writer makes of it (EMIT-290).
+8 is what every target allows: D3D's eight clip and cull distances together, Vulkan's `maxClipDistances` of at least 8 with the feature, Metal's 8 and WebGPU's 8.
+A plane that is off writes a distance of 0 or more, so one shader serves a frame with three planes and one with none, at the cost of the dot products.
+The geometry, tessellation and mesh stages, and their polyfills, which would carry the field in their words, wait for a shader that needs them.
+
+## CHK-574
+
+D3D, Vulkan and Metal let a pixel stage read the interpolated distances, which no shader asks for yet, and WebGPU does not.
+So the pixel stage's link leaves the field out, which keeps WGSL's fragment input valid and asks the device nothing for the pixel stage.
+
+## CHK-575
+
+A feature because core WebGPU lacks it, not because a desktop device does: D3D12 has it at every feature level, and desktop Vulkan devices report `shaderClipDistance`.
+
 ## CHK-564
 
 Its use is a stage that writes memory, as an order-independent or a visibility pass does.

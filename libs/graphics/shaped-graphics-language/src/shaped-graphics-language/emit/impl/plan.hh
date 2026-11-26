@@ -67,6 +67,8 @@ struct planned_member
     bool is_layer = false;
     /// `@viewport_index`, likewise (CHK-534).
     bool is_viewport_index = false;
+    /// `@clip_distances`, likewise: on HLSL one `SV_ClipDistance` piece per lane (EMIT-290).
+    bool is_clip_distances = false;
     /// How a stage link's member is interpolated; the default everywhere else.
     check::interpolation interpolate;
     /// A render target struct's depth or sample mask, which takes no location; `color` everywhere else.

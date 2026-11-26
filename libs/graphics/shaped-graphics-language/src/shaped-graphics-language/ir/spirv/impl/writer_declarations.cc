@@ -58,6 +58,7 @@ constexpr built_in_number k_built_ins[] = {
     {built_in::depth_greater_equal, 22},
     {built_in::depth_less_equal, 22},
     {built_in::tess_edge, 11},
+    {built_in::clip_distance, 3},
     {built_in::tess_inside, 12},
     {built_in::domain_location, 13},
     {built_in::launch_id, 5319},
@@ -137,9 +138,10 @@ constexpr u32 k_mode_output_triangles = 5298;
 constexpr u32 k_primitive_line_indices = 5295;
 constexpr u32 k_primitive_triangle_indices = 5296;
 
+/// A lane of an array the target declares whole: a tessellation factor, or a clip distance.
 [[nodiscard]] constexpr bool is_factor(built_in b)
 {
-    return b == built_in::tess_edge || b == built_in::tess_inside;
+    return b == built_in::tess_edge || b == built_in::tess_inside || b == built_in::clip_distance;
 }
 } // namespace
 
@@ -441,10 +443,16 @@ void writer::write_stage_elements()
                 if (_p.types[t].kind == type_kind::vector && _p.types[t].count == 3
                     && _p.types[t].element == _p.at(e.type).element && !_p.types[t].is_debug_only)
                     held = _type_ids[t];
-        auto const count = e.system == built_in::sample_mask ? u32(1)
-                         : e.system == built_in::tess_edge   ? k_outer_factors
-                         : e.system == built_in::tess_inside ? k_inner_factors
-                                                             : e.array_size;
+        // the clip distances are as many as the lanes that follow
+        auto lanes = u32(0);
+        while (e.system == built_in::clip_distance && i + isize(lanes) < _p.stage_elements.size()
+               && _p.stage_elements[i + isize(lanes)].system == built_in::clip_distance)
+            ++lanes;
+        auto const count = e.system == built_in::sample_mask   ? u32(1)
+                         : e.system == built_in::tess_edge     ? k_outer_factors
+                         : e.system == built_in::tess_inside   ? k_inner_factors
+                         : e.system == built_in::clip_distance ? lanes
+                                                               : e.array_size;
         auto lane = u32(0);
         if (count > 0)
         {
@@ -480,6 +488,8 @@ void writer::write_stage_elements()
                 if (e.system == built_in::layer && _p.stage != check::stage::mesh)
                     require(_p.stage == check::stage::pixel || _p.stage == check::stage::geometry ? spv::Geometry
                                                                                                   : spv::ShaderLayer);
+                if (e.system == built_in::clip_distance)
+                    require(spv::ClipDistance);
                 if (e.system == built_in::viewport_index && _p.stage != check::stage::mesh)
                     require(_p.stage == check::stage::pixel || _p.stage == check::stage::geometry
                                 ? spv::MultiViewport

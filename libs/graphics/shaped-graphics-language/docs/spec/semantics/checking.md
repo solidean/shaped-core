@@ -1084,6 +1084,20 @@ fun f() -> float:
   Each stage whose struct holds one needs `multi_viewport`, which WebGPU has on no device, so its WGSL is `target-lacks-feature`.
   A host sets the viewports with `set_viewports`; an index past the last one set is the API's to define, and SGL does not.
   The struct that reaches the rasterizer carries exactly one, which CHK-307 asks of the pipeline.
+* **CHK-571** A field of the struct a vertex stage hands the rasterizer may carry `@clip_distances`, at most one, of type `float[N]` with `N` from 1 to 8 ([why](why/checking.md#chk-571)).
+  The rasterizer reads it, so it takes no location, no `@interpolate` and no `@per_draw` (CHK-393).
+  A second such field, another type, `N` outside 1 to 8, or one of those attributes beside it, is `invalid-entry-point`, and the attribute with an argument is `invalid-attribute-arguments`.
+  On a struct that reaches no rasterizer it is `invalid-entry-point` too.
+  A geometry, tessellation or mesh stage that hands one on, or takes one, is `unsupported-yet`: only a vertex stage writes clip distances so far.
+* **CHK-572** Each lane is a distance from one plane: the rasterizer keeps the points of a primitive where every lane, interpolated linearly across it, is 0 or more.
+  It cuts the primitive at the lanes' zeros.
+  So what it hands the pixel stage, and the depth test, covers the kept part alone.
+  A lane that is a NaN or an infinity clips as the target clips it, which SGL does not specify.
+* **CHK-573** Only the struct that reaches the rasterizer clips, and a pipeline whose vertex stage hands one to a geometry or a tessellation stage is `invalid-pipeline` (CHK-307).
+* **CHK-574** A pixel stage that takes the struct reads no `@clip_distances` field: a read of it is `unsupported-yet` there, since WGSL has no such input ([why](why/checking.md#chk-574)).
+  Its link leaves the field out on every target, so the pixel stage needs nothing of it.
+* **CHK-575** A vertex stage whose result holds one needs `clip_distances` ([why](why/checking.md#chk-575)).
+  sg's dx12 and metal backends grant it on every device, vulkan with `shaderClipDistance`, and webgpu with the feature `clip-distances`, so WGSL writes it where the device has the feature.
 * **CHK-437** `@view_index` is which view of a draw of several the invocation renders, from 0, and the pipeline's `view_count` says how many.
   View `i` renders into layer `i` of every target, so a stereo frame is one draw into a two-layer array, and the shader picks each eye's camera by it.
   The count is the host's, so one shader serves one view and two alike: a pipeline of one view reads 0.
@@ -1163,6 +1177,7 @@ A feature is what a device may lack, so using one makes a shader non-portable on
   A write through a binding in a vertex, geometry or tessellation stage adds `vertex_pipeline_stores` (CHK-531).
   A `mut` image of a 16-bit normalized format adds `readwrite_norm16_image_formats` (CHK-201).
   `@early_depth_test` on a pixel stage that writes memory or discards adds `early_depth_test` (CHK-567).
+  A `@clip_distances` field of a vertex stage's result adds `clip_distances` (CHK-575).
   Any other name is the normal error `unknown-feature`, and its detail lists the names.
 * **CHK-259** A `require` at file scope grants its features to everything in the file ([why](why/checking.md#chk-259)).
 * **CHK-260** A `require` in a binding grants its features to that binding's members.
@@ -2203,7 +2218,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 
 | kind | reported by |
 |---|---|
-| `unsupported-yet` | CHK-540, CHK-541, CHK-543, CHK-549, CHK-8, CHK-61, CHK-134, CHK-213, CHK-237, CHK-291, CHK-299, CHK-307, CHK-314, CHK-321, CHK-329, CHK-333, CHK-338, CHK-339, CHK-344, CHK-346, CHK-347, CHK-350, CHK-352, CHK-353, CHK-357, CHK-366, CHK-374, CHK-381, CHK-383, CHK-387, CHK-389, CHK-397, CHK-431, CHK-432, CHK-434, CHK-516, CHK-522, CHK-523, CHK-526, CHK-524, CHK-525, CHK-450, CHK-453, CHK-454, CHK-538, CHK-555 |
+| `unsupported-yet` | CHK-540, CHK-541, CHK-543, CHK-549, CHK-8, CHK-61, CHK-134, CHK-213, CHK-237, CHK-291, CHK-299, CHK-307, CHK-314, CHK-321, CHK-329, CHK-333, CHK-338, CHK-339, CHK-344, CHK-346, CHK-347, CHK-350, CHK-352, CHK-353, CHK-357, CHK-366, CHK-374, CHK-381, CHK-383, CHK-387, CHK-389, CHK-397, CHK-431, CHK-432, CHK-434, CHK-516, CHK-522, CHK-523, CHK-526, CHK-524, CHK-525, CHK-450, CHK-453, CHK-454, CHK-538, CHK-555, CHK-571, CHK-574 |
 | `member-not-allowed-here` | CHK-490 |
 | `duplicate-declaration` | CHK-552, CHK-540, CHK-543, CHK-12, CHK-28, CHK-241, CHK-347, CHK-351, CHK-530 |
 | `dependency-cycle` | CHK-18, CHK-136 |
@@ -2219,7 +2234,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `unknown-builtin` | CHK-31 |
 | `expected-body` | CHK-32, CHK-236 |
 | `opaque-struct-needs-builtin` | CHK-34 |
-| `invalid-attribute-arguments` | CHK-546, CHK-547, CHK-548, CHK-36, CHK-39, CHK-204, CHK-208, CHK-211, CHK-212, CHK-220, CHK-231, CHK-267, CHK-403, CHK-292, CHK-293, CHK-301, CHK-304, CHK-384, CHK-369, CHK-370, CHK-371, CHK-431, CHK-435, CHK-480, CHK-522, CHK-526, CHK-538, CHK-564 |
+| `invalid-attribute-arguments` | CHK-546, CHK-547, CHK-548, CHK-36, CHK-39, CHK-204, CHK-208, CHK-211, CHK-212, CHK-220, CHK-231, CHK-267, CHK-403, CHK-292, CHK-293, CHK-301, CHK-304, CHK-384, CHK-369, CHK-370, CHK-371, CHK-431, CHK-435, CHK-480, CHK-522, CHK-526, CHK-538, CHK-564, CHK-571 |
 | `binding-not-listed` | CHK-45, CHK-131, CHK-228 |
 | `as-precedence` | CHK-411 |
 | `type-mismatch` | CHK-552, CHK-541, CHK-542, CHK-52, CHK-56, CHK-77, CHK-112 to CHK-118, CHK-121, CHK-167, CHK-210, CHK-214, CHK-219, CHK-236, CHK-243, CHK-275, CHK-276, CHK-279, CHK-281, CHK-287, CHK-329, CHK-344, CHK-362, CHK-375, CHK-392, CHK-429, CHK-433, CHK-434, CHK-558 |
@@ -2252,9 +2267,9 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `stage-not-allowed` | CHK-193, CHK-277, CHK-329, CHK-344, CHK-512, CHK-556 |
 | `ambiguous-overload` | CHK-72 |
 | `missing-field`, `unknown-field`, `duplicate-field` | CHK-178 |
-| `invalid-entry-point` | CHK-87, CHK-88, CHK-89, CHK-93, CHK-271, CHK-273, CHK-276, CHK-294, CHK-301 to CHK-306, CHK-326 to CHK-328, CHK-342, CHK-380, CHK-481, CHK-484, CHK-485, CHK-520, CHK-565 |
+| `invalid-entry-point` | CHK-87, CHK-88, CHK-89, CHK-93, CHK-271, CHK-273, CHK-276, CHK-294, CHK-301 to CHK-306, CHK-326 to CHK-328, CHK-342, CHK-380, CHK-481, CHK-484, CHK-485, CHK-520, CHK-565, CHK-571 |
 | `nesting-too-deep` | CHK-268 |
-| `invalid-pipeline` | CHK-175 to CHK-185, CHK-187, CHK-276, CHK-307, CHK-308, CHK-328, CHK-330, CHK-331, CHK-332, CHK-343, CHK-403 |
+| `invalid-pipeline` | CHK-175 to CHK-185, CHK-187, CHK-276, CHK-307, CHK-308, CHK-328, CHK-330, CHK-331, CHK-332, CHK-343, CHK-403, CHK-573 |
 | `shadows-unshadowable` | CHK-220, CHK-266 |
 | `test-captures-runtime-value` | CHK-228 |
 | `test-must-end-in-check` | CHK-226 |

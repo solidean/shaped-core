@@ -342,6 +342,9 @@ public:
         case sg::feature::early_depth_test:
             // `[earlydepthstencil]` is Shader Model 5's
             return true;
+        case sg::feature::clip_distances:
+            // `SV_ClipDistance` is every feature level's
+            return true;
         case sg::feature::float_atomic_add:
             // HLSL's float atomics are bitwise exchanges alone; an add is NVAPI's, which this backend does not take
             return false;

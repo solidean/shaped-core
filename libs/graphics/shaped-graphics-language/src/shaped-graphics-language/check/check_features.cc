@@ -110,6 +110,11 @@ void checker::judge_entry_features(symbol_id id)
     };
     if (info.entry_stage == stage::vertex && has_viewport(info.result))
         needed.set(feature::multi_viewport);
+    // CHK-575: a vertex stage that writes clip distances needs the device to clip by them
+    if (info.entry_stage == stage::vertex && is_valid(info.result) && out.at(info.result).kind == type_kind::structure)
+        for (auto const& m : out.at(out.at(info.result).members))
+            if (m.is_clip_distances)
+                needed.set(feature::clip_distances);
     if (info.entry_stage == stage::pixel)
         for (auto const& parameter : out.at(info.parameters))
             if (parameter.input == stage_input::none && has_viewport(parameter.type))

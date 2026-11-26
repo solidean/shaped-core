@@ -95,6 +95,7 @@ ctx.supports(sg::feature::ray_query)               // bool — THE capability qu
                                                    //   | readwrite_norm16_image_formats (read_write r16..rgba16 _unorm/_snorm; never webgpu/metal)
                                                    //   | norm16_filtering (filter r16..rgba16 _unorm/_snorm; never webgpu)
                                                    //   | early_depth_test (SGL's @early_depth_test on a pixel stage that writes memory or discards; never webgpu)
+                                                   //   | clip_distances (SGL's @clip_distances field; vulkan with shaderClipDistance; not webgpu yet)
                                                    //   | unaligned_block_compression (false on webgpu and metal: a BC texture needs whole 4x4 blocks,
                                                    //     and create_texture THROWS on one that has not; desc.unaligned_block_error(supports) asks first)
                                                    //   | texture_compression_bc (BC1-BC7 textures; vulkan enables textureCompressionBC, metal on Apple-silicon Macs, webgpu with the adapter's feature)

@@ -253,6 +253,7 @@ enum capability : u32
     Int64 = 11,
     Int64Atomics = 12,
     Int16 = 22,
+    ClipDistance = 32,
     ImageCubeArray = 34,
     SampleRateShading = 35,
     Sampled1D = 43,

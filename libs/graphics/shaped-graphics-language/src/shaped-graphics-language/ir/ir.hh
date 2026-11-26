@@ -695,6 +695,8 @@ enum class sgl::ir::built_in : sgl::u8
     /// A patch's edge and inside tessellation factors, one element per factor.
     tess_edge,
     tess_inside,
+    /// What reaches the rasterizer's clip distances, one element per lane (EMIT-290).
+    clip_distance,
 };
 
 /// Which edge of an entry point an element crosses.

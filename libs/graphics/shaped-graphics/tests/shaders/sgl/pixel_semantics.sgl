@@ -394,3 +394,25 @@ pipeline counted_late:
     depth_test = true
     depth_compare = .less
     depth_stencil_format = .depth32_float
+
+// Clip distances (CHK-571, EMIT-290): six lanes, the last of which is the vertex's x in clip space, so the rasterizer
+// keeps the right half of what is drawn; the other five are 1 and keep everything.
+struct clipped:
+    @position position: hpos4
+    @clip_distances planes: float[6]
+
+@vertex fun clipped_vs(v: tagged_corner) -> clipped:
+    require clip_distances
+    // the tag is 0 here, and read so the vertex attribute it is in is consumed
+    let mut planes = float[6].filled(1.0 + (v.tag as float))
+    planes[5] = v.position.x
+    return {position = hpos4(v.position.x, v.position.y, v.depth, 1.0), planes = planes}
+
+@pixel fun clipped_ps(p: clipped) -> tag_target:
+    return {value = float4(1.0, 0.0, 0.0, 1.0)}
+
+pipeline clipped_draw:
+    vertex = clipped_vs
+    pixel = clipped_ps
+    cull = .none
+    format = .rgba32_float

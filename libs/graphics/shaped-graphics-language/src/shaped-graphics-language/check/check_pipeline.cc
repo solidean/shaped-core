@@ -871,6 +871,16 @@ void checker::compile_pipeline(symbol_id id)
                 passed = out.at(parameter.type).element;
         from = geometry;
     }
+    // CHK-573: only what reaches the rasterizer clips, so a vertex stage another stage follows hands on no clip distance
+    if ((is_valid(control) || is_valid(evaluation) || is_valid(geometry)) && is_valid(vertex) && !pc.is_failed
+        && out.at(vertex_info.result).kind == type_kind::structure)
+        for (auto const& m : out.at(out.at(vertex_info.result).members))
+            if (m.is_clip_distances)
+                pc.fail(file, where,
+                        cc::format("{} hands its @clip_distances field '{}' to a {} stage, and only what reaches the "
+                                   "rasterizer clips; the last stage before it writes its own",
+                                   out.at(vertex).name, m.name,
+                                   stage_name(is_valid(control) ? stage::tessellation_control : stage::geometry)));
     // what reaches the rasterizer says where each vertex lands
     auto positions = 0;
     for (auto const& m : out.at(out.at(passed).members))

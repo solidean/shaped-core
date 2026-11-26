@@ -8,6 +8,11 @@ Nothing here is normative.
 The emitters follow the [compilation model](../../incubator/compilation-model.md): SGL compiles to shader text, and the text's own compiler optimizes it.
 So an emitter is a printer with opinions about names and addresses, and it transforms nothing.
 
+## EMIT-290
+
+DXC refuses an array under `SV_ClipDistance` in a DXIL signature, since each element would take a row, and takes a float per lane, which it packs as it would a `float4` and the rest.
+A lane each is also what the existing pieces of an array on a link already are, so the HLSL text needs no form of its own, and SGL's own DXIL matches DXC's compile of that text element for element.
+
 ## EMIT-288
 
 A native route lowers what its target's text compiles to, and DXC compiles HLSL's `|` of two `uint`s to an `or`.

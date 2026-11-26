@@ -169,6 +169,12 @@ const light_kind_sun: i32 = 2;
 * **EMIT-25** What an edge struct is comes from where it stands in the signature, by the table below.
 * **EMIT-26** Member order is the address: the **location** of a member is its position among the members that carry no `@position`.
 * **EMIT-27** A member with `@position` is `SV_Position` in HLSL and `@builtin(position)` in WGSL, and it takes no location.
+* **EMIT-290** A `@clip_distances` field (CHK-571) is the target's clip distances, in lane order ([why](why/emitting.md#emit-290)).
+  HLSL writes it a lane at a time, `float planes_0 : SV_ClipDistance0` to `SV_ClipDistanceN-1`.
+  DXC packs those into the rows a `float4` and the rest take, and concatenates them into one `ClipDistance` array for vulkan.
+  A native route declares what that text compiles to: on DXIL a signature element of the system value `ClipDistance` per lane, packed as EMIT-235 packs a system value.
+  On SPIR-V it is one `Output` variable of `float[N]` decorated `BuiltIn ClipDistance`, with the capability `ClipDistance`.
+  MSL writes the field `float planes [[clip_distance]] [N];`, filled a lane at a time, and WGSL `@builtin(clip_distances) planes: array<f32, N>` behind `enable clip_distances;`.
 * **EMIT-28** A member of a vertex input at location i has the dx12 semantic of its name in upper case, `[[vk::location(i)]]` in vulkan, and `@location(i)` in WGSL.
   A name that ends in a digit gets a `_` after it, `uv1` -> `UV1_`, since HLSL reads a trailing number as the semantic's index.
   A semantic an earlier member of the struct took, ignoring case, gets a `_` after it until it is its own: `uv1` then `uv1_` is `UV1_` then `UV1__`.

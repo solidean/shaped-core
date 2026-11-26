@@ -23,6 +23,7 @@ enum class reach : u8
 
 /// `D3D_NAME`.
 constexpr u32 k_position = 1;
+constexpr u32 k_clip_distance = 2;
 constexpr u32 k_render_target_array_index = 4;
 constexpr u32 k_viewport_array_index = 5;
 constexpr u32 k_vertex_id = 6;
@@ -53,6 +54,7 @@ constexpr system_rule k_systems[] = {
     {built_in::position, reach::row, k_position},
     {built_in::layer, reach::row, k_render_target_array_index},
     {built_in::viewport_index, reach::row, k_viewport_array_index},
+    {built_in::clip_distance, reach::row, k_clip_distance},
     {built_in::vertex_index, reach::row, k_vertex_id},
     {built_in::instance_index, reach::row, k_instance_id},
     {built_in::is_front_facing, reach::row, k_is_front_face},

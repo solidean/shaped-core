@@ -1,0 +1,34 @@
+// CHK-571 to CHK-575: a vertex stage hands the rasterizer up to 8 clip distances, a float[N] field it fills per plane.
+require clip_distances
+
+binding section:
+    planes: float4[3]
+
+@vertex struct corner_in:
+    position: float3
+    uv: float2
+
+struct varyings:
+    @position position: hpos4
+    @clip_distances planes: float[3]
+    uv: float2
+
+// a plane that is off is (0, 0, 0, 1), whose distance is 1 everywhere and keeps everything
+fun plane_distances(planes: float4[3], world: float4) -> float[3]:
+    let mut d = float[3].filled(0.0)
+    for i in 0 ..< 3:
+        d[i] = dot(planes[i], world)
+    return d
+
+test plane_distances(float4[3].filled(float4(0.0, 0.0, 0.0, 1.0)), float4(5.0, 6.0, 7.0, 1.0))[2] == 1.0
+
+@vertex fun section_vs(v: corner_in){section} -> varyings:
+    let world = float4(v.position.x, v.position.y, v.position.z, 1.0)
+    return {position = hpos4(world.x, world.y, world.z, 1.0), planes = plane_distances(section.planes, world), uv = v.uv}
+
+// the rasterizer has cut away what lies behind a plane, so the pixel stage needs no discard
+@pixel fun section_ps(p: varyings) -> float4 => float4(p.uv.x, p.uv.y, 0.0, 1.0)
+
+// a read of them there is no form any target has alike
+@expect(error = "unsupported-yet")
+@pixel fun peek_ps(p: varyings) -> float4 => float4(p.planes[0])

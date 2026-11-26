@@ -485,6 +485,8 @@ public:
         case sg::feature::early_depth_test:
             // `EarlyFragmentTests` is a core execution mode
             return true;
+        case sg::feature::clip_distances:
+            return _clip_distances;
         // SPIR-V's `Coherent` decoration is core, and storage-image atomics on r32 integer formats are required.
         // BaseInstance is the DrawParameters capability, which creation requires `shaderDrawParameters` for.
         case sg::feature::device_coherence:
@@ -1103,6 +1105,7 @@ public:
     bool _view_instancing = false;
     /// `vertexPipelineStoresAndAtomics`, enabled wherever the device has it.
     bool _vertex_pipeline_stores = false;
+    bool _clip_distances = false; // shaderClipDistance, enabled where the device has it
     /// `VK_EXT_shader_atomic_float`, enabled with its buffer and shared float32 atomics and adds alike.
     bool _float_atomic_add = false;
     /// `VK_KHR_shader_quad_control` with `VK_KHR_shader_maximal_reconvergence`, both enabled.

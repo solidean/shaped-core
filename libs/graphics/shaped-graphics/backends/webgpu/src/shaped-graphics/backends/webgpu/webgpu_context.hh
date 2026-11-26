@@ -217,6 +217,9 @@ public:
         case sg::feature::early_depth_test:
             // WGSL has no attribute that forces the tests before a fragment stage
             return false;
+        case sg::feature::clip_distances:
+            // `clip-distances` is not requested yet, so no device has it here
+            return false;
         case sg::feature::unaligned_block_compression:
             // Lifted by `texture-compression-unaligned`, which the emdawnwebgpu this builds against does not offer.
             return false;

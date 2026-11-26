@@ -254,7 +254,7 @@ struct planner
     {
         auto count = 0;
         for (auto const& member : p.m.at(p.m.at(type).members))
-            if (!member.is_position && !member.is_layer && !member.is_viewport_index
+            if (!member.is_position && !member.is_layer && !member.is_viewport_index && !member.is_clip_distances
                 && member.type != check::checked_module::void_type)
             {
                 count += locations_taken(member.type);
@@ -372,8 +372,11 @@ struct planner
         auto next_location = first_location;
         for (auto const& member : members)
         {
+            // EMIT-290: HLSL writes clip distances a lane at a time, which MSL and WGSL take as the array itself
+            auto const is_hlsl = p.which == emit::target::hlsl_dx12 || p.which == emit::target::hlsl_vulkan;
             auto const split = has_locations && !member.is_position && !member.is_layer && !member.is_viewport_index
                                     && member.factor == check::tessellation_factor::none
+                                    && (!member.is_clip_distances || is_hlsl)
                                  ? pieces_of(member.type)
                                  : edge_pieces();
             result.push_back({
@@ -383,11 +386,12 @@ struct planner
                 .is_position = has_locations && member.is_position,
                 .is_layer = has_locations && member.is_layer,
                 .is_viewport_index = has_locations && member.is_viewport_index,
+                .is_clip_distances = has_locations && member.is_clip_distances,
                 .interpolate = member.interpolate,
                 .output = member.output,
                 .factor = member.factor,
                 .location = has_locations && !member.is_position && !member.is_layer && !member.is_viewport_index
-                                 && member.output == check::pixel_output::color
+                                 && !member.is_clip_distances && member.output == check::pixel_output::color
                                  && member.factor == check::tessellation_factor::none
                               ? next_location
                               : -1,
@@ -480,8 +484,11 @@ struct planner
         for (auto const& member : p.m.at(info.members))
         {
             need(member.type, struct_role::plain);
-            member_of.push_back(member.type == check::checked_module::void_type ? -1 : i32(written.size()));
-            if (member.type != check::checked_module::void_type)
+            // CHK-574: a pixel stage takes no clip distance, which no target hands it alike, so its link leaves them out
+            auto const is_left_out = member.type == check::checked_module::void_type
+                                  || (member.is_clip_distances && p.e.entry_stage == check::stage::pixel);
+            member_of.push_back(is_left_out ? -1 : i32(written.size()));
+            if (!is_left_out)
                 written.push_back(member);
         }
 
@@ -1354,7 +1361,7 @@ cc::vector<sgl::emit::impl::planned_member> sgl::emit::impl::declared_members(pl
             piece.name = cc::format("{}_{}", member.name, i);
             piece.source_name = cc::format("{}_{}", member.source_name, i);
             piece.type = member.piece;
-            piece.location = member.location + i * member.piece_locations;
+            piece.location = member.location < 0 ? -1 : member.location + i * member.piece_locations;
             piece.pieces = 0;
             result.push_back(cc::move(piece));
         }
@@ -1739,6 +1746,9 @@ cc::string sgl::emit::impl::semantic_of(plan const& p, planned_struct const& s, 
         return "SV_RenderTargetArrayIndex";
     if (member.is_viewport_index)
         return "SV_ViewportArrayIndex";
+    // EMIT-290: a lane each, which DXC packs into the rows a float4 and the rest take, and concatenates for vulkan
+    if (member.is_clip_distances)
+        return cc::format("SV_ClipDistance{}", member.piece_index >= 0 ? member.piece_index : 0);
     switch (s.role)
     {
     case struct_role::vertex_input:

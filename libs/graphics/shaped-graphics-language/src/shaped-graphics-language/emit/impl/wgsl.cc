@@ -82,6 +82,9 @@ public:
             out += k_indent;
             if (member.is_position)
                 out += "@builtin(position) ";
+            // EMIT-290: behind `enable clip_distances;`
+            else if (member.is_clip_distances)
+                out += "@builtin(clip_distances) ";
             // EMIT-130: WGSL has no conservative depth, and the promise changes no result, so it is dropped
             else if (member.output == check::pixel_output::sample_mask)
                 out += "@builtin(sample_mask) ";
@@ -214,6 +217,9 @@ public:
         // EMIT-141: a 16-bit float is an extension of WGSL, which the text enables where the entry point needs it
         if (p.e.features.has(check::feature::shader_f16))
             out += "enable f16;\n\n";
+        // EMIT-290: so are clip distances, which only the stage that writes them names
+        if (p.e.features.has(check::feature::clip_distances))
+            out += "enable clip_distances;\n\n";
         // EMIT-127: `@builtin(primitive_index)` is an extension of WGSL, which the text enables first.
         for (auto const& input : p.e.stage_inputs)
             if (input.input == check::stage_input::primitive_id)

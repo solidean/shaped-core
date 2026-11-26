@@ -1186,6 +1186,19 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
             });
     };
 
+    // CHK-574: WGSL hands a pixel stage no clip distance, so no target reads one there yet
+    if (info.entry_stage == stage::pixel)
+        for (auto const& x : f.entry.exprs)
+            if (auto const* const member = x.node.try_as<flat_member>(); member != nullptr && !member->is_swizzle())
+                if (auto const object = f.entry.at(member->object).type;
+                    is_valid(object) && object != checked_module::error_type && out.builtin_type_of(object) == nullptr
+                    && out.at(object).kind == type_kind::structure && member->member >= 0
+                    && member->member < isize(out.at(object).members.count)
+                    && out.at(out.at(object).members)[member->member].is_clip_distances)
+                    report_of_entry(diagnostic_kind::unsupported_yet, x.from.file,
+                                    ast::is_valid(x.from.expr) ? span_of(x.from.file, x.from.expr)
+                                                               : span_of(x.from.file, x.from.stmt),
+                                    "a read of clip distances in a pixel stage, which WGSL hands it none of");
     // CHK-566, CHK-567: early tests write depth before the stage, which a discard keeps and memory writes observe
     if (info.is_early_depth_test)
     {

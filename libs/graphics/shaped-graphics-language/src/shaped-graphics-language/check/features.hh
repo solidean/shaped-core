@@ -100,6 +100,8 @@ enum class sgl::check::feature : sgl::u8
     readwrite_norm16_image_formats,
     /// `@early_depth_test` on a pixel stage that writes memory or discards (CHK-567), which WebGPU has on no device.
     early_depth_test,
+    /// A `@clip_distances` field of what a vertex stage hands the rasterizer (CHK-575); WebGPU's `clip-distances`.
+    clip_distances,
 };
 
 CC_FLAG_ENUM_INDEXED(sgl::check, feature, u64);
@@ -150,6 +152,7 @@ inline constexpr cc::string_view k_feature_names[] = {
     "float_round_trip_workaround",    //
     "readwrite_norm16_image_formats", //
     "early_depth_test",               //
+    "clip_distances",                 //
 };
 inline constexpr isize k_feature_count = isize(sizeof(k_feature_names) / sizeof(k_feature_names[0]));
 

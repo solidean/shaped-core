@@ -927,3 +927,34 @@ ASYNC_INVOCABLE_TEST("sg - an SGL pixel stage with @early_depth_test runs for no
     // neither draw passed the test, so no color reached the target
     CHECK(pixels[0].rgba_float(1, 1) == tg::vec4f(0, 0, 0, 0));
 }
+
+ASYNC_INVOCABLE_TEST("sg - an SGL vertex stage's clip distances cut what the rasterizer draws",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::clip_distances))
+        SKIP("this context clips by no distance a vertex stage writes");
+
+    // a rect over a 4 x 1 target, whose sixth clip distance is x: the two pixels left of the centre are cut away
+    auto vertices = cc::vector<corner>();
+    push_rect(vertices, tg::vec4f(-1, -1, 1, 1), 0.5f, 0);
+    auto const buffer = ctx->persistent.create_buffer_from_data(cc::move(vertices), sg::buffer_usage::vertex_buffer);
+    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::pixel_semantics::clipped_draw);
+    auto const pixels = co_await sg_test::draw_offscreen(*ctx,
+                                                         {.width = 4,
+                                                          .height = 1,
+                                                          .colors = {sg::pixel_format::rgba32_float},
+                                                          .target_set = shaders::pixel_semantics::tag_target::name,
+                                                          .clear_color = tg::vec4f(-1, -1, -1, -1)},
+                                                         [&](sg::rendering_scope& scope)
+                                                         {
+                                                             scope.bind_pipeline(*pipeline);
+                                                             scope.bind_vertex_buffer(buffer.as_vertex_buffer());
+                                                             scope.draw({.vertex_range = {.offset = 0, .size = 6}});
+                                                         });
+    for (auto x = 0; x < 4; ++x)
+        CHECK(pixels[0].rgba_float(x, 0) == (x < 2 ? tg::vec4f(-1, -1, -1, -1) : tg::vec4f(1, 0, 0, 1)))
+            .context(cc::format("pixel {}", x));
+}

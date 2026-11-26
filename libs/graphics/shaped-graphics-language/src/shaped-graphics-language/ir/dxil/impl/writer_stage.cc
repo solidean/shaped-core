@@ -69,6 +69,7 @@ struct system_rule
 constexpr system_rule k_systems[] = {
     {0, 0},   // an ordinary link or attribute
     {1, 3},   // SV_Position
+    {2, 6},   // SV_ClipDistance
     {6, 1},   // SV_VertexID
     {8, 2},   // SV_InstanceID
     {64, 16}, // SV_Target

@@ -162,7 +162,7 @@ described_struct describe_struct(check::checked_module const& m, check::type_inf
         auto [piece, pieces] = t.edge == check::stage::vertex ? pieces_of(m, member.type) : cc::pair<cc::string, i32>();
         // the position, the layer, the depth and the sample mask take no location
         auto const takes_location = !member.is_position && !member.is_layer && !member.is_viewport_index
-                                 && member.output == check::pixel_output::color;
+                                 && !member.is_clip_distances && member.output == check::pixel_output::color;
         result.members.push_back({.name = member.name,
                                   .type = host_spelling(m, member.type),
                                   .location = takes_location ? location : -1,

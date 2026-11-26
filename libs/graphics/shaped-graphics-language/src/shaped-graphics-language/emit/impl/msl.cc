@@ -89,6 +89,8 @@ public:
             return "render_target_array_index";
         if (member.is_viewport_index)
             return "viewport_array_index";
+        if (member.is_clip_distances)
+            return "clip_distance";
         switch (s.role)
         {
         case struct_role::vertex_input:
@@ -147,6 +149,12 @@ public:
                 ? cc::format("array<{}, {}>", builtin_spelling(p, row_vector_of(p, p.m.at(member.type).element)),
                              p.m.at(member.type).count)
                 : cc::string(type_text(p, *this, member.type));
+        // EMIT-290: MSL's clip distances are a C array, its attribute between the name and the extent
+        if (member.is_clip_distances && p.m.at(member.type).kind == type_kind::array)
+        {
+            out.appendf("{}float {} [[clip_distance]] [{}];\n", k_indent, member.name, p.m.at(member.type).count);
+            return;
+        }
         out.appendf("{}{}{} {}", k_indent, is_packed_tail ? "packed_" : "", type, member.name);
         if (owner != nullptr)
             if (auto const attribute = attribute_of(*owner, member); !attribute.empty())

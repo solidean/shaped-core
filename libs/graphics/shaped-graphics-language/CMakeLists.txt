@@ -592,6 +592,7 @@ if(SC_BUILD_TESTS)
         tests/emit/debug-emit-test.cc
         tests/emit/vertex-pipeline-atomics-emit-test.cc
         tests/emit/early-depth-emit-test.cc
+        tests/emit/clip-distances-emit-test.cc
 
         tests/driver/classify-test.cc
         tests/driver/references-test.cc

@@ -745,6 +745,26 @@ struct writer
                 widen_array_into(cc::format("{}.{}", name, planned.members[planned.member_of[i]].name),
                                  p.e.at(arguments[i]).type, expr(arguments[i]).text,
                                  mat3_cell_field(p, p.e.at(arguments[i]).type));
+            // EMIT-290: MSL's clip distances are a C array, which takes no `array`, so it is filled a lane at a time
+            else if (planned.member_of[i] >= 0 && planned.members[planned.member_of[i]].is_clip_distances
+                     && d.language() == builtins::language::msl && is_array(p.e.at(arguments[i]).type))
+            {
+                auto value = expr(arguments[i]).text;
+                if (!is_name(value))
+                {
+                    auto const held = p.names.mint("clipped");
+                    auto declaration = cc::string();
+                    d.write_local(declaration, {.name = held,
+                                                .type = type_text(p, d, p.e.at(arguments[i]).type),
+                                                .value = value,
+                                                .dimensions = array_dimensions(p, p.e.at(arguments[i]).type)});
+                    line(declaration);
+                    value = held;
+                }
+                for (auto lane = isize(0); lane < isize(p.m.at(p.e.at(arguments[i]).type).count); ++lane)
+                    line(cc::format("{}.{}[{}] = {}[{}];", name, planned.members[planned.member_of[i]].name, lane,
+                                    value, lane));
+            }
             else if (planned.member_of[i] >= 0)
                 line(cc::format("{}.{} = {};", name, planned.members[planned.member_of[i]].name,
                                 holds_widened_mat3(p, x.type, i)

@@ -329,6 +329,11 @@ enum class sg::feature
     /// whether it discards: SGL's `@early_depth_test` on a stage where the order changes a result.
     /// D3D12, Vulkan and Metal grant it on every device; WebGPU has no such attribute, so it never grants it.
     early_depth_test,
+
+    /// A vertex shader may hand the rasterizer clip distances, which cut each primitive where one is below 0: SGL's
+    /// `@clip_distances` field.
+    /// D3D12 and Metal grant it on every device, Vulkan with `shaderClipDistance`, and WebGPU with `clip-distances`.
+    clip_distances,
 };
 
 CC_FLAG_ENUM_INDEXED(sg, feature, cc::u64);
@@ -393,8 +398,9 @@ inline constexpr feature k_all_features[] = {
     feature::norm16_filtering,
     feature::independent_blend,
     feature::early_depth_test,
+    feature::clip_distances,
 };
-static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize(feature::early_depth_test) + 1,
+static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize(feature::clip_distances) + 1,
               "k_all_features lists every feature");
 
 /// The enumerator's name, `ray_query`, which is also what SGL's `require` spells it as.
@@ -508,6 +514,8 @@ static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize
         return "independent_blend";
     case feature::early_depth_test:
         return "early_depth_test";
+    case feature::clip_distances:
+        return "clip_distances";
     }
     return "";
 }

@@ -1195,6 +1195,7 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     // a pipeline that uses one without the device feature enabled fails validation, whatever the device has.
     // `samplerAnisotropy` is enabled wherever the device has it too, and a sampler asking for anisotropy without it is created with it off.
     // `drawIndirectFirstInstance` too, without which an indirect record's `first_instance` must be 0.
+    // `shaderClipDistance` too, which sg::feature::clip_distances reports.
     // `independentBlend` too, without which every color target of a pipeline must blend alike, as dx12, metal and webgpu never ask.
     auto supported = VkPhysicalDeviceFeatures{};
     vkGetPhysicalDeviceFeatures(best_device, &supported);
@@ -1214,6 +1215,7 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
                      .vertexPipelineStoresAndAtomics = supported.vertexPipelineStoresAndAtomics,
                      .fragmentStoresAndAtomics = VK_TRUE,
                      .shaderStorageImageExtendedFormats = supported.shaderStorageImageExtendedFormats,
+                     .shaderClipDistance = supported.shaderClipDistance,
                      .shaderFloat64 = shader_features.shader_float64,
                      .shaderInt64 = shader_features.shader_int64,
                      .shaderInt16 = shader_features.shader_int16},
@@ -1425,6 +1427,7 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     ctx->_multi_viewport = supported.multiViewport == VK_TRUE && shader_features.shader_output_viewport_index == VK_TRUE;
     ctx->_view_instancing = shader_features.multiview == VK_TRUE;
     ctx->_vertex_pipeline_stores = supported.vertexPipelineStoresAndAtomics == VK_TRUE;
+    ctx->_clip_distances = supported.shaderClipDistance == VK_TRUE;
     ctx->_float_atomic_add = float_atomic_add_supported;
     ctx->_quad_control = quad_control_supported;
     ctx->_shader_execution_reordering = raytracing_supported && reorder_supported;

@@ -450,6 +450,8 @@ struct sgl::check::member_info
     bool is_layer = false;
     /// Carries `@viewport_index`: the viewport the vertex stage sends its primitive to (CHK-534).
     bool is_viewport_index = false;
+    /// `@clip_distances` on a `float[N]` field of what reaches the rasterizer: its clip distances (CHK-571).
+    bool is_clip_distances = false;
     /// `@interpolate(…)`, or the default: perspective at the pixel centre.
     interpolation interpolate;
     /// Carries `@interpolate` at all, which a member that is no stage link must not.

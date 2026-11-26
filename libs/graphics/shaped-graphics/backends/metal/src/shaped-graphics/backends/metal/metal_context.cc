@@ -188,6 +188,9 @@ bool metal_context::supports(sg::feature f) const
     case sg::feature::early_depth_test:
         // `[[early_fragment_tests]]` is on every Apple GPU
         return true;
+    case sg::feature::clip_distances:
+        // `[[clip_distance]]` is on every Apple GPU
+        return true;
     case sg::feature::wireframe_fill:
         // `MTLTriangleFillModeLines` is on every Apple GPU.
         return true;
