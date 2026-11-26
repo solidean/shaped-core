@@ -1819,6 +1819,9 @@ struct writer
                 auto text = cc::string();
                 if (p.e.at(v.value).type == checked_module::void_type)
                     text = cc::format("{};", value.text);
+                // an operation whose value is dropped, `let _ = n * 2`, which DXC refuses as an unused result
+                else if (d.language() == builtins::language::hlsl && value.binds != level::primary)
+                    text = cc::format("(void)({});", value.text);
                 else
                     d.write_eval(text, value.text);
                 line(text);
