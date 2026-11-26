@@ -1,8 +1,8 @@
 // The rotating cube again, with its shader written in SGL: one `cube.sgl` for dx12, vulkan and webgpu alike.
 //
 // examples/graphics/rotating-cube is the same program with one shader language per backend, HLSL twice and WGSL once.
-// Here the package is SGL, and slib's SGL compiler edge writes it as the text the backend's own compiler reads.
-// So nothing on the shader side forks: every `#if` left is about the host, which context to create and whether DXC exists.
+// Here the package is SGL, and slib's SGL compiler edge writes what the backend takes: DXIL, SPIR-V or WGSL, with no DXC.
+// So nothing on the shader side forks: every `#if` left is about the host, which context to create.
 //
 // The host side is generated from cube.sgl too: the vertex struct, the render target, the inline constants, and the
 // pipeline cube.sgl declares, which is everything the draw is built from but the swapchain's format.
