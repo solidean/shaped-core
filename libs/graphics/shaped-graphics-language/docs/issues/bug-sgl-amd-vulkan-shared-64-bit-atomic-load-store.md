@@ -4,8 +4,6 @@ refs:
   - file: docs/bugs-external/amd-vulkan-shared-64-bit-atomic-store-keeps-high-word/readme.md
   - file: libs/graphics/shaped-graphics-language/src/shaped-graphics-language/ir/spirv/impl/writer_operations.cc
   - test: sg vulkan - workgroup 64-bit atomics on a device that has them (CHK-510)
-claimed-by: Claude (for Philip Trettner)
-claimed-at: 2026-11-26T06:57Z
 ---
 
 # A 64-bit atomic load or store of workgroup memory reads wrong on AMD's vulkan driver, so SGL writes DXC's exchange and or instead
