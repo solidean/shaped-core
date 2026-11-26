@@ -540,7 +540,7 @@ described_raytracing_pipeline describe_raytracing_pipeline(check::checked_module
         result.max_attribute_size = check::checked_module::max_attribute_bytes;
     for (auto const b : m.at(p.layout))
         result.layout.push_back(host_name_of(m, b));
-    // CHK-NEW: every table of the program's callable section, in its order
+    // CHK-562: every table of the program's callable section, in its order
     auto tables = cc::vector<check::pipeline_info const*>();
     for (auto const t : m.callable_tables)
         tables.push_back(&m.pipelines[m.at(t).info]);
@@ -1148,7 +1148,7 @@ cc::result<sgl::module_description, cc::string> sgl::describe(describe_request c
         else
             result.pipelines.push_back(describe_pipeline(m, p, legal));
     }
-    // CHK-NEW: the program's whole callable section, its modules' tables too, so a host builds no index by hand
+    // CHK-562: the program's whole callable section, its modules' tables too, so a host builds no index by hand
     if (!is_module)
         for (auto const t : m.callable_tables)
             result.callables.push_back(describe_callables(m, m.pipelines[m.at(t).info]));

@@ -723,7 +723,7 @@ ASYNC_INVOCABLE_TEST("sg - an SGL ray-tracing pipeline calls the module's callab
 // raytracing_callables_used.sgl's `stepping`: its raygen uses a module, so it is checked behind the library's whole chain,
 // which holds `aside_callables`'s table too.
 // Thread i calls callable `i % 2` of `steps`, which starts the callable section the host's table holds: a table of a
-// module the raygen never reaches moves neither (CHK-NEW).
+// module the raygen never reaches moves neither (CHK-562).
 
 ASYNC_INVOCABLE_TEST("sg - an SGL raygen that uses a module calls its own callables where its table holds them",
                      (sg::context_handle const& ctx))

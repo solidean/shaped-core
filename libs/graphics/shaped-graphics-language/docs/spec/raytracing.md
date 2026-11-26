@@ -546,7 +546,7 @@ callables ops = (doubled, negated, .host)
     operands.values[id.x] = float4(v.x, 0.0, 0.0, 0.0)
 ```
 
-* **A table is the program's, not a pipeline's**: every ray-tracing pipeline of the program holds its **callable section**, every table of the modules it reaches (CHK-NEW).
+* **A table is the program's, not a pipeline's**: every ray-tracing pipeline of the program holds its **callable section**, every table of the modules it reaches (CHK-562).
   A used module's tables come before its user's, modules free to come in either order by name, and a module's tables in declaration order, so the program's own come last.
   So a table's place in the callable section is a constant of the program, and a stage that calls one compiles once, whichever pipeline it joins.
   A module of the library the program does not reach takes no place, and `describe` lists each table with its place.

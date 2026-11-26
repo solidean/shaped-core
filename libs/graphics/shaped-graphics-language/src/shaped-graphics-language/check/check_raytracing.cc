@@ -870,7 +870,7 @@ void checker::compile_raytracing_pipeline(symbol_id id)
             entries.push_back(out.pipelines[out.at(group).info].intersection);
         }
         // CHK-343: every callables table of the reached modules joins every ray-tracing pipeline; the section's order
-        // (CHK-NEW) is made after every symbol compiled, and only which tables join matters here
+        // (CHK-562) is made after every symbol compiled, and only which tables join matters here
         for (auto i = isize(0); i < out.symbols.size(); ++i)
         {
             auto const table = symbol_id(i);

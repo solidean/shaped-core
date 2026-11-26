@@ -5,7 +5,7 @@
 
 using namespace sgl_test;
 
-// CHK-NEW: a call of a callable is compiled at its table's place in the program's callable section.
+// CHK-562: a call of a callable is compiled at its table's place in the program's callable section.
 // The section holds the tables of the modules the program reaches and of no other module, in an order the files'
 // `module` and `use` lines and the modules' names fix.
 // Every way a compile checks the program, and every module of the library it does not reach, must leave each place

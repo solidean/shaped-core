@@ -880,7 +880,7 @@ auto sgl::check::impl::flattener::flatten_callable_call(ast::expr_id id, ast::ca
     -> flat_expr_id
 {
     auto const where = origin{.file = file(), .expr = id};
-    // CHK-NEW: the table's place in the program's callable section, which holds the tables of reached modules alone
+    // CHK-562: the table's place in the program's callable section, which holds the tables of reached modules alone
     auto const base = c.out.callable_offset_of(t.table);
     // a program's call reaches its table, so only a module's test in a link of the library's chain, which reaches no
     // module, finds none; the link is refused, and the check beside the library reports that test (CHK-344)

@@ -577,11 +577,11 @@ The attributes are a struct of the program because every target passes them as a
 
 ## CHK-343
 
-A table belongs to the program's callable section rather than to a pipeline so that its place there is a constant of the program (CHK-NEW).
+A table belongs to the program's callable section rather than to a pipeline so that its place there is a constant of the program (CHK-562).
 Were a table the pipeline's, a stage calling it would compile once per pipeline, with another offset each time, and a stage shared by two pipelines would be two shaders.
 The cost is that every pipeline of the program holds every callable of the section, which costs table space and nothing else.
 
-## CHK-NEW
+## CHK-562
 
 A table's place is compiled into every call of it, and the host builds its shader table to the same places, so a place depends on what the program reaches and on nothing else.
 Counting the tables of every module of the library would move a pipeline's indices whenever a module nothing of the pipeline uses gains a table, or a file joins the library.

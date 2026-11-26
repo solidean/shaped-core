@@ -1417,7 +1417,7 @@ struct checker
                                 ast::call const& call,
                                 ast::index const& index,
                                 symbol_id table);
-    /// CHK-NEW: `out.callable_tables`, the tables of the modules the program reaches in the order of its callable
+    /// CHK-562: `out.callable_tables`, the tables of the modules the program reaches in the order of its callable
     /// section, made from the files' `module` and `use` lines alone, so every way of checking the program agrees.
     void order_callables();
     /// CHK-343: at most one table of the callable section takes the host's callables, and it is the section's last.

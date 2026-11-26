@@ -534,7 +534,7 @@ struct flattener
     flat_expr_id decide_report(origin from, flat_expr_id reported);
 
     /// CHK-344: `table[i](mut p)` is a call of callable `base + i` of the program's callable section, where `base` is
-    /// the table's place in it (CHK-NEW).
+    /// the table's place in it (CHK-562).
     flat_expr_id flatten_callable_call(ast::expr_id id, ast::call const& call, callable_call const& t);
 
     /// The element `place` names, over a local holding its index where evaluating the index twice could differ.

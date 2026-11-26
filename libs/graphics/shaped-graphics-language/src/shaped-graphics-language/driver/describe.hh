@@ -16,7 +16,7 @@
 /// A type is named as SGL spells it, `float3` or `mat4`, and mapping it to a host type is the reader's job.
 /// It holds only what the file itself declares: a module it `use`s describes its own declarations.
 /// The callable section is the exception: it lists the tables of every module the program reaches, since their places
-/// are the program's (CHK-NEW).
+/// are the program's (CHK-562).
 /// A name of such a module the file writes is spelled as the program names it, `view.frame`, whatever name the file's
 /// `use` gave the module, so the host refers to that module's declaration rather than generating a second one.
 ///
@@ -391,7 +391,7 @@ struct sgl::described_hit_group
     cc::vector<cc::string> traversals;
 };
 
-/// A `callables` table of the program's callable section: callable shaders of one parameter type (CHK-343, CHK-NEW).
+/// A `callables` table of the program's callable section: callable shaders of one parameter type (CHK-343, CHK-562).
 struct sgl::described_callables
 {
     /// Bare for the program's own module's, `m.name` for a module's it uses (CHK-348).
@@ -428,7 +428,7 @@ struct sgl::described_raytracing_pipeline
     cc::vector<cc::string> layout;
     cc::string inline_constants;
     cc::vector<cc::string> features;
-    /// Every callable of the program's callable section, in its order (CHK-NEW), which the pipeline's callable section
+    /// Every callable of the program's callable section, in its order (CHK-562), which the pipeline's callable section
     /// holds first; a module's named `m.name`, as `described_callables::entries` names it (CHK-348).
     cc::vector<cc::string> callables;
     bool has_host_callables = false;

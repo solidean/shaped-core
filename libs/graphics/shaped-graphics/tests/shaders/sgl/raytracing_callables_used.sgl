@@ -1,6 +1,6 @@
 // Callables of a raygen that uses a module of the library, so it is checked behind the library's whole chain.
 // That chain holds `aside_callables`'s table too, which the raygen never reaches: its own table still starts its
-// callable section, and thread i calls callable `i % 2` of `steps` (CHK-NEW).
+// callable section, and thread i calls callable `i % 2` of `steps` (CHK-562).
 require raytracing_pipeline
 use callable_start
 

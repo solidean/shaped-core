@@ -1995,7 +1995,7 @@ cc::vector<sgl::check::symbol_id> sgl::emit::impl::owning_ray_sets(check::checke
         switch (p.kind)
         {
         case check::pipeline_kind::raytracing:
-            // every callable of the program's callable section is in each ray-tracing pipeline (CHK-NEW)
+            // every callable of the program's callable section is in each ray-tracing pipeline (CHK-562)
             return p.raygen == e.function || is_in(m.at(p.misses), e.function) || e.entry_stage == check::stage::callable;
         case check::pipeline_kind::hit_group:
             return p.intersection == e.function || is_in(m.at(p.records), e.function);

@@ -69,7 +69,7 @@ struct slib::raytracing_pipeline_definition
     bool has_host_hit_groups = false;
     /// Its package takes `SOFTWARE_TRACE`, which a host's hit group or callable compiles with too: metal links them only alike.
     bool software_trace = false;
-    /// Every callable of the program's callable section, in its order (SGL's CHK-NEW), and whether the host appends its
+    /// Every callable of the program's callable section, in its order (SGL's CHK-562), and whether the host appends its
     /// own after them.
     cc::span<shader_asset_handle const* const> callables;
     bool has_host_callables = false;

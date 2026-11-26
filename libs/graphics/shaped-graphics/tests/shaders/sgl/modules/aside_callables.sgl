@@ -1,5 +1,5 @@
 // A module no shader of the package uses, with a callables table of its own.
-// The library's chain checks it ahead of every program, and it takes no place in their callable sections (CHK-NEW):
+// The library's chain checks it ahead of every program, and it takes no place in their callable sections (CHK-562):
 // `raytracing_callables_used.sgl`, which uses another module of the library, still calls its own `steps` at 0 and 1.
 module aside_callables
 require raytracing_pipeline

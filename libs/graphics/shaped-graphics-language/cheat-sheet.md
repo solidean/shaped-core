@@ -744,7 +744,7 @@ hit_group textured for path_rays:                        // one row: a record pe
     raygen = primary
     miss.surface = sky
     hit_groups = (textured, .host)                       // `.host` last, and then max_recursion_depth = N is required
-callables ops = (doubled, negated, .host)                // in the program's callable section (CHK-343, CHK-NEW)
+callables ops = (doubled, negated, .host)                // in the program's callable section (CHK-343, CHK-562)
 ops[i](mut v)                                            // raygen, miss, closest hit, callable (CHK-344)
 ```
 
