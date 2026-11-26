@@ -31,3 +31,25 @@ It happens on every run under `--thorough`, in under 8 s once the shaders are ca
 `SC_GPU=amd uv run dev.py test "sv - the path tracer through SGL's binary traces what DXC's traces, on dx12 and on vulkan" --thorough`.
 The DXIL route agrees with DXC's on every case of the same run, to 1.7e-6 relative.
 Not yet known: whether DXC's SPIR-V traces the case on this driver in the same process, and what changed since the 32 pixels, the driver or SGL.
+
+**2026-11-26, later: not SGL's, and not the cutout case alone.**
+Traced alone, with `SC_EXP_CASE`-style selection in an experiment, cutout passes on both SPIR-V routes, to 1e-6 relative.
+It goes black, and mostly loses the device, only after another case traced in the same process, and only some:
+
+| traced first, then cutout | result on AMD's vulkan |
+|---|---|
+| nothing, pbr, openpbr constants, cutout | traces |
+| unlit, mesh attributes | black on both routes, or the device lost |
+
+Unlit followed by pbr, textured, quadrics or openpbr constants traces, so the trigger is the cutout panel's stochastic any-hit after one of those two.
+DXC's SPIR-V fails exactly as SGL's does, once DXC's route traces first, so what SGL writes is not the cause.
+The Arc traces the same sequence on vulkan, and the AMD iGPU on dx12.
+Every hit stage of the cutout pipeline is byte for byte the same in the run that traces and the run that fails, on both routes.
+Not it, each tried:
+- the alpha-cutoff box or the quadrics, since the floor, a plain box and the panel suffice;
+- the persistent pipeline tier, off under `SC_SG_COLD=pipelines`;
+- the previous case's resources being released and their slots reused, since keeping them alive changes nothing;
+- the `StorageBufferArrayNonUniformIndexing` capability both routes leave out, patched in.
+Validation, synchronization validation and GPU-assisted validation report nothing before the loss.
+So one pipeline, from the same modules and the same scene, traces or hangs by what the process ran before, which points at state in AMD's driver.
+Next: reduce outside sv, from the dumped modules and the layout they bind, or ask whether the driver caches compiled hit shaders across pipelines.
