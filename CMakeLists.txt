@@ -45,6 +45,8 @@ option(SC_BUILD_TOOLS "Build the developer tools in tools/" ${PROJECT_IS_TOP_LEV
 # shaped-linter alone, which `dev.py lint shaped` builds: a consuming project wants it without shaped-core's other tools,
 # some of which carry tests of their own that its `dev.py test` would then find.
 option(SC_BUILD_LINTER "Build shaped-linter" ${SC_BUILD_TOOLS})
+# sgl alone, the compiler every SGL shader package runs at build time: a consuming project that draws needs it, shaped-rendering's own shaders included.
+option(SC_BUILD_SGL "Build sgl, which SGL shader packages compile with" ${SC_BUILD_TOOLS})
 
 # Examples are built by every normal and CI build and executed by nobody automatically — building them is
 # what keeps them compiling against the API they demonstrate. `dev.py example <match>` runs exactly one.
@@ -296,6 +298,14 @@ if(APPLE)
     set(SC_HAS_METAL_COMPILER ON)
 else()
     set(SC_HAS_METAL_COMPILER OFF)
+endif()
+
+# A project that adds shaped-core as a subdirectory reads both too, to gate what compiles shaders (docs/guides/starting-a-project.md).
+# Plain variables stop at this directory, so they are handed up; a top-level build has no parent to hand them to.
+get_directory_property(_sc_parent_directory PARENT_DIRECTORY)
+if(_sc_parent_directory)
+    set(SC_HAS_DXC_COMPILER ${SC_HAS_DXC_COMPILER} PARENT_SCOPE)
+    set(SC_HAS_METAL_COMPILER ${SC_HAS_METAL_COMPILER} PARENT_SCOPE)
 endif()
 
 # Whether a window backend is available.

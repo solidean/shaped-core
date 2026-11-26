@@ -43,6 +43,8 @@ _LAZY: dict[str, tuple[str, str]] = {
     'build_server_from_dev_toml': ('.lib.pipeline.build_server', 'from_dev_toml'),
     'remove_build_dir': ('.lib.pipeline.cmake', 'remove_build_dir'),
     'configure': ('.lib.pipeline.configure', 'configure'),
+    'Prerequisite': ('.lib.pipeline.prereqs', 'Prerequisite'),
+    'register_project_prerequisites': ('.lib.pipeline.prereqs', 'register_project_prerequisites'),
     'ensure_configured': ('.lib.pipeline.configure', 'ensure_configured'),
     'BuildMark': ('.lib.pipeline.diagjobs', 'BuildMark'),
     'harvest_build_jobs': ('.lib.pipeline.diagjobs', 'harvest'),

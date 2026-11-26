@@ -254,6 +254,8 @@ Each entry above names what it depends on, and the `CMakeLists.txt` files are th
 * **Absolute paths are never baked into binaries** ([Build Configurations](docs/coding-guidelines.md#build-configurations)).
   A source-tree directory goes through `sc_target_source_paths` and `nx::source_path`, and `check`'s `abspaths` gate holds the line.
 * **Work goes straight to `main`** (see Git workflow).
+* **When everything points at a driver, runtime or compiler bug, reduce it to a standalone repro in [docs/bugs-external/](docs/bugs-external/_index.md),**
+  then work around it or skip it keyed to what was measured, and link the two — the procedure is that index's.
 * **Never wait for CI.** Push and move on; a red run is fixed after the fact, directly on `main`.
 * **No force-push to `main`.**
 
@@ -330,6 +332,7 @@ The loop is **run `dev.py`, then diagnose with `repo_tools`** — `build_diag` a
 * `SC_BUILD_TESTS` / `SC_BUILD_TOOLS` / `SC_BUILD_EXAMPLES` gate the `*-test` binaries, `tools/` and the `*-example` binaries.
   All default to ON for a top-level build (the normal flow) and OFF when shaped-core is consumed via `add_subdirectory`.
   `SC_BUILD_LINTER` (default: `SC_BUILD_TOOLS`) is shaped-linter alone, which a consuming project builds for `dev.py lint shaped`.
+  `SC_BUILD_SGL` (default: `SC_BUILD_TOOLS`) is the `sgl` tool alone, which a consuming project with SGL shader packages needs at build time.
 * `SC_THREADS` (default ON) is the repo-wide threading knob → clean-core's `CC_HAS_THREADS`.
   **No API is gated on it** — threaded types keep their full surface and fall back to running on the calling thread, so never `#if` a declaration away.
   OFF is a whole-build switch, never per-target, and CI and `check --all-presets` run a `singlethreaded-*` preset so both modes stay exercised.

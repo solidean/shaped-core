@@ -64,6 +64,15 @@ constexpr sg::known_issue registry[] = {
                 "into a row of a vertex's, as the mesh spec forbids",
      .affects
      = [](sg::context const& ctx) { return ctx.backend() == sg::backend_kind::dx12 && is_hardware(ctx, vendor_amd); }},
+    {.id = "amd-vulkan-cutout-trace-after-another-hangs",
+     .symptom = "AMD's vulkan driver traces sv's stochastic cutout black, or hangs, after some other ray-tracing "
+                "pipelines traced in the process, from the very modules it traces right alone",
+     .affects =
+         [](sg::context const& ctx)
+     {
+         return ctx.backend() == sg::backend_kind::vulkan && is_hardware(ctx, vendor_amd)
+             && ctx.metrics.adapter().driver_name != "radv";
+     }},
     {.id = "nvidia-mesh-groupshared-atomics-lost",
      .symptom = "NVIDIA's driver loses workgroup atomics of some mesh-shader invocations",
      .affects = [](sg::context const& ctx) { return is_hardware(ctx, vendor_nvidia); }},
