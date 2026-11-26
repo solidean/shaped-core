@@ -17,3 +17,11 @@ Either the pipeline cache declines the default store where no SQLite backend exi
 
 2026-11-06: the emscripten-webgpu build has no SQLite backend at all, so every sv viewer there logs `[bcache] cache degraded to always-miss` once.
 Under nexus that fails the run by the log rule: `dev.py example web-viewer --preset emscripten-webgpu-release` drew its frames and still failed on it.
+
+## Log
+
+**2026-11-26: bcache reports a build with no SQLite backend as information.**
+The pipeline cache had stopped opening the default store on webgpu with `c77fd4f96`, but sv's `background_work` still awaited the default cache's backlog, which opens it.
+`default_cache.hh` already promised that calling it unconditionally is correct, so the fix is bcache's: a build that persists nothing by design is no degradation to warn about.
+`dev.py example web-viewer --preset emscripten-webgpu-relwithdebinfo --capture` now logs `cache misses on everything` at info.
+It still fails, on a render routine pending for 600 ticks, which is another matter.
