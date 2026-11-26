@@ -25,3 +25,8 @@ This is SGL's to fix or to explain, since both routes run one source on one driv
 2026-11-25: it does not reproduce on RADV (Steam Deck, RDNA 2, Mesa's ACO), now that the test also builds on Linux with vulkan alone.
 `--thorough`, every case on the native SPIR-V route agrees with DXC's: cutout differs in 64 of 2304 pixels, by up to 2.8e-7 absolute and 1.5e-6 relative.
 So the same SPIR-V traces alike on another RDNA 2 compiler, which points at AMD's own Windows compiler rather than at what SGL writes; the module diff is still the next step.
+
+2026-11-26: worse now, on the AMD iGPU with vulkan driver 2.0.353: the cutout case through SGL's SPIR-V traces an image of nothing, then the device is lost.
+It is every run, under `--thorough`, in under 8 s once the shaders are cached: `SC_GPU=amd uv run dev.py test "sv - the path tracer through SGL's binary traces what DXC's traces, on dx12 and on vulkan" --thorough`.
+The DXIL route agrees with DXC's on every case of the same run, to 1.7e-6 relative.
+Not yet known: whether DXC's SPIR-V traces the case on this driver in the same process, and what changed since the 32 pixels, the driver or SGL.
