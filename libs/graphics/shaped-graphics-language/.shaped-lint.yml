@@ -12,7 +12,7 @@ rules:
   - kind: allow-include
     value: <cstdlib>
     reason: std::system runs spirv-val over each module the SPIR-V route writes; clean-core runs no process yet
-    files: tests/emit/spirv-emit-test.cc
+    files: [tests/emit/spirv-emit-test.cc, tests/emit/unroll-emit-test.cc]
 
   - kind: allow-include
     value: <filesystem>

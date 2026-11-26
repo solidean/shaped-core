@@ -287,6 +287,23 @@ void writer::find_loop_breaks()
         }
     auto const dom = dominance(first, preds);
 
+    // EMIT-291: an edge back to a block that dominates its source is a back edge, and its loop's header that block
+    _rolled_back_to.resize_to_filled(_p.blocks.size(), k_no_loop);
+    _loop_nodes.resize_to_filled(_p.blocks.size(), 0u);
+    for (auto const x : order)
+    {
+        if (!is_reachable(x))
+            continue;
+        auto const& block = _p.blocks[isize(x)];
+        auto innermost = k_no_loop;
+        for (auto const to : successors_of(_p, _p.instructions[block.first + block.count - 1], scratch))
+            if (dom.dominates(position[to], position[isize(x)])
+                && (innermost == k_no_loop || dom.dominates(position[innermost], position[to])))
+                innermost = to;
+        if (innermost != k_no_loop && _p.blocks[isize(innermost)].hint == loop_hint::rolled)
+            _rolled_back_to[isize(x)] = innermost;
+    }
+
     for (auto const h : order)
     {
         auto const& header = _p.blocks[isize(h)];
@@ -335,6 +352,26 @@ void writer::find_loop_breaks()
                 _loop_breaks.push_back({.from = u32(x), .merge = u32(m), .back = back});
         }
     }
+    for (auto& l : _loop_breaks)
+        l.is_rolled_back
+            = _p.blocks[isize(l.back)].hint == loop_hint::rolled && dom.dominates(position[l.back], position[l.from]);
+}
+
+void writer::mark_back_edge(u32 header)
+{
+    if (header == k_no_loop)
+        return;
+    if (_loop_nodes[header] == 0)
+    {
+        if (_unroll_disable == 0)
+        {
+            u32 const disable[] = {_m.md_string("llvm.loop.unroll.disable")};
+            _unroll_disable = _m.md_node(disable);
+        }
+        u32 const properties[] = {_unroll_disable};
+        _loop_nodes[header] = _m.md_loop(properties);
+    }
+    _m.set_loop(_loop_nodes[header]);
 }
 
 auto writer::loop_break_of(u32 from, u32 to) const -> loop_break const*
@@ -441,8 +478,12 @@ void writer::terminator(instruction const& i)
     {
     case op::branch:
         if (auto const* const l = loop_break_of(_lowering, operands[0]))
-            return _m.branch_if(_break_condition, _blocks[l->merge], _blocks[l->back]);
-        return _m.branch(_blocks[operands[0]]);
+        {
+            _m.branch_if(_break_condition, _blocks[l->merge], _blocks[l->back]);
+            return mark_back_edge(l->is_rolled_back ? l->back : _rolled_back_to[_lowering]);
+        }
+        _m.branch(_blocks[operands[0]]);
+        return mark_back_edge(_rolled_back_to[_lowering]);
     case op::branch_conditional:
     {
         // EMIT-285: a branch on a negation branches on what it negates, its ways swapped
@@ -458,18 +499,23 @@ void writer::terminator(instruction const& i)
         auto const* const yes = loop_break_of(_lowering, if_true);
         auto const* const no = loop_break_of(_lowering, if_false);
         if (yes == nullptr && no == nullptr)
-            return _m.branch_if(leaf_at(condition), _blocks[if_true], _blocks[if_false]);
+        {
+            _m.branch_if(leaf_at(condition), _blocks[if_true], _blocks[if_false]);
+            return mark_back_edge(_rolled_back_to[_lowering]);
+        }
         // both ways out to one merge: the break's block alone, so the merge has the one edge its phis name
         if (yes == no)
             _m.branch(yes->split);
         else
             _m.branch_if(leaf_at(condition), yes != nullptr ? yes->split : _blocks[if_true],
                          no != nullptr ? no->split : _blocks[if_false]);
+        mark_back_edge(_rolled_back_to[_lowering]);
         for (auto const* const l : {yes, no})
             if (l != nullptr && (l == yes || yes != no))
             {
                 _m.open_block(l->split);
                 _m.branch_if(_break_condition, _blocks[l->merge], _blocks[l->back]);
+                mark_back_edge(l->is_rolled_back ? l->back : k_no_loop);
             }
         return;
     }
@@ -481,7 +527,8 @@ void writer::terminator(instruction const& i)
             cases.push_back(u32(_m.constant_i32(operands[k])));
             cases.push_back(u32(_blocks[operands[k + 1]]));
         }
-        return _m.switch_on(leaf_at(value_ref(operands[0])), _blocks[operands[1]], cases);
+        _m.switch_on(leaf_at(value_ref(operands[0])), _blocks[operands[1]], cases);
+        return mark_back_edge(_rolled_back_to[_lowering]);
     }
     case op::dispatch_mesh:
     {

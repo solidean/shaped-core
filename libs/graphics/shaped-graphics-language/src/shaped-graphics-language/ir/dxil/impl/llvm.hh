@@ -224,6 +224,10 @@ public:
     void md_named(cc::string_view name, cc::span<u32 const> nodes);
     /// A specialized node, such as a `DIFile`: LLVM's record `code` and its fields as LLVM 3.7 writes them.
     [[nodiscard]] u32 md_record(u32 code, cc::span<u64 const> fields);
+    /// A loop's `llvm.loop` node: distinct, itself its first operand, then `properties` (EMIT-291).
+    [[nodiscard]] u32 md_loop(cc::span<u32 const> properties);
+    /// Attaches the `llvm.loop` node `node` to the instruction added last, a terminator going back to its loop's header.
+    void set_loop(u32 node) { _instructions.back().loop = node; }
 
     // ---- debug info (EMIT-257), which only `write(..., with_debug_info)` states
     /// Where an instruction's debug location stands, and in what scope; ids are metadata ids, 0 for none.
@@ -468,6 +472,8 @@ private:
         u32 count = 0;
         /// The debug location's key, 0 for none.
         u32 location = 0;
+        /// The `llvm.loop` node a loop's back edge carries, 0 for none.
+        u32 loop = 0;
     };
     struct block_entry
     {

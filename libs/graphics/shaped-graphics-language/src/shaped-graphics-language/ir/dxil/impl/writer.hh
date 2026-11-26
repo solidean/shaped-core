@@ -271,12 +271,24 @@ private:
         u32 back = 0;
         /// A conditional branch's block on its edge to `merge`, which holds the branch on the condition.
         ll_block split = ll_block::none;
+        /// Whether `back` is the header of an `@unroll(false)` loop, so the split block's branch is a back edge of it.
+        bool is_rolled_back = false;
     };
     /// Every such break, found once the reachable blocks are known.
     void find_loop_breaks();
     /// The break from block `from` to block `to`; null where that edge is none.
     [[nodiscard]] loop_break const* loop_break_of(u32 from, u32 to) const;
     cc::vector<loop_break> _loop_breaks;
+    /// EMIT-291: by block, the header of the `@unroll(false)` loop its terminator goes back to, `k_no_loop` for none.
+    /// Of loops it goes back to several of, the innermost decides, as it is the innermost a `continue` names.
+    cc::vector<u32> _rolled_back_to;
+    /// By block, the `llvm.loop` node of the loop it heads, made where its first back edge is written; 0 before.
+    cc::vector<u32> _loop_nodes;
+    /// `!{!"llvm.loop.unroll.disable"}`, which every rolled loop's node names; 0 before the first.
+    u32 _unroll_disable = 0;
+    static constexpr u32 k_no_loop = 0xffffffffu;
+    /// Attaches the loop node of `header` to the terminator just written.
+    void mark_back_edge(u32 header);
     /// `@dx.break.cond`'s word, compared to 0: true wherever it is read, which no compile can tell.
     ll_value _break_condition = ll_value::none;
     /// The block `lower_block` is writing.

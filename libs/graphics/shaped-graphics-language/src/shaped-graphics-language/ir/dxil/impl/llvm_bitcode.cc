@@ -193,6 +193,10 @@ constexpr cc::string_view k_metadata_kinds[] = {
     "dx.nonuniform",
     "dx.precise",
 };
+/// The number `llvm.loop` takes after them, in a module whose loop asks a target's unrolling something (EMIT-291).
+/// DXC's context names the kind on first use, so a module of no such loop names none.
+constexpr cc::string_view k_metadata_kind_loop = "llvm.loop";
+constexpr u32 k_kind_loop = 19;
 /// The number of "dx.nonuniform" in `k_metadata_kinds`.
 constexpr u32 k_kind_nonuniform = 17;
 /// The number of "dx.precise" in `k_metadata_kinds`.
@@ -472,13 +476,23 @@ cc::vector<byte> module_builder::write(cc::string_view triple, cc::string_view l
 
     out.enter_block(k_block_metadata_kind, 3);
     auto kind_number = u64(0);
-    for (auto const kind : k_metadata_kinds)
+    auto const write_kind = [&](cc::string_view kind)
     {
         scratch.clear();
         scratch.push_back(kind_number++);
         for (auto const c : kind)
             scratch.push_back(u8(c));
         out.record(k_md_kind, scratch);
+    };
+    for (auto const kind : k_metadata_kinds)
+        write_kind(kind);
+    auto has_loop = false;
+    for (auto const& inst : _instructions)
+        has_loop = has_loop || inst.loop != 0;
+    if (has_loop)
+    {
+        static_assert(k_kind_loop == sizeof(k_metadata_kinds) / sizeof(k_metadata_kinds[0]));
+        write_kind(k_metadata_kind_loop);
     }
     out.exit_block();
 
@@ -513,7 +527,7 @@ cc::vector<byte> module_builder::write(cc::string_view triple, cc::string_view l
         auto const relative = [&](u32 raw) -> u64 { return u64(next - local_number(raw)); };
         auto const signed_relative = [&](u32 raw) -> u64 { return signed_vbr(i64(next) - i64(local_number(raw))); };
         auto const block_number = [&](u32 raw) -> u64 { return u64(raw - first_block); };
-        // each attachment as its instruction's position, then its kind
+        // each attachment as its instruction's position, its kind, then its node's id plus one
         auto marked = cc::vector<u32>();
         auto position = u32(0);
         auto last_location = u32(0);
@@ -559,11 +573,19 @@ cc::vector<byte> module_builder::write(cc::string_view triple, cc::string_view l
                 {
                     marked.push_back(position);
                     marked.push_back(k_kind_nonuniform);
+                    marked.push_back(_one_node);
                 }
                 if (inst.code == inst_code::call && inst.sub == k_ll_precise)
                 {
                     marked.push_back(position);
                     marked.push_back(k_kind_precise);
+                    marked.push_back(_one_node);
+                }
+                if (inst.loop != 0)
+                {
+                    marked.push_back(position);
+                    marked.push_back(k_kind_loop);
+                    marked.push_back(inst.loop);
                 }
                 auto const args = cc::span<u32 const>(_args.data() + inst.first, isize(inst.count));
                 switch (inst.code)
@@ -719,8 +741,8 @@ cc::vector<byte> module_builder::write(cc::string_view triple, cc::string_view l
         if (!marked.empty())
         {
             out.enter_block(k_block_metadata_attachment, 3);
-            for (auto k = isize(0); k < marked.size(); k += 2)
-                out.record(k_md_attachment, {u64(marked[k]), u64(marked[k + 1]), u64(_one_node - 1)});
+            for (auto k = isize(0); k < marked.size(); k += 3)
+                out.record(k_md_attachment, {u64(marked[k]), u64(marked[k + 1]), u64(marked[k + 2] - 1)});
             out.exit_block();
         }
         out.exit_block();

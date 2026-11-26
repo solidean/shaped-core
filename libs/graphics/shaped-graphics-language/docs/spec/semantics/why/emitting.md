@@ -8,6 +8,13 @@ Nothing here is normative.
 The emitters follow the [compilation model](../../incubator/compilation-model.md): SGL compiles to shader text, and the text's own compiler optimizes it.
 So an emitter is a printer with opinions about names and addresses, and it transforms nothing.
 
+## EMIT-291
+
+The attribute is in the source, and the text route already honoured it, so the native routes ignoring it made the three routes compile one program three ways.
+Around a trace an unrolled loop multiplies what a driver compiles when the pipeline is created, since the driver inlines every `TraceRay` and callable call site.
+DXIL's passes fold a loop's structure away, so the hint stands on the loop's header in SGL's IR and moves with it.
+Where threading an empty header would make two loops of different hints one, the header stays: a back edge names one loop's node, and LLVM reads a loop's hint off its back edges.
+
 ## EMIT-290
 
 DXC refuses an array under `SV_ClipDistance` in a DXIL signature, since each element would take a row, and takes a float per lane, which it packs as it would a `float4` and the rest.
