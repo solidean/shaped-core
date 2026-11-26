@@ -28,5 +28,7 @@ binding mix_images:
     // A half float holds nothing past 65504, and a bright sample converted to one becomes infinity, which a denoiser reading it turns into NaN.
     let c = mix_constants.ceiling
     let source = clamp(mix_images.source.load(id.xy), float4(-c), float4(c))
-    let blended = mix(mix_images.destination[id.xy], source as texel[destination_format], mix_constants.weight)
+    let replacement = source as texel[destination_format]
+    // `mix` is `a + t * (b - a)`, which reaches `b` at t = 1 only to within a rounding, and a NaN in `a` not at all
+    let blended = if mix_constants.weight >= 1.0 => replacement else mix(mix_images.destination[id.xy], replacement, mix_constants.weight)
     mix_images.destination[id.xy] = blended

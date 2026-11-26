@@ -98,7 +98,9 @@ cc::result<dx12_raster_pipeline_handle> dx12_context::create_dx12_raster_pipelin
         record_pipeline_shader(desc.mesh_shader.value());
 
     require_persistent(scope);
-    auto pipeline = dx12_raster_pipeline::create(_device.Get(), cc::move(layout), desc);
+    // docs/bugs-external/d3d12-mesh-pipeline-without-topology-refuses-its-blob: an Intel GPU restores no mesh-shaded blob
+    auto const mesh_blobs = metrics.adapter().vendor_id != 0x8086 || metrics.adapter().is_software;
+    auto pipeline = dx12_raster_pipeline::create(_device.Get(), cc::move(layout), desc, mesh_blobs);
     if (pipeline.has_value())
         record_cached_blob_use(!desc.cached_pipeline.empty(), pipeline.value()->used_cached_pipeline());
     return pipeline;
