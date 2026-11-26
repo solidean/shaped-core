@@ -26,3 +26,14 @@ Closing this issue means enabling it again.
 On dx12 no device has clustered geometry, so ab2487fb6 leaves only a `cluster_id` field that the prelude sets to the constant -1.
 The B580's failure is on dx12, so the field would have to change a result through its layout alone, which no traced hit stores.
 Reverting the prelude by itself is no experiment: the registry and the tests expect its new reads, and the build fails.
+
+## Log
+
+**2026-11-26: the restart's first sample, through `sr::mix_routine` at weight 1.**
+Split apart on the Arc, the other view drawn first changes nothing, and the camera's detour alone gives the 42 differences, every one a rounding.
+A single sample after the restart already differs in 303 channels, and more samples average it down, so the mean's first sample is what differs.
+A hybrid sample enters the mean through `mix.sgl` at weight `1 / (n + 1)`, and SGL's `mix` is `a + t * (b - a)`, DXC's `lerp`, exact at 0 and not at 1.
+A fresh slot holds zeros, where that is exact; a restarted one holds the old mean, and its first sample came back rounded against it.
+`mix.sgl` now writes the source itself at weight 1, which `sr - a mix reaches both of its endpoints exactly` checks bit for bit: it read 0.099999994 for 0.1 before.
+Not the pack count, the previous camera or the occlusion history, each of which was pinned in turn with the 42 unchanged.
+The test is enabled again, and passes on the Arc and the AMD iGPU.

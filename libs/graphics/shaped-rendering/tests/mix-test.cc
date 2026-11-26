@@ -102,11 +102,12 @@ ASYNC_INVOCABLE_TEST("sr - a mix reaches both of its endpoints exactly",
         for (auto c = 0; c < 4; ++c)
             CHECK(kept[0][c] == stored[c]).context(what);
 
-        // And weight 1 arrives at the source, to within the one subtraction `lerp` takes to get there and the store's
-        // own rounding.
+        // And weight 1 replaces it with the source, bit for bit: an accumulated mean restarts through this, so a
+        // rounding here would make one mean's bits depend on whatever the image held before it.
         auto const replaced = co_await mix_once(ctx, format, a, b, 1.0f);
-        tg::vec4f const wanted[] = {b};
-        CHECK(sr_test::worst_stored(format, cc::span<tg::vec4f const>(replaced).first_n(1), wanted, 4) < 1e-6).context(what);
+        auto const source = sr_test::quantized(format, b);
+        for (auto c = 0; c < 4; ++c)
+            CHECK(replaced[0][c] == source[c]).context(what);
     }
 }
 
