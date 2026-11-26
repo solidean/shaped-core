@@ -460,6 +460,13 @@ void writer::write_stage_elements()
             auto const array = _bound++;
             emit(_declarations, spv::TypeArray, {array, held, literal_id(count)});
             held = array;
+            // a mesh stage writes them a vertex at a time, so its array of lanes is one of each vertex's
+            if (e.system == built_in::clip_distance && e.array_size > 0)
+            {
+                auto const vertices = _bound++;
+                emit(_declarations, spv::TypeArray, {vertices, held, literal_id(e.array_size)});
+                held = vertices;
+            }
         }
         _element_variables.push_back(id);
         _element_lanes.push_back(lane);

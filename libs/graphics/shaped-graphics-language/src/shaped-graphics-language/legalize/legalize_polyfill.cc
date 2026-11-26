@@ -24,6 +24,16 @@ cc::optional<leaf_kind> sgl::check::impl::scalar_kind_of(checked_module const& m
     return {};
 }
 
+bool sgl::check::impl::holds_clip_distances(checked_module const& m, type_id type)
+{
+    if (!is_valid(type) || type == checked_module::error_type || m.at(type).kind != type_kind::structure)
+        return false;
+    for (auto const& member : m.at(m.at(type).members))
+        if (member.is_clip_distances)
+            return true;
+    return false;
+}
+
 cc::result<cc::vector<leaf>, cc::string> sgl::check::impl::leaves_of(checked_module const& m, type_id type)
 {
     auto result = cc::vector<leaf>();

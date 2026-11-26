@@ -978,3 +978,91 @@ ASYNC_INVOCABLE_TEST("sg - a wireframe pipeline on a device without wireframe fi
     REQUIRE(built->has_error());
     CHECK(built->try_error()->underlying().to_string().contains("wireframe_fill"));
 }
+
+namespace
+{
+/// Whether pixel (x, y) of a clipped draw holds `color` right of the centre and the clear color left of it.
+void check_right_half(sg_test::offscreen_pixels const& pixels, tg::vec4f color)
+{
+    for (auto y = 0; y < size; ++y)
+        for (auto x = 0; x < size; ++x)
+            CHECK(pixels[0].rgba_float(x, y) == (x < size / 2 ? tg::vec4f(-1, -1, -1, -1) : color))
+                .context(cc::format("pixel ({}, {})", x, y));
+}
+} // namespace
+
+ASYNC_INVOCABLE_TEST("sg - an SGL evaluation stage's clip distances cut the tessellated quad the rasterizer draws",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::tessellation_shader))
+        SKIP("this device has no tessellation stages, and no polyfill carries clip distances");
+    if (!ctx->supports(sg::feature::clip_distances))
+        SKIP("this context clips by no distance a stage writes");
+
+    // the patch covers the target, and its second clip distance is x: the left half is cut away
+    shaders::stages::stage_corner const corners[] = {{.position = tg::vec2f(-1, -1)},
+                                                     {.position = tg::vec2f(1, -1)},
+                                                     {.position = tg::vec2f(1, 1)},
+                                                     {.position = tg::vec2f(-1, 1)}};
+    auto const buffer = ctx->persistent.create_buffer_from_data(corners, sg::buffer_usage::vertex_buffer);
+    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::stages::clipped_quad);
+    auto const pixels = co_await sg_test::draw_offscreen(*ctx, stage_target(),
+                                                         [&](sg::rendering_scope& scope)
+                                                         {
+                                                             scope.bind_pipeline(*pipeline);
+                                                             scope.bind_vertex_buffer(buffer.as_vertex_buffer());
+                                                             scope.draw({.vertex_range = {.offset = 0, .size = 4}});
+                                                         });
+    // the color after the lanes reaches the pixel stage as written, which a link off by a register would not
+    check_right_half(pixels, tg::vec4f(0, 1, 0, 1));
+}
+
+ASYNC_INVOCABLE_TEST("sg - an SGL geometry stage's clip distances cut each triangle it appends",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::geometry_shader))
+        SKIP("this device has no geometry stage, and no polyfill carries clip distances");
+    if (!ctx->supports(sg::feature::clip_distances))
+        SKIP("this context clips by no distance a stage writes");
+
+    // two triangles over the target, whose second clip distance is x: the left half is cut away
+    shaders::stages::stage_corner const corners[]
+        = {{.position = tg::vec2f(-1, -1)}, {.position = tg::vec2f(1, -1)}, {.position = tg::vec2f(1, 1)},
+           {.position = tg::vec2f(-1, -1)}, {.position = tg::vec2f(1, 1)},  {.position = tg::vec2f(-1, 1)}};
+    auto const buffer = ctx->persistent.create_buffer_from_data(corners, sg::buffer_usage::vertex_buffer);
+    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::stages::clipped_triangles);
+    auto const pixels = co_await sg_test::draw_offscreen(*ctx, stage_target(),
+                                                         [&](sg::rendering_scope& scope)
+                                                         {
+                                                             scope.bind_pipeline(*pipeline);
+                                                             scope.bind_vertex_buffer(buffer.as_vertex_buffer());
+                                                             scope.draw({.vertex_range = {.offset = 0, .size = 6}});
+                                                         });
+    check_right_half(pixels, tg::vec4f(0, 0, 1, 1));
+}
+
+ASYNC_INVOCABLE_TEST("sg - a polyfilled geometry stage that writes clip distances is refused, naming them",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->draws_geometry_polyfill())
+        SKIP("this backend draws no polyfilled geometry stage");
+
+    // the polyfill is what runs whether or not the device has a geometry stage
+    auto const before = ctx->geometry_polyfill();
+    ctx->set_geometry_polyfill(sg::polyfill_use::always);
+    auto const built = ctx->cached.acquire_raster_pipeline(shaders::stages::clipped_triangles);
+    co_await cc::async_settled(built);
+    ctx->set_geometry_polyfill(before);
+    REQUIRE(built->has_error());
+    CHECK(built->try_error()->underlying().to_string().contains("clip distances"))
+        .dump("error", built->try_error()->underlying().to_string());
+}

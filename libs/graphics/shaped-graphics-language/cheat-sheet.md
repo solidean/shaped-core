@@ -664,8 +664,9 @@ log10(x)                                 // log2(x) times the float nearest log1
 @early_depth_test @pixel fun ...         // depth and stencil tests before the stage (CHK-564); no @depth/@sample_mask beside it;
                                          //   needs early_depth_test only where it writes memory or discards (never wgsl);
                                          //   a discard keeps the depth: WARNING early-depth-keeps-discarded
-@clip_distances planes: float[N]         // a vertex result's field, N 1..8: the rasterizer keeps lanes >= 0 (CHK-571);
-                                         //   needs clip_distances; no pixel stage reads it; not from geometry/tess/mesh yet
+@clip_distances planes: float[N]         // a field of the last stage before the rasterizer, N 1..8: vertex or evaluation
+                                         //   result, geometry stream, mesh vertex; it keeps lanes >= 0 (CHK-571);
+                                         //   needs clip_distances; no pixel stage reads it; no earlier stage or polyfill
 
 fun bump(c: mut counter, by: float):     // a mut parameter: the caller's place (CHK-315)
     c.total += by

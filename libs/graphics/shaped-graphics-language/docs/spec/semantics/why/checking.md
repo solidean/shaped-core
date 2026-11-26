@@ -452,7 +452,15 @@ A shader fills it in a loop over its planes.
 HLSL's semantics are a spelling the writer makes of it (EMIT-290).
 8 is what every target allows: D3D's eight clip and cull distances together, Vulkan's `maxClipDistances` of at least 8 with the feature, Metal's 8 and WebGPU's 8.
 A plane that is off writes a distance of 0 or more, so one shader serves a frame with three planes and one with none, at the cost of the dot products.
-The geometry, tessellation and mesh stages, and their polyfills, which would carry the field in their words, wait for a shader that needs them.
+Every target clips by what the last stage before its rasterizer writes, whichever stage that is, so each of them may write the field, and the stages before it may not.
+The polyfills, which would carry the field in their words and write it from their vertex half, wait for a shader that needs them.
+
+## CHK-573
+
+An entry point is compiled alone, so what a vertex stage writes cannot depend on whether a geometry stage follows it in some pipeline.
+Passing the field on as an ordinary member would make one struct mean two things, clip distances in one pipeline and plain values in another.
+And the rasterizer would never see the earlier stage's planes anyway.
+So the stage that clips writes its own, which it computes from what it takes, and a stage before it writes none.
 
 ## CHK-574
 

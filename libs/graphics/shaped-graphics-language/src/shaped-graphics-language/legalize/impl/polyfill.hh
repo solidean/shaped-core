@@ -32,6 +32,9 @@ struct leaf
 
 [[nodiscard]] cc::optional<leaf_kind> scalar_kind_of(checked_module const& m, type_id type);
 
+/// Whether the struct `type` holds a `@clip_distances` field (CHK-571), which no polyfill carries yet.
+[[nodiscard]] bool holds_clip_distances(checked_module const& m, type_id type);
+
 /// Every scalar leaf of `type` in field order, or the first type that is none.
 [[nodiscard]] cc::result<cc::vector<leaf>, cc::string> leaves_of(checked_module const& m, type_id type);
 

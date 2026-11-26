@@ -1084,20 +1084,25 @@ fun f() -> float:
   Each stage whose struct holds one needs `multi_viewport`, which WebGPU has on no device, so its WGSL is `target-lacks-feature`.
   A host sets the viewports with `set_viewports`; an index past the last one set is the API's to define, and SGL does not.
   The struct that reaches the rasterizer carries exactly one, which CHK-307 asks of the pipeline.
-* **CHK-571** A field of the struct a vertex stage hands the rasterizer may carry `@clip_distances`, at most one, of type `float[N]` with `N` from 1 to 8 ([why](why/checking.md#chk-571)).
+* **CHK-571** A field of the struct the last stage before the rasterizer hands it may carry `@clip_distances`, at most one, of type `float[N]` with `N` from 1 to 8 ([why](why/checking.md#chk-571)).
+  That struct is what a vertex or a tessellation evaluation stage returns, what a geometry stage appends to its stream, or what a mesh stage writes per vertex.
   The rasterizer reads it, so it takes no location, no `@interpolate` and no `@per_draw` (CHK-393).
   A second such field, another type, `N` outside 1 to 8, or one of those attributes beside it, is `invalid-entry-point`, and the attribute with an argument is `invalid-attribute-arguments`.
-  On a struct that reaches no rasterizer it is `invalid-entry-point` too.
-  A geometry, tessellation or mesh stage that hands one on, or takes one, is `unsupported-yet`: only a vertex stage writes clip distances so far.
+  On a struct that reaches no rasterizer it is `invalid-entry-point` too: a vertex stage's input, a control stage's factors, a task stage's payload, and what a mesh stage writes per triangle.
+  So is one in what a geometry or tessellation stage takes from the stage before it, which CHK-573 makes no last stage.
+  A polyfilled geometry, tessellation or mesh stage that writes one (CHK-524, CHK-525, CHK-527) is `unsupported-yet`: no polyfill carries clip distances yet.
 * **CHK-572** Each lane is a distance from one plane: the rasterizer keeps the points of a primitive where every lane, interpolated linearly across it, is 0 or more.
   It cuts the primitive at the lanes' zeros.
   So what it hands the pixel stage, and the depth test, covers the kept part alone.
   A lane that is a NaN or an infinity clips as the target clips it, which SGL does not specify.
-* **CHK-573** Only the struct that reaches the rasterizer clips, and a pipeline whose vertex stage hands one to a geometry or a tessellation stage is `invalid-pipeline` (CHK-307).
+* **CHK-573** Only the struct that reaches the rasterizer clips ([why](why/checking.md#chk-573)).
+  A stage another stage follows hands on no clip distance, as an ordinary link member or otherwise.
+  A pipeline whose vertex stage hands one to a tessellation or a geometry stage, or whose evaluation stage hands one to a geometry stage, is `invalid-pipeline` (CHK-307).
 * **CHK-574** A pixel stage that takes the struct reads no `@clip_distances` field: a read of it is `unsupported-yet` there, since WGSL has no such input ([why](why/checking.md#chk-574)).
   A link matched by location leaves the field out of the pixel stage, so the pixel stage needs nothing of it.
-  dx12 matches its stages by register, so there the pixel stage declares the lanes, unread, where the vertex stage writes them.
-* **CHK-575** A vertex stage whose result holds one needs `clip_distances` ([why](why/checking.md#chk-575)).
+  dx12 matches its stages by register, so there the pixel stage declares the lanes, unread, where the stage before it writes them, whichever of CHK-571's stages that is.
+* **CHK-575** The stage that writes one needs `clip_distances` ([why](why/checking.md#chk-575)).
+  That is a vertex or an evaluation stage whose result holds one, a geometry stage whose stream does, or a mesh stage whose output does.
   sg's dx12 and metal backends grant it on every device, vulkan with `shaderClipDistance`, and webgpu with the feature `clip-distances`, so WGSL writes it where the device has the feature.
 * **CHK-437** `@view_index` is which view of a draw of several the invocation renders, from 0, and the pipeline's `view_count` says how many.
   View `i` renders into layer `i` of every target, so a stereo frame is one draw into a two-layer array, and the shader picks each eye's camera by it.
@@ -1178,7 +1183,7 @@ A feature is what a device may lack, so using one makes a shader non-portable on
   A write through a binding in a vertex, geometry or tessellation stage adds `vertex_pipeline_stores` (CHK-531).
   A `mut` image of a 16-bit normalized format adds `readwrite_norm16_image_formats` (CHK-201).
   `@early_depth_test` on a pixel stage that writes memory or discards adds `early_depth_test` (CHK-567).
-  A `@clip_distances` field of a vertex stage's result adds `clip_distances` (CHK-575).
+  A `@clip_distances` field of what the last stage before the rasterizer hands it adds `clip_distances` (CHK-575).
   Any other name is the normal error `unknown-feature`, and its detail lists the names.
 * **CHK-259** A `require` at file scope grants its features to everything in the file ([why](why/checking.md#chk-259)).
 * **CHK-260** A `require` in a binding grants its features to that binding's members.

@@ -301,3 +301,19 @@ ASYNC_INVOCABLE_TEST("sg - an indirect draw of a polyfilled task stage launches 
             CHECK(pixels[0].rgba8(x, y) == expected).context(cc::format("pixel ({}, {})", x, y));
         }
 }
+
+ASYNC_INVOCABLE_TEST("sg - a polyfilled SGL mesh stage that writes clip distances is refused, naming them",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (auto const why = unreachable(*ctx); why.has_value())
+        SKIP(why.value());
+    auto const scope = polyfilling(*ctx);
+
+    // no polyfill carries clip distances yet (SGL's CHK-571), so the vertex half the polyfill draws refuses them
+    auto const built = ctx->cached.acquire_raster_pipeline(sg::test::sgl_shaders::meshes::clipped_covered);
+    co_await cc::async_settled(built);
+    REQUIRE(built->has_error());
+    CHECK(built->try_error()->underlying().to_string().contains("clip distances"))
+        .dump("error", built->try_error()->underlying().to_string());
+}

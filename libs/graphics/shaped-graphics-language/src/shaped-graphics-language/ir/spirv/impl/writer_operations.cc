@@ -382,6 +382,12 @@ u32 writer::element_pointer(u32 element, u32 index)
     // an element behind an array: per control point or vertex, `SampleMask` of one, or a tessellation factor
     auto const& e = _p.stage_elements[element];
     auto const pointer = _bound++;
+    // a mesh stage's clip distance is a lane of its vertex's array of them
+    if (e.system == built_in::clip_distance && e.array_size > 0)
+    {
+        emit(_code, spv::AccessChain, {lane, pointer, _element_variables[element], index, literal_id(e.semantic_index)});
+        return pointer;
+    }
     auto const at = e.array_size > 0 ? index : literal_id(e.system == built_in::sample_mask ? 0 : e.semantic_index);
     emit(_code, spv::AccessChain, {lane, pointer, _element_variables[element], at});
     return pointer;

@@ -1,5 +1,5 @@
-// CHK-571 to CHK-575: a vertex stage hands the rasterizer up to 8 clip distances, a float[N] field it fills per plane.
-require clip_distances
+// CHK-571 to CHK-575: the last stage before the rasterizer hands it up to 8 clip distances, a float[N] field it fills per plane.
+require clip_distances, geometry_shader
 
 binding section:
     planes: float4[3]
@@ -32,3 +32,13 @@ test plane_distances(float4[3].filled(float4(0.0, 0.0, 0.0, 1.0)), float4(5.0, 6
 // a read of them there is no form any target has alike
 @expect(error = "unsupported-yet")
 @pixel fun peek_ps(p: varyings) -> float4 => float4(p.planes[0])
+
+// a geometry stage is the last before the rasterizer where it follows the vertex stage, so it writes them per vertex
+struct corner:
+    @position position: hpos4
+    world: float4
+
+@geometry(max_vertices = 3)
+fun section_gs(tri: corner[3], stream: mut triangle_stream[varyings]){section}:
+    for i in 0 ..< 3:
+        stream.emit({position = tri[i].position, planes = plane_distances(section.planes, tri[i].world), uv = float2(0.0, 0.0)})

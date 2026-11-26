@@ -119,6 +119,8 @@ struct row
     /// One past its last free column: a tessellation factor keeps column `w`.
     u32 limit = 4;
     bool has_system = false;
+    /// Holds clip distances, which DXC packs into rows of their own.
+    bool has_clip = false;
 };
 
 /// First fit in declared order, DXC's `-pack-prefix-stable`: the rule the golden test holds against DXC.
@@ -127,13 +129,16 @@ class packer
 public:
     /// A row holds one mode, and an ordinary element never follows a system one in it.
     /// Types do not part a row, nor do a system element's lanes after an ordinary element's.
+    /// Clip distances share a row with clip distances alone, as DXC packs them, whatever stands before them.
     void place(signature_element& e, bool is_system)
     {
+        auto const is_clip = e.system_value == k_clip_distance;
         for (auto r = isize(0); r < _rows.size(); ++r)
         {
             auto& held = _rows[r];
             if ((held.has_mode && held.mode != e.mode) || held.next_column + e.lanes > held.limit
-                || (held.has_system && !is_system))
+                || (held.has_system && !is_system) || held.has_clip != is_clip
+                || (is_clip && held.next_column > 0 && !held.has_clip))
                 continue;
             return take(e, r, is_system);
         }
@@ -171,6 +176,7 @@ private:
         held.mode = e.mode;
         held.has_mode = true;
         held.has_system = held.has_system || is_system;
+        held.has_clip = held.has_clip || e.system_value == k_clip_distance;
     }
 
     cc::vector<row> _rows;

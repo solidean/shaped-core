@@ -804,7 +804,9 @@ void checker::compile_pipeline(symbol_id id)
             {
                 auto const& a = returned[i];
                 auto const& b = expected[i];
-                if (a.name != b.name || a.type != b.type || a.is_position != b.is_position || a.factor != b.factor)
+                // the rasterizer's own members are told apart by their marks, which place them on dx12 (CHK-574)
+                if (a.name != b.name || a.type != b.type || a.is_position != b.is_position || a.factor != b.factor
+                    || a.is_clip_distances != b.is_clip_distances)
                     mismatch = cc::format("member {} is `{}: {}` where {} returns it and `{}: {}` where {} takes it", i,
                                           a.name, out.name_of(a.type), out.at(from).name, b.name, out.name_of(b.type),
                                           out.at(to).name);
@@ -860,6 +862,25 @@ void checker::compile_pipeline(symbol_id id)
         passed = info_of_entry(evaluation).result;
         from = evaluation;
     }
+    // CHK-573: only what reaches the rasterizer clips, so a vertex or an evaluation stage another stage follows hands
+    // on no clip distance; the last stage before the rasterizer writes them
+    auto const refuse_handed_clip = [&](type_id handed, symbol_id by, stage next)
+    {
+        if (pc.is_failed || !is_valid(by) || !is_valid(handed) || out.at(handed).kind != type_kind::structure)
+            return;
+        for (auto const& m : out.at(out.at(handed).members))
+            if (m.is_clip_distances && !pc.is_failed)
+                pc.fail(file, where,
+                        cc::format("{} hands its @clip_distances field '{}' to a {} stage, and only what reaches the "
+                                   "rasterizer clips; the last stage before it writes its own",
+                                   out.at(by).name, m.name, stage_name(next)));
+    };
+    if (is_valid(control))
+        refuse_handed_clip(vertex_info.result, vertex, stage::tessellation_control);
+    else if (is_valid(geometry))
+        refuse_handed_clip(vertex_info.result, vertex, stage::geometry);
+    if (is_valid(control) && is_valid(geometry))
+        refuse_handed_clip(passed, evaluation, stage::geometry);
     auto primitive = 0;
     if (is_valid(geometry))
     {
@@ -871,16 +892,6 @@ void checker::compile_pipeline(symbol_id id)
                 passed = out.at(parameter.type).element;
         from = geometry;
     }
-    // CHK-573: only what reaches the rasterizer clips, so a vertex stage another stage follows hands on no clip distance
-    if ((is_valid(control) || is_valid(evaluation) || is_valid(geometry)) && is_valid(vertex) && !pc.is_failed
-        && out.at(vertex_info.result).kind == type_kind::structure)
-        for (auto const& m : out.at(out.at(vertex_info.result).members))
-            if (m.is_clip_distances)
-                pc.fail(file, where,
-                        cc::format("{} hands its @clip_distances field '{}' to a {} stage, and only what reaches the "
-                                   "rasterizer clips; the last stage before it writes its own",
-                                   out.at(vertex).name, m.name,
-                                   stage_name(is_valid(control) ? stage::tessellation_control : stage::geometry)));
     // what reaches the rasterizer says where each vertex lands
     auto positions = 0;
     for (auto const& m : out.at(out.at(passed).members))

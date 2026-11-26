@@ -285,3 +285,50 @@ pipeline quad_grid:
     pixel = staged_ps
     cull = .back
     format = .rgba32_float
+
+// Clip distances from the last stage before the rasterizer (CHK-571, EMIT-290): two lanes, the first 1 everywhere and
+// the second the vertex's x in clip space, so the rasterizer keeps the right half of what is drawn.
+// The tag after the lanes reaches the pixel stage on the row both stages agree on, which dx12 links by.
+struct clipped_staged:
+    @position position: hpos4
+    @clip_distances planes: float[2]
+    color: float4
+
+@pixel fun clipped_staged_ps(p: clipped_staged) -> stage_target:
+    return {color = p.color}
+
+// The quad patch of `quad_te`, clipped by its evaluation stage.
+@tessellation_evaluation
+fun clipped_quad_te(patch: control_point[4], f: quad_factors, @domain_location uv: float2) -> clipped_staged:
+    require clip_distances
+    let bottom = patch[0].position + (patch[1].position - patch[0].position) * uv.x
+    let top = patch[3].position + (patch[2].position - patch[3].position) * uv.x
+    let p = bottom + (top - bottom) * uv.y
+    return {
+        position = hpos4(p.x, p.y, 0.5, 1.0)
+        planes = [1.0, p.x]
+        color = float4(0.0, 1.0, 0.0, 1.0)
+    }
+
+pipeline clipped_quad:
+    vertex = corner_vs
+    tessellation_control = quad_ccw_tc
+    tessellation_evaluation = clipped_quad_te
+    pixel = clipped_staged_ps
+    cull = .none
+    format = .rgba32_float
+
+// Each triangle passed on, clipped by the geometry stage.
+@geometry(max_vertices = 3)
+fun clipped_gs(tri: staged[3], stream: mut triangle_stream[clipped_staged]):
+    require clip_distances
+    for i in 0 ..< 3:
+        let p = tri[i].position
+        stream.emit({position = p, planes = [1.0, p.x], color = float4(0.0, 0.0, 1.0, 1.0)})
+
+pipeline clipped_triangles:
+    vertex = white_vs
+    geometry = clipped_gs
+    pixel = clipped_staged_ps
+    cull = .none
+    format = .rgba32_float

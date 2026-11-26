@@ -282,6 +282,11 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
         // the evaluation stage's vertex half reads its points back alone, and needs no control stage
         if (control == nullptr && mesh == emit::mesh_form::vertex_fetch)
         {
+            // CHK-571: the vertex half would write them, which no polyfill does yet
+            if (check::impl::holds_clip_distances(m, e.result))
+                return cc::error(cc::format("{}: error: unsupported: {}'s result holds clip distances, which the "
+                                            "polyfill does not carry yet\n",
+                                            source_name, e.name));
             auto const leaves = check::impl::leaves_of(m, e.result);
             if (leaves.has_error())
                 return cc::error(cc::format("{}: error: unsupported: {}'s result holds a '{}', which no word holds\n",

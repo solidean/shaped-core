@@ -330,8 +330,8 @@ enum class sg::feature
     /// D3D12, Vulkan and Metal grant it on every device; WebGPU has no such attribute, so it never grants it.
     early_depth_test,
 
-    /// A vertex shader may hand the rasterizer clip distances, which cut each primitive where one is below 0: SGL's
-    /// `@clip_distances` field.
+    /// The last shader before the rasterizer, vertex, domain, geometry or mesh, may hand it clip distances, which cut
+    /// each primitive where one is below 0: SGL's `@clip_distances` field.
     /// D3D12 and Metal grant it on every device, Vulkan with `shaderClipDistance`, and WebGPU with `clip-distances`.
     clip_distances,
 };

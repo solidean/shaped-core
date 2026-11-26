@@ -111,6 +111,10 @@ cc::result<tessellation_polyfill_layout, cc::string> sgl::check::tessellation_po
     };
     if (te != nullptr)
     {
+        // CHK-571: the polyfill's vertex half would write them, which no polyfill does yet
+        if (impl::holds_clip_distances(m, te->result))
+            return cc::error(
+                cc::format("{}'s result holds clip distances, which the polyfill does not carry yet", te->name));
         auto const vertex = leaves_of(m, te->result);
         if (vertex.has_error())
             return cc::error(cc::format("{}'s result holds a '{}', which no word holds", te->name, vertex.error()));

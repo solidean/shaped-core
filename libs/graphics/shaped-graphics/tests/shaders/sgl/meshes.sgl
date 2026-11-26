@@ -198,3 +198,28 @@ pipeline patched:
     pixel = painting
     cull = .none
     format = .rgba8_unorm
+
+// Clip distances from a mesh stage (CHK-571, EMIT-290): one triangle over the whole target whose second lane is each
+// vertex's x in clip space, so the rasterizer keeps the right half; the color after the lanes reaches the pixel stage.
+struct clipped_corner:
+    @position position: hpos4
+    @clip_distances planes: float[2]
+    color: float4
+
+@mesh(1, vertices = 3, triangles = 1) fun clipped_covering(output: mut mesh_output[clipped_corner]):
+    require clip_distances
+    output.set_counts(3u, 1u)
+    let green = float4(0.0, 1.0, 0.0, 1.0)
+    output.vertex(0u, {position = hpos4(-1.0, -1.0, 0.0, 1.0), planes = [1.0, -1.0], color = green})
+    output.vertex(1u, {position = hpos4(3.0, -1.0, 0.0, 1.0), planes = [1.0, 3.0], color = green})
+    output.vertex(2u, {position = hpos4(-1.0, 3.0, 0.0, 1.0), planes = [1.0, -1.0], color = green})
+    output.triangle(0u, uint3(0u, 1u, 2u))
+
+@pixel fun clipped_painting(c: clipped_corner) -> painted:
+    return {color = c.color}
+
+pipeline clipped_covered:
+    mesh = clipped_covering
+    pixel = clipped_painting
+    cull = .none
+    format = .rgba8_unorm

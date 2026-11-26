@@ -76,6 +76,9 @@ cc::result<mesh_polyfill_layout, cc::string> sgl::check::geometry_polyfill_layou
     if (!is_valid(stream))
         return cc::error(cc::format("{} takes no stream", g.name));
     auto const& t = m.at(g.at(stream).type);
+    // CHK-571: the polyfill's vertex half would write them, which no polyfill does yet
+    if (impl::holds_clip_distances(m, t.element))
+        return cc::error(cc::format("{}'s vertex holds clip distances, which the polyfill does not carry yet", g.name));
     auto const leaves = leaves_of(m, t.element);
     if (leaves.has_error())
         return cc::error(cc::format("{}'s vertex holds a '{}', which no word holds", g.name, leaves.error()));

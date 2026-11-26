@@ -267,6 +267,35 @@ bool checker::clip_distances_of(i32 file, ast::attribute const* a)
     return true;
 }
 
+void checker::judge_clip_distances(type_id link,
+                                   cc::string_view what,
+                                   bool is_vertex,
+                                   cc::function_ref<void(cc::string_view)> invalid)
+{
+    if (!is_valid(link) || link == checked_module::error_type || out.at(link).kind != type_kind::structure)
+        return;
+    // one field of clip distances at most, a float[N] of 1 to 8, which every target allows
+    auto clips = 0;
+    for (auto const& m : out.at(out.at(link).members))
+        if (m.is_clip_distances)
+        {
+            ++clips;
+            auto const& held = out.at(m.type);
+            auto const is_floats = m.type != checked_module::error_type && held.kind == type_kind::array
+                                && held.count >= 1 && held.count <= 8 && out.name_of(held.element) == "float";
+            if (m.type != checked_module::error_type && !is_floats)
+                invalid(cc::format("the @clip_distances field '{}' is a float[N] with N from 1 to 8", m.name));
+            // the rasterizer reads them, as it does the position; a stage after the vertex stage refuses @per_draw on
+            // every member already (CHK-393)
+            if (m.has_interpolate || (m.is_per_draw && is_vertex))
+                invalid(cc::format("the @clip_distances member '{}' is the rasterizer's, and takes no @interpolate "
+                                   "and no @per_draw",
+                                   m.name));
+        }
+    if (clips > 1)
+        invalid(cc::format("{} a struct with at most one @clip_distances field", what));
+}
+
 /// CHK-564, CHK-565: `@early_depth_test` on a pixel entry point, with no argument, whose result has no `@depth` or
 /// `@sample_mask` member.
 bool checker::early_depth_test_of(i32 file, ast::attribute const* a, bool is_pixel, type_id result)
@@ -2809,31 +2838,54 @@ void checker::judge_entry_point(symbol_id id)
     if (info.entry_stage == stage::geometry || info.entry_stage == stage::tessellation_control
         || info.entry_stage == stage::tessellation_evaluation || info.entry_stage == stage::mesh)
     {
-        // CHK-571: what such a stage hands the rasterizer, or the stage after it, carries no clip distances yet
-        auto const holds_clip = [&](type_id type)
+        // CHK-571, CHK-573: what reaches the rasterizer may clip, the vertices an evaluation stage returns, a geometry
+        // stage appends or a mesh stage writes; what such a stage takes from the stage before, a control stage's
+        // factors, a mesh stage's payload and what it writes per triangle hold none
+        auto const struct_of = [&](type_id type)
         {
-            for (auto depth = 0; depth < 4 && type != type_id::none && type != checked_module::error_type; ++depth)
+            for (auto depth = 0; depth < 4 && check::is_valid(type) && type != checked_module::error_type; ++depth)
             {
                 auto const& t = out.at(type);
-                if (t.kind == type_kind::structure && out.builtin_type_of(type) == nullptr)
-                {
-                    for (auto const& m : out.at(t.members))
-                        if (m.is_clip_distances)
-                            return true;
-                    return false;
-                }
+                if (t.kind == type_kind::structure)
+                    return out.builtin_type_of(type) == nullptr ? type : type_id::none;
+                if (t.kind != type_kind::array)
+                    return type_id::none;
                 type = t.element;
             }
-            return false;
+            return type_id::none;
         };
-        // what it takes is the pipeline's to judge (CHK-573); what it hands on, its result or its stream, is this
-        auto clipped = holds_clip(info.result);
+        auto const refuse_clip = [&](type_id type, cc::string_view why)
+        {
+            if (auto const held = struct_of(type); check::is_valid(held))
+                for (auto const& m : out.at(out.at(held).members))
+                    if (m.is_clip_distances)
+                        invalid(cc::format("'{}' {}, so @clip_distances means nothing on it", m.name, why));
+        };
+        auto const name = stage_name(info.entry_stage);
         for (auto const& parameter : out.at(info.parameters))
-            clipped = clipped || (out.at(parameter.type).kind == type_kind::stream && holds_clip(parameter.type));
-        if (clipped)
-            unsupported(s.file, where,
-                        cc::format("clip distances in a {} stage; a vertex stage before the rasterizer writes them",
-                                   stage_name(info.entry_stage)));
+        {
+            auto const& t = out.at(parameter.type);
+            if (parameter.input != stage_input::none)
+                continue;
+            if (t.kind == type_kind::stream && info.entry_stage == stage::geometry)
+                judge_clip_distances(t.element, "what a geometry stage appends is", false, invalid);
+            else if (t.kind == type_kind::stream && info.entry_stage == stage::mesh)
+            {
+                judge_clip_distances(t.element, "what a mesh stage writes is", false, invalid);
+                if (check::is_valid(t.primitive))
+                    refuse_clip(t.primitive, "is written per triangle, and clip distances are a vertex's");
+            }
+            else if (info.entry_stage == stage::mesh)
+                refuse_clip(parameter.type, "is a task stage's payload, which reaches no rasterizer");
+            else
+                refuse_clip(parameter.type, cc::format("reaches the {} stage from the stage before it, and only the "
+                                                       "last stage before the rasterizer writes clip distances",
+                                                       name));
+        }
+        if (info.entry_stage == stage::tessellation_evaluation)
+            judge_clip_distances(info.result, "a @tessellation_evaluation fun returns", false, invalid);
+        else
+            refuse_clip(info.result, "reaches no rasterizer");
         auto forward = invalid;
         judge_primitive_stage(id, forward);
         notes[s.info].is_valid_entry = is_valid;
@@ -2932,8 +2984,9 @@ void checker::judge_entry_point(symbol_id id)
                                    out.name_of(m.type), m.name));
             if (m.has_interpolate && m.is_position)
                 invalid(cc::format("the @position member '{}' is the rasterizer's, and is no interpolated value", m.name));
-            // CHK-571: the clip distances are the rasterizer's too
-            if (m.is_clip_distances && (m.has_interpolate || m.is_per_draw))
+            // CHK-571: the clip distances are the rasterizer's too, which judge_clip_distances says of the stage
+            // that writes them; the pixel stage takes the same struct
+            if (m.is_clip_distances && (m.has_interpolate || m.is_per_draw) && info.entry_stage == stage::pixel)
                 invalid(cc::format("the @clip_distances member '{}' is the rasterizer's, and takes no @interpolate "
                                    "and no @per_draw",
                                    m.name));
@@ -3030,20 +3083,7 @@ void checker::judge_entry_point(symbol_id id)
             }
         if (viewports > 1)
             invalid("a @vertex fun returns a struct with at most one @viewport_index field");
-        // CHK-571: one field of clip distances at most, a float[N] of 1 to 8, which every target allows
-        auto clips = 0;
-        for (auto const& m : out.at(result.members))
-            if (m.is_clip_distances)
-            {
-                ++clips;
-                auto const& held = out.at(m.type);
-                auto const is_floats = m.type != checked_module::error_type && held.kind == type_kind::array
-                                    && held.count >= 1 && held.count <= 8 && out.name_of(held.element) == "float";
-                if (m.type != checked_module::error_type && !is_floats)
-                    invalid(cc::format("the @clip_distances field '{}' is a float[N] with N from 1 to 8", m.name));
-            }
-        if (clips > 1)
-            invalid("a @vertex fun returns a struct with at most one @clip_distances field");
+        judge_clip_distances(info.result, "a @vertex fun returns", true, invalid);
         // CHK-90: a vertex stage before a tessellation stage hands on control points, which have none
         if (positions > 1)
             invalid("a @vertex fun returns a struct with at most one @position field");

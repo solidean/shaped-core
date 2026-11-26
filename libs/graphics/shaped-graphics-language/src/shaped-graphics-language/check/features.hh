@@ -100,7 +100,7 @@ enum class sgl::check::feature : sgl::u8
     readwrite_norm16_image_formats,
     /// `@early_depth_test` on a pixel stage that writes memory or discards (CHK-567), which WebGPU has on no device.
     early_depth_test,
-    /// A `@clip_distances` field of what a vertex stage hands the rasterizer (CHK-575); WebGPU's `clip-distances`.
+    /// A `@clip_distances` field of what the last stage before the rasterizer hands it (CHK-575); WebGPU's `clip-distances`.
     clip_distances,
 };
 
