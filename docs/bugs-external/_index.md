@@ -13,6 +13,19 @@ Those questions come back every time a toolchain or a driver updates, and re-der
 
 So each entry carries the answer as something runnable.
 
+## When the evidence points outside our code
+
+Driver and compiler bugs are common here, so this is the standing procedure rather than a judgment call each time.
+Once the evidence points at a driver, a runtime or a compiler, the work is three steps, in order:
+
+1. **Reduce it to a standalone repro** in this folder, by the rules below.
+   An investigation that stops at "probably the driver" is unfinished: the repro is what settles it, and what a vendor report needs.
+2. **Work around it or skip it, keyed to what was measured**: the vendor, the driver, the backend.
+   A workaround stays as narrow as the evidence, and a test that cannot run skips through a known issue, never by commenting it out.
+3. **Link the two** and record what to re-check after an update.
+
+Where the repro will not reduce, the entry still lands with what was ruled out, marked as not reduced, and the issue stays open for it.
+
 ## The rules
 
 - **One directory per bug**, kebab-case, named for the symptom rather than for the file that hit it.

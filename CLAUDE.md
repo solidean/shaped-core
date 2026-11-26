@@ -254,6 +254,8 @@ Each entry above names what it depends on, and the `CMakeLists.txt` files are th
 * **Absolute paths are never baked into binaries** ([Build Configurations](docs/coding-guidelines.md#build-configurations)).
   A source-tree directory goes through `sc_target_source_paths` and `nx::source_path`, and `check`'s `abspaths` gate holds the line.
 * **Work goes straight to `main`** (see Git workflow).
+* **When everything points at a driver, runtime or compiler bug, reduce it to a standalone repro in [docs/bugs-external/](docs/bugs-external/_index.md),**
+  then work around it or skip it keyed to what was measured, and link the two — the procedure is that index's.
 * **Never wait for CI.** Push and move on; a red run is fixed after the fact, directly on `main`.
 * **No force-push to `main`.**
 
