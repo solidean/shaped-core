@@ -35,6 +35,9 @@ struct stage_violation
     bool is_candidate_body = false;
     /// The write is an assignment to a buffer's element, `call` its place; `callee` is then none.
     bool is_buffer_store = false;
+    /// The write is an assignment to a member of a `@workgroup` binding, or a part of one, `call` its place; `callee` is
+    /// then none.
+    bool is_workgroup_store = false;
     /// The callee is a builtin only a test calls (CHK-512).
     bool is_test_only = false;
 };
@@ -56,6 +59,11 @@ struct flattener
     stage inlined_decision = stage::none;
     /// The decision being inlined is a candidate loop's body rather than a trace's decision (CHK-556).
     bool is_candidate_body = false;
+    /// The program's call of the trace whose decision is being inlined, which a note names (CHK-284).
+    call_site decision_site = {};
+    /// A barrier, a derivative, a subgroup or a quad operation a trace's decision reaches, which stands in non-uniform
+    /// control flow whatever the ray (CHK-284); `written` is the trace's call.
+    cc::vector<stage_violation> decision_group_calls;
     /// A test's calls of a builtin only the ray-tracing stages reach, which a test cannot run yet.
     cc::vector<stage_violation> ray_stage_calls;
     /// A compute entry point's calls of a quad operation, whose workgroup then forms its quads along one axis (CHK-380).

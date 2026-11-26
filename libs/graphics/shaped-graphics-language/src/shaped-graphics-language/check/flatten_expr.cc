@@ -1584,15 +1584,23 @@ auto sgl::check::impl::flattener::call_closure(ast::expr_id id,
         return call_candidate_body(id, f.candidate_loop, values);
     // CHK-404: a function handed a candidate or a box is a decision the traversal calls in its loop
     auto const outer_decision = inlined_decision;
+    auto const outer_site = decision_site;
     auto decision = outer_decision;
     if (!values.empty() && is_valid(values[0]))
         if (auto const d = decision_of(entry.at(values[0]).type); d != stage::none)
+        {
             decision = d;
+            // the program's call that reached the prelude's trace, which runs the decision
+            for (auto const& site : entry.at(current()->chain))
+                if (!c.is_prelude_file(site.file))
+                    decision_site = site;
+        }
     if (is_valid(f.function))
     {
         inlined_decision = decision;
         auto const inlined = inline_bound(id, f.function, values, slots, argument_closures);
         inlined_decision = outer_decision;
+        decision_site = outer_site;
         return add_expr(type, id, flat_block{.label = inlined.label, .body = inlined.body});
     }
     auto const& lambda_ast = c.ast_of(f.file);
@@ -1639,6 +1647,7 @@ auto sgl::check::impl::flattener::call_closure(ast::expr_id id,
     inlined_decision = decision;
     auto const value = flatten_expr(l.body.value);
     inlined_decision = outer_decision;
+    decision_site = outer_site;
     frames.remove_back();
     return value;
 }

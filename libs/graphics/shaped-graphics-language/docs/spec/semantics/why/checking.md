@@ -465,6 +465,11 @@ SGL runs its own analysis, so inheriting Tint's pessimism would buy nothing but 
 A barrier is where that switch does not exist: WGSL refuses one in what Tint judges non-uniform, whatever the directive.
 So a barrier keeps WGSL's rule on every target, and one shader means the same on all of them.
 
+A trace's decision is the body of the candidate loop the trace stands for (CHK-560), and the driver presents each invocation its own candidates, however alike their rays.
+So a barrier, an implicit derivative or a subgroup operation there meets the group in an order and a number no program decides, as in the loop's body.
+Judging a decision by its ray let a constant ray take a barrier the equivalent loop refuses, which broke CHK-560's promise that the two agree.
+The decision's result is still judged as a value, so a trace with a constant ray and a decision of constants hands every invocation the same hit, and code after it keeps its barriers.
+
 ## CHK-285
 
 `T[N]` reads the way a C, HLSL or GLSL reader writes an array, and `texture_2d[float4][64]` is a binding array by the same rule, with no second spelling.
@@ -840,6 +845,7 @@ HLSL's `float3x4` is three rows, which only `row_major` keeps in that order, and
 ## CHK-404
 
 An atomic counts the invocations that reach it, so it means something only where the program can say how many there are.
+Workgroup memory is a buffer the group's other invocations see, so a store to it from a decision has the buffer's problem, and the decision's own locals and the enclosing body's stay writable.
 A raygen runs once per launch index, a miss once per ray that leaves the scene, a closest hit once per trace that hit, and a callable once per call.
 An any hit runs for each candidate the traversal asks about, including candidates a nearer hit later replaces, in an order the device picks.
 DXR and Vulkan may run it more than once for one candidate, unless the geometry sets `NO_DUPLICATE_ANYHIT_INVOCATION`, and Metal has no such flag.

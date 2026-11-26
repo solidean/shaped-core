@@ -247,6 +247,61 @@ TEST("sgl check - a candidate loop's body is non-uniform control flow, whatever 
             "non-uniform-control-flow");
     refused("", "let q = scene.world.query(probe(), mask = id.x)\nfor c in q.candidates:\n    workgroup_barrier()\n",
             "non-uniform-control-flow");
+    // the note names the program's loop, never the prelude's step or a line of the body
+    refused("", "let q = scene.world.query(probe())\nfor c in q.candidates:\n    workgroup_barrier()\n    c.commit()\n",
+            "non-uniform-control-flow",
+            "  note user:[q.candidates] each invocation meets its own candidates in this candidate loop, so its body "
+            "is "
+            "non-uniform control flow\n");
+}
+
+TEST("sgl check - a trace's decision is non-uniform control flow, whatever its ray, as a candidate loop's body is")
+{
+    // CHK-284: a barrier, a subgroup operation and a derivative in a decision are refused as in a candidate loop's body
+    constexpr auto stalls = "fun stalls(c: triangle_candidate) -> hit_decision:\n"
+                            "    workgroup_barrier()\n"
+                            "    return hit_decision.accept\n";
+    refused(stalls, "scene.hits[id.x] = float4(scene.world.trace(probe(), stalls).t)\n", "non-uniform-control-flow",
+            "  note user:[scene.world.trace(probe(), stalls)] this trace runs its decision for each invocation's own "
+            "candidates, so the decision's body is non-uniform control flow whatever the ray\n");
+    // reported once where the ray differs too
+    auto const differing = reports_of_body(stalls, "let r = ray(origin = pos3(id.x as float, 0.0, -1.0), direction = "
+                                                   "vec3(0.0, 0.0, 1.0))\n"
+                                                   "scene.hits[id.x] = float4(scene.world.trace(r, stalls).t)\n");
+    auto const first = differing.find("non-uniform-control-flow");
+    CHECK(first >= 0).dump("report", differing);
+    CHECK(differing.subview(first + 1).find("non-uniform-control-flow") < 0).dump("report", differing);
+    // a lambda's subgroup operation, named at the program's trace
+    refused("require subgroups\n",
+            "scene.hits[id.x] = float4(scene.world.trace(probe(), c => if subgroup_any(c.t > 1.0) => "
+            "hit_decision.accept else hit_decision.ignore).t)\n",
+            "non-uniform-control-flow", "subgroup_any exchanges values within the subgroup");
+    // what a decision decides stays a value of its own: a barrier after the trace is judged by the ray alone
+    accepted("", "let h = scene.world.trace(probe(), c => hit_decision.accept)\nworkgroup_barrier()\n"
+                 "scene.hits[id.x] = float4(h.t)\n");
+}
+
+TEST("sgl check - a decision writes no workgroup memory, which the group's other invocations see")
+{
+    // CHK-404: an assignment to a `@workgroup` member, or a part of one, as a buffer store is refused
+    constexpr auto shared = "@workgroup binding shared:\n    seen: uint\n    counts: uint[4]\n";
+    auto const with_shared = [&](cc::string_view line)
+    {
+        return reports_for(cc::format("{}{}@compute(64) fun main_cs(@thread_id id: int3){{scene, shared}}:\n"
+                                      "    let q = scene.world.query(probe())\n"
+                                      "    for c in q.candidates:\n"
+                                      "        {}\n"
+                                      "        c.commit()\n"
+                                      "    scene.hits[id.x] = float4(q.hit.t)\n",
+                                      scene, shared, line));
+    };
+    for (auto const line : {"shared.seen = 1u", "shared.counts[2] += 1u"})
+    {
+        auto const report = with_shared(line);
+        CHECK(report.contains("stage-not-allowed")).dump("report", report).dump("line", line);
+        CHECK(report.contains("this store to workgroup memory, which the group's other invocations see"))
+            .dump("report", report);
+    }
 }
 
 TEST("sgl check - a mixed query that skips triangles is a query of its boxes")

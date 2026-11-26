@@ -44,6 +44,11 @@ struct divergence
     /// It differs only between subgroups: every active invocation of a subgroup agrees, a helper perhaps not (CHK-537).
     /// A subgroup operation stands in such control flow, and a barrier, a derivative or a quad operation does not.
     bool agrees_in_subgroup = false;
+    /// It comes from the candidates each invocation meets, whose candidate loop a note names rather than the
+    /// prelude's step (CHK-555).
+    bool is_candidates = false;
+    /// Of such a value, the calls its step was inlined through, the candidate loop's own among them.
+    ast::range_of<call_site> candidates_through = {};
 
     [[nodiscard]] static divergence none() { return {}; }
 };
@@ -348,8 +353,16 @@ struct uniformity_pass
         // what another thread did to it first is what an atomic gives
         if (record->is_atomic && !result.is)
             result = {.is = true, .where = e.at(id).from, .why = cc::format("is what {} gave", record->name)};
+        // CHK-555: a candidate loop's step meets each invocation's own candidates, whatever its query holds
+        if (record->differs_between_invocations && record->is_ray_query)
+            result = {.is = true,
+                      .varies = true,
+                      .where = e.at(id).from,
+                      .why = cc::string("comes from the candidates each invocation meets"),
+                      .is_candidates = true,
+                      .candidates_through = e.at(id).inlined_through};
         // CHK-283: a ray-tracing stage's launch index, its ray and its hit are each invocation's own
-        if (record->differs_between_invocations && !result.varies)
+        else if (record->differs_between_invocations && !result.varies)
             result = {.is = true,
                       .varies = true,
                       .where = e.at(id).from,
@@ -479,7 +492,9 @@ struct uniformity_pass
                 .tested_why = d.why,
                 .through = through,
                 .agrees_in_quad = d.agrees_in_quad,
-                .agrees_in_subgroup = d.agrees_in_subgroup};
+                .agrees_in_subgroup = d.agrees_in_subgroup,
+                .is_candidates = d.is_candidates,
+                .candidates_through = d.candidates_through};
     }
 
     /// Whether control flow that differs between quads alone, or between subgroups alone, reaches a call whole.
@@ -857,6 +872,21 @@ cc::optional<flat_entry_point> checker::judge_uniformity(flat_entry_point const&
         if (is_seen)
             continue;
         reported.push_back(v.call);
+        // a trace's decision the flattener judged already, whatever the ray (CHK-284)
+        {
+            auto const& seen = e.at(v.call);
+            auto seen_at = call_site{.file = seen.from.file, .call = seen.from.expr};
+            if (out.builtin_function(seen.node.as<flat_call>().intrinsic) == nullptr
+                && !e.at(seen.inlined_through).empty())
+                seen_at = e.at(seen.inlined_through).back();
+            auto is_judged = false;
+            for (auto const& d : out.diagnostics)
+                is_judged = is_judged
+                         || (d.what.kind == diagnostic_kind::non_uniform_control_flow && d.file == seen_at.file
+                             && d.what.where == span_of(seen_at.file, seen_at.call));
+            if (is_judged)
+                continue;
+        }
 
         auto const& call = e.at(v.call);
         auto const& c = call.node.as<flat_call>();
@@ -892,6 +922,19 @@ cc::optional<flat_entry_point> checker::judge_uniformity(flat_entry_point const&
             for (auto const& s : e.at(v.flow.through))
                 if (s.file >= prelude_count)
                     site = s;
+        // CHK-555: the program's candidate loop, which hands each invocation its own candidates
+        if (v.flow.is_candidates)
+            for (auto const& s : e.at(v.flow.candidates_through))
+                if (s.file >= prelude_count)
+                    site = s;
+        if (ast::is_valid(site.call) && v.flow.is_candidates)
+        {
+            d.notes.push_back({.file = site.file,
+                               .where = span_of(site.file, site.call),
+                               .message = "each invocation meets its own candidates in this candidate loop, so its "
+                                          "body is non-uniform control flow"});
+            continue;
+        }
         if (ast::is_valid(site.call))
         {
             d.notes.push_back(

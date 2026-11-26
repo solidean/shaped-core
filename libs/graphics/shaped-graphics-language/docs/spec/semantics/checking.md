@@ -1428,6 +1428,7 @@ A `require` in a test's body that nothing in it uses is `unused-require`, and a 
 * **CHK-404** A traversal's decision writes no memory through a binding ([why](why/checking.md#chk-404)).
   Each such write it reaches is `stage-not-allowed`, whose detail says how often the decision runs.
   A write is an atomic, an image store, a `mut bytes` store, and an assignment to an element of a `mut buffer` or to a part of one, through a binding or a resource parameter.
+  So is an assignment to a member of a `@workgroup` binding or to a part of one, since the group's other invocations see it as they see a buffer.
   The payload, the decision's result and its locals it writes freely, since they are how it answers.
   A decision is an `@any_hit` or an `@intersection` entry point, and a function an inline trace calls as one: a parameter that takes a candidate or a box makes it so, in any stage.
   The other ray-tracing stages take every atomic of a `mut buffer` and of an `@atomic` image; none of them lists workgroup memory (CHK-294).
@@ -1468,6 +1469,8 @@ Tint's verdict on a barrier cannot be silenced, so a barrier keeps WGSL's rules 
 
 * **CHK-282** A barrier, and a builtin that takes derivatives implicitly, in **non-uniform control flow** is `non-uniform-control-flow`, at the call.
   A note names the branch or the exit that made the flow so, and what the branch tested.
+  In a candidate loop's body the note names the program's `for c in q.candidates`, and says each invocation meets its own candidates (CHK-555).
+  In a trace's decision it names the program's `world.trace` call that runs the decision; neither names the prelude's own loop.
   A branch of the prelude is no line of the program, so the note names the program's call that reached it instead.
   `sample` without a `level` or gradients, `sample_compare` without a `level`, `ddx`, `ddy`, their `_coarse` and `_fine` forms and `fwidth` take derivatives.
   A subgroup operation (CHK-377) and `workgroup_uniform_load` (CHK-374) stand where a barrier does.
@@ -1487,6 +1490,8 @@ Tint's verdict on a barrier cannot be silenced, so a barrier keeps WGSL's rules 
   So is the result of every atomic and of every subgroup operation (CHK-377), a compare-exchange's `old` and `exchanged` included.
   Every other value is uniform: a literal, a `const`, a member of a constant block, and an element of a read-only buffer at a uniform index.
 * **CHK-284** Control flow is non-uniform inside an `if`, a `case` or a loop whose condition is non-uniform, and the right side of an `and` or an `or` whose left side is.
+  It is non-uniform in a candidate loop's body (CHK-555) and in a trace's decision, whatever the ray, since each invocation meets its own candidates ([why](why/checking.md#chk-284)).
+  A decision is CHK-404's, and what it returns keeps its own uniformity: a barrier after the trace is judged by the ray and by the values the trace was handed.
   It stays so after an `if` or a `case` one of whose sides leaves in non-uniform control flow, and for the rest of the entry point after such a `return`.
   A loop some invocations leave early, by a `break`, a `continue` or a `return` in non-uniform control flow, is non-uniform throughout.
   A `while` condition is tested again before every iteration, so such a loop's condition runs in non-uniform control flow too.
