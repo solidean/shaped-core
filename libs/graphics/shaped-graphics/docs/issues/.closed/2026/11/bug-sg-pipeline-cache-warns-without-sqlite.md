@@ -4,8 +4,8 @@ tags: [webgpu, wasm]
 refs:
   - symbol: sg::pipeline_cache::resolve_blob_cache
   - file: libs/data/blob-cache/src/blob-cache/impl/cache_actor.cc
-claimed-by: Claude (for Philip Trettner)
-claimed-at: 2026-11-26T12:59Z
+closed: 2026-11-26
+resolution: fixed
 ---
 
 # The pipeline cache opens the default blob cache on wasm, which warns that it has no SQLite
