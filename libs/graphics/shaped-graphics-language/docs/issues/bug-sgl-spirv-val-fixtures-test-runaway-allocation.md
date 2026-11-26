@@ -5,6 +5,8 @@ refs:
   - test: shaped-graphics-language-test
   - file: libs/graphics/shaped-graphics-language/tests/emit/spirv-emit-test.cc:278
   - file: libs/graphics/shaped-graphics-language/src/shaped-graphics-language/ir/lower_expr.cc:331
+claimed-by: Claude (for Philip Trettner)
+claimed-at: 2026-11-26T06:57Z
 ---
 
 # The spirv-val fixtures test grows to 26 GB on debug-clang and fails a 23 GB allocation
