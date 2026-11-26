@@ -21,7 +21,8 @@ Possibly the driver cache bug of known issue `intel-d3d12-cached-pso-draws-nothi
 ## Log
 
 **2026-11-26: reproduced standalone, and the gate is exactly as wide as the bug.**
-[intel-d3d12-mesh-pipeline-built-after-a-restore-draws-nothing](../../../../../../../../docs/bugs-external/intel-d3d12-mesh-pipeline-built-after-a-restore-draws-nothing/readme.md) reproduces it with a trivial mesh stage.
+Its entry reproduces it with a trivial mesh stage:
+[intel-d3d12-mesh-pipeline-built-after-a-restore-draws-nothing](../../../../../../../../docs/bugs-external/intel-d3d12-mesh-pipeline-built-after-a-restore-draws-nothing/readme.md).
 A mesh pipeline restored from another process's blob draws, and every one built fresh after it in that process draws nothing.
 A vertex pipeline in the same order draws, so `dx12_bind.cc`'s `mesh_blobs`, false on an Intel GPU, is the workaround and stays.
 Not the cached-PSO bug of intel-d3d12-cached-pso-draws-nothing, which needs a large pixel stage and no blob of the application's.
