@@ -3,6 +3,8 @@ created: 2026-11-11
 priority: next
 refs:
   - test: "sv - a traced mean is the same bits*"
+claimed-by: Claude (for Philip Trettner)
+claimed-at: 2026-11-26T11:53Z
 ---
 
 # The deterministic-seed test's hybrid mode differs in about 30 channels, on an RTX 4090 and an Arc B580
