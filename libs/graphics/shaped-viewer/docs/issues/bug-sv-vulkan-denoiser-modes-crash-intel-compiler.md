@@ -44,3 +44,12 @@ With it the test's megakernel and wavefront agree with dx12 on the Arc.
 
 Still open, so the test still skips Intel: the forward hybrid's depth guide reads 20 non-finite pixels on every frame.
 After that the process dies of heap corruption, again inside `igc_default64` but on a thread of the driver's own, so no frame names the pipeline.
+
+**2026-11-26, later: the test passes on the Arc, and only the reduction is left.**
+The forward hybrid's non-finite guides were the test's own: it checked guide and mean slots on frames before anything wrote them.
+Vulkan does not zero a new texture's memory, and on the Arc it held earlier allocations' bytes, which a half-float read turns into NaNs.
+`agreement_test_support.hh` now checks a slot once it holds a frame, as `ran` already did for the denoised one.
+The later heap corruption did not come back in five runs of the whole test, all of which pass, so the Intel skip is gone.
+The no-op closest hit is still needed: with it off the test crashes within 6 s.
+Its entry carries it, marked not reduced, which is what this issue stays open for:
+[intel-vulkan-mixed-empty-hit-groups-crash-compiler](../../../../../docs/bugs-external/intel-vulkan-mixed-empty-hit-groups-crash-compiler/readme.md).

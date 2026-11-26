@@ -21,7 +21,7 @@ struct staged_module
 
 /// A closest hit that does nothing, which an empty hit group gets on an Intel GPU: it leaves the payload as no closest hit would.
 /// Intel's Vulkan compiler crashes building some pipelines of eight hit groups or more where empty ones sit beside others.
-/// shaped-viewer's issue bug-sv-vulkan-denoiser-modes-crash-intel-compiler has the measurements.
+/// docs/bugs-external/intel-vulkan-mixed-empty-hit-groups-crash-compiler has the measurements.
 /// `spirv-as --target-env vulkan1.2` of: RayTracingKHR, SPV_KHR_ray_tracing, entry point ClosestHitKHR "main", which returns.
 constexpr u32 noop_closest_hit[] = {
     0x07230203, 0x00010500, 0x00070000, 0x00000005, 0x00000000, 0x00020011, 0x0000117f, 0x0006000a, 0x5f565053,

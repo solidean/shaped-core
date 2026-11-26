@@ -306,9 +306,14 @@ inline cc::shared_async<converged> converge(sg::context& ctx,
             take(normals, out.normals);
             take(albedo, out.albedo);
         }
-        check_finite(config.name, "mean", index, cc::span<tg::vec4f const>(out.mean));
-        check_finite(config.name, "normal guide", index, cc::span<rgba16 const>(out.normals));
-        check_finite(config.name, "albedo guide", index, cc::span<rgba16 const>(out.albedo));
+        // A slot nothing wrote yet holds whatever its memory held, which Vulkan does not zero.
+        if (slot != nullptr && slot->accum_frame != 0)
+            check_finite(config.name, "mean", index, cc::span<tg::vec4f const>(out.mean));
+        if (normal_slot != nullptr && normal_slot->accum_frame != 0)
+        {
+            check_finite(config.name, "normal guide", index, cc::span<rgba16 const>(out.normals));
+            check_finite(config.name, "albedo guide", index, cc::span<rgba16 const>(out.albedo));
+        }
         co_return out;
     };
 
@@ -466,6 +471,11 @@ public:
         auto const ran = def.views[0].layers[0].settings.reconstruct.denoiser != sr::denoise_method::none
                       && denoised_slot != nullptr && denoised_slot->accum_frame != 0 && mean_slot != nullptr
                       && mean_slot->stand_in_hash == 0;
+        // A slot nothing wrote yet holds whatever its memory held, which Vulkan does not zero: the guides count on the
+        // normal slot's frames, and the mean on its own.
+        auto const* const normal_slot = slot_of(sv::temporal_id::normal_guide(0));
+        auto const guides_written = normal_slot != nullptr && normal_slot->accum_frame != 0;
+        auto const mean_written = mean_slot != nullptr && mean_slot->accum_frame != 0;
         _ctx.submit_command_list(cc::move(cmd));
         _ctx.advance_epoch();
         co_await _ctx.idle_completion();
@@ -483,12 +493,13 @@ public:
         if (auto const d = denoised.try_get_data(); denoised.is_valid() && d.has_value())
             for (auto const& v : d.value())
                 out.denoised.push_back(tg::vec4f(f32(v.r), f32(v.g), f32(v.b), f32(v.a)));
-        check_finite(_name, "mean", index, cc::span<tg::vec4f const>(out.raw));
-        if (auto const d = normal_guide.try_get_data(); normal_guide.is_valid() && d.has_value())
+        if (mean_written)
+            check_finite(_name, "mean", index, cc::span<tg::vec4f const>(out.raw));
+        if (auto const d = normal_guide.try_get_data(); guides_written && normal_guide.is_valid() && d.has_value())
             check_finite(_name, "normal guide", index, cc::span<rgba16 const>(d.value()));
-        if (auto const d = albedo_guide.try_get_data(); albedo_guide.is_valid() && d.has_value())
+        if (auto const d = albedo_guide.try_get_data(); guides_written && albedo_guide.is_valid() && d.has_value())
             check_finite(_name, "albedo guide", index, cc::span<rgba16 const>(d.value()));
-        if (auto const d = depth_guide.try_get_data(); depth_guide.is_valid() && d.has_value())
+        if (auto const d = depth_guide.try_get_data(); guides_written && depth_guide.is_valid() && d.has_value())
             check_finite(_name, "depth guide", index, cc::span<f32 const>(d.value()));
         // A denoised image the member did not produce this frame is an older one, which its own frame already checked.
         if (ran)
