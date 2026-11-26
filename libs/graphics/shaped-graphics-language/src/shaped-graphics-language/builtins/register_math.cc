@@ -1001,8 +1001,8 @@ void sgl::builtins::register_math(registry& r)
          .wgsl_names = k_reinterpret_wgsl,
          .msl_names = k_as_type});
 
-    r.add_comment("// packing into a uint and back: bytes rounded half up, as floor(x + 0.5), and halves rounded to "
-                  "even");
+    r.add_comment("// packing into a uint and back: bytes rounded half up, as floor(x + 0.5), and halves as `x as half` "
+                  "rounds them (EVAL-96)");
     add(r, "@pure fun pack_unorm4x8(v: float4) -> uint", pack_unorm4x8,
         {.hlsl = "sgl_pack_unorm4x8",
          .wgsl = "pack4x8unorm",

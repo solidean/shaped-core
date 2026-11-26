@@ -29,6 +29,7 @@ A listing here is the dump of a flat tree, shortened: a label is `$name`, and a 
   Apple's compiler does under Metal's fast math, and Mesa and NVIDIA's vulkan driver take `(x as half) as float` for `x`.
   A float converted to a half, `x as half`, rounds once either to nearest, ties to even, or toward zero: whichever its target does.
   D3D converts to another float format toward zero, and Vulkan leaves a conversion's rounding to the device, so no target promises nearest; the interpreter rounds to nearest.
+  `pack_half2x16` converts each lane the same way, and a target rounds every lane of every pack one way: NVIDIA's dx12 truncates there though its `x as half` does not.
   At `.precise` and `.ieee` it is a half either way, and a result no half holds is no conversion.
 * **EVAL-108** A double's rounding functions are exact, and a zero they give keeps the sign of the argument: `trunc(-0.5)` is -0.0 (CHK-458).
   `round` takes a tie to the even neighbour, and `fract(x)` is `x - floor(x)`.

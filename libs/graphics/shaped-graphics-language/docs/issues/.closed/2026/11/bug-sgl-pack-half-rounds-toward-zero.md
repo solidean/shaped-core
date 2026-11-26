@@ -4,8 +4,8 @@ tags: [half, dx12, vulkan, amd, nvidia]
 refs:
   - file: libs/graphics/shaped-graphics/tests/compute/compute-pack-routes-test.cc
   - file: libs/graphics/shaped-graphics-language/src/shaped-graphics-language/builtins/register_math.cc
-claimed-by: Claude (for Philip Trettner)
-claimed-at: 2026-11-26T06:57Z
+closed: 2026-11-26
+resolution: fixed
 ---
 
 # pack_half2x16 rounds toward zero on dx12 and on AMD's vulkan, where SGL rounds to nearest
@@ -22,7 +22,7 @@ It packs every half's midpoint to its neighbor and the floats a step either side
 A value a half holds exactly packs to that half everywhere, and so does an infinity; a NaN packs to a NaN.
 
 It is the target's conversion and no route's: the two routes of each context agree to the bit.
-[bug-sgl-half-conversion-rounds-toward-zero-on-amd](.closed/2026/11/bug-sgl-half-conversion-rounds-toward-zero-on-amd.md) is the same finding for `f as half` on AMD.
+[bug-sgl-half-conversion-rounds-toward-zero-on-amd](bug-sgl-half-conversion-rounds-toward-zero-on-amd.md) is the same finding for `f as half` on AMD.
 The corpus's `half_math.sgl` saw no such thing on NVIDIA's dx12, so there `LegacyF32ToF16` truncates where a conversion does not.
 
 What would settle it:
@@ -30,3 +30,10 @@ What would settle it:
 - Or SGL rounds by hand from the float's bits on dx12, where no rounding control exists, and asks for `RoundingModeRTE` on vulkan where the device grants it.
 
 `TEMPORARY(bug-sgl-pack-half-rounds-toward-zero)` lets the pack-routes test accept a route that packs every such word toward zero, and no route that mixes the two.
+
+## Log
+
+**2026-11-26: settled by the spec, as `x as half` was.**
+EVAL-96 says `pack_half2x16` converts each lane as `x as half` does, to nearest or toward zero as the target does, one way for every pack.
+The pack-routes test's check that a route rounds every inexact pair one way is that rule now, and no longer a workaround.
+The interpreter and the constant folder keep rounding to nearest, so the differential corpus packs only halves no rounding changes.

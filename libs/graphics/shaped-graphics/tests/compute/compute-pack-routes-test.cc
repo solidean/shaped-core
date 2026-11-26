@@ -316,8 +316,8 @@ void hold_to_cpu(outputs const& o, cc::span<float4 const> values, cc::span<u32 c
                 .dump("cpu", expected);
         }
     }
-    // a target's conversion rounds every inexact pair the same way, to nearest or toward zero
-    CHECK((h.toward_zero == 0 || h.toward_zero == h.rounded)) // TEMPORARY(bug-sgl-pack-half-rounds-toward-zero)
+    // a target rounds every inexact pair one way, to nearest or toward zero (EVAL-96)
+    CHECK((h.toward_zero == 0 || h.toward_zero == h.rounded))
         .dump("route", route)
         .dump("toward zero", h.toward_zero)
         .dump("inexact", h.rounded);
