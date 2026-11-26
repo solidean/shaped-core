@@ -8,6 +8,13 @@ Nothing here is normative.
 The emitters follow the [compilation model](../../incubator/compilation-model.md): SGL compiles to shader text, and the text's own compiler optimizes it.
 So an emitter is a printer with opinions about names and addresses, and it transforms nothing.
 
+## EMIT-288
+
+A native route lowers what its target's text compiles to, and DXC compiles HLSL's `|` of two `uint`s to an `or`.
+The flags are an `int` on every target already, since the registry gives `ray_flags` an `int`'s layout, so the operators are rows of the lowering's family table.
+Every use before was folded first, which is why no route met the gap until a trace took flags chosen at run time.
+MSL sets its intersector's parameters from the value, and WGSL's emulated walk reads the word, so neither changed.
+
 ## EMIT-287
 
 WGSL refuses a const-expression that is non-finite when it creates the shader, and a `bitcast` of a literal is one.

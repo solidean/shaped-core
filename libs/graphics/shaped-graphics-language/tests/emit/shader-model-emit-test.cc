@@ -769,6 +769,48 @@ TEST("sgl emit - the nvapi fill of opacity micromaps refuses a trace that forces
     REQUIRE(plain.has_value()).dump("error", plain.has_error() ? plain.error() : cc::string());
 }
 
+TEST("sgl emit - a ray query's flags combined from constants are a constant, and ones combined at run time are "
+     "lowered on both routes (EMIT-184, EMIT-288)")
+{
+    auto const source = [](cc::string_view flags)
+    {
+        return cc::format("require ray_query\n"
+                          "\n"
+                          "binding work:\n"
+                          "    world: acceleration_structure[.triangles]\n"
+                          "    values: mut buffer[float]\n"
+                          "\n"
+                          "@compute(64) fun cs(@thread_id id: int3){{work}}:\n"
+                          "    let r = ray(origin = pos3(0.0, 0.0, 0.0), direction = vec3(0.0, 0.0, 1.0))\n"
+                          "    let picked = if id.x > 3 => ray_flags.cull_opaque else ray_flags.none\n"
+                          "    let flags = {}\n"
+                          "    work.values[id.x] = work.world.trace(r, c => hit_decision.ignore, flags = flags).t\n",
+                          flags);
+    };
+    // `|` of two constants folds before the nvapi fill asks whether they force 2 states
+    auto const folded = source("ray_flags.force_non_opaque | ray_flags.skip_procedural");
+    for (auto const route : k_routes)
+    {
+        auto const e = filled(folded, "cs", feature::opacity_micromap, fill::nvapi, route);
+        REQUIRE(e.has_value()).dump("error", e.has_error() ? e.error() : cc::string());
+    }
+    // flags combined at run time lower on SGL's own DXIL and SPIR-V as an int's `or`, `and` and comparison
+    auto const runtime = source("if (picked | ray_flags.force_non_opaque).has(ray_flags.cull_opaque) => picked & "
+                                "ray_flags.cull_opaque else ray_flags.force_non_opaque");
+    for (auto const t : {target::hlsl_dx12, target::hlsl_vulkan})
+    {
+        auto const e = sgl::compile_to_text(
+            {.source = runtime, .entry_point = "cs", .target = t, .native = native_route::require});
+        REQUIRE(e.has_value()).dump("target", sgl::emit::to_string(t)).dump("error", e.has_error() ? e.error() : "");
+        CHECK(e.value().text.contains("bit_or")).dump("text", e.value().text);
+        CHECK(e.value().text.contains("bit_and")).dump("text", e.value().text);
+    }
+    // under the nvapi fill such flags may force 2 states, so it still refuses them
+    auto const refused = filled(runtime, "cs", feature::opacity_micromap, fill::nvapi, native_route::text);
+    REQUIRE(refused.has_error());
+    CHECK(refused.error().contains("flags that are no constant")).dump("error", refused.error());
+}
+
 TEST("sgl emit - the nvapi fill of reordering writes NVAPI's hit objects through nvHLSLExtns.h at 6.6 (EMIT-265)")
 {
     auto const e = filled(k_reordering, "shoot", feature::shader_execution_reordering, fill::nvapi, native_route::text);

@@ -584,6 +584,12 @@ fn main_ps(p: pixel_input) -> target_ {
   An `affine3` is a value of three rows, and GPU memory holds one as EMIT-259 writes it.
   A query of an entry point that states opacity micromaps is EMIT-184's.
   What is undefined on one way into a merge takes the other way's value, since DXIL's validator refuses `undef` in a `select`.
+* **EMIT-288** A native route lowers `|` and `&` of `ray_flags` as an `int`'s `bit_or` and `bit_and`, whether their operands are constant or not ([why](why/emitting.md#emit-288)).
+  It lowers `flags.has(f)` as `(flags & f) == f`.
+  A trace hands its flags to the target as the value, a run-time operand on every target.
+  Those are `dx.op.traceRay`'s and `OpTraceRayKHR`'s for a pipeline trace, and `rayQuery_TraceRayInline`'s and `OpRayQueryInitializeKHR`'s for an inline one.
+  A query whose flags are no constant is allocated with none, as EMIT-159's template is `RAY_FLAG_NONE`: `dx.op.allocateRayQuery` with 0.
+  What EMIT-184 says of such a query holds on both routes: on vulkan it states the micromap capability, and under dx12's `nvapi` fill it is `unsupported`.
 * **EMIT-244** A ray-tracing stage of a native route is one entry point of its target's own, so a pipeline may take each stage from either route.
   A payload, a callable's parameter and a hit's attributes are each one variable of the stage, and a trace or a call copies into a variable of the caller's, one per type, and back.
   An any hit's decision ends the stage: `OpIgnoreIntersectionKHR` or `OpTerminateRayKHR`, `dx.op.ignoreHit` or `dx.op.acceptHitAndEndSearch`.

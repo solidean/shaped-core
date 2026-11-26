@@ -61,6 +61,8 @@ enum class family : u8
     derivative_width,
     derivative_x_fine,
     derivative_y_fine,
+    /// `flags.has(f)` of `ray_flags`: `(flags & f) == f` (EMIT-288).
+    has_flags,
 };
 
 struct family_name
@@ -89,6 +91,10 @@ constexpr family_name k_families[] = {
     {"enum_as_int", family::identity},
     {"bit_and", family::bit_and},
     {"bit_or", family::bit_or},
+    // EMIT-288: `ray_flags` is an `int` on every target, so its `|`, `&` and `has` are an int's bit operations
+    {"combine_ray_flags", family::bit_or},
+    {"intersect_ray_flags", family::bit_and},
+    {"has", family::has_flags},
     {"bit_xor", family::bit_xor},
     {"bit_not", family::bit_not},
     {"shift_left", family::shift_left},
@@ -1051,6 +1057,8 @@ value_ref lowering::call(flat_expr const& x, flat_call const& c)
         unsupported(cc::format("the builtin {}", record.name));
         return value_ref::none;
     }
+    case family::has_flags:
+        return add(op::ieq, _bool, {add(op::bit_and, _out.type_of(args[0]), {args[0], args[1]}), args[1]});
     case family::any:
         return lanes_of(_out.type_of(args[0])) == 1 ? args[0] : add(op::any, _bool, {args[0]});
     case family::all:

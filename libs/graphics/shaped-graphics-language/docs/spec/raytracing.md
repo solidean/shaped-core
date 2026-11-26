@@ -95,7 +95,9 @@ What a traversal cannot decide alone it asks of **decisions**, which the call ha
   A lambda sees the names around it, `c => c.t < limit`.
 * **`flags` and `mask` are named-only**: `flags = ray_flags.force_opaque`, `mask = 0x01`.
   The mask is ANDed with each instance's; the default 255 meets every instance.
-* **A trace never hands the target flags it forbids together**, since DXR and vulkan leave those undefined.
+* **A trace never hands the target constant flags it forbids together**, since DXR and vulkan leave those undefined.
+  Flags combined at run time that the target forbids together give what the target gives, which DXR and vulkan leave undefined, and no mask is added at run time.
+  Those are two facing culls, or two of `force_opaque`, `force_non_opaque`, `cull_opaque` and `cull_non_opaque`.
   A trace that skips every kind its structure holds meets nothing, and traces nothing: `skip_triangles` on `.triangles`, `skip_procedural` on `.procedural`, both on `.mixed`.
   A trace that skips triangles drops `cull_back_facing` and `cull_front_facing`, which mean nothing for a box.
 * **`is_occluded(world, r)`** asks whether anything lies on a ray of triangles, stopping at the first hit it accepts: the shadow ray.

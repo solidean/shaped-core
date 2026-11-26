@@ -155,6 +155,20 @@ ASYNC_INVOCABLE_TEST("sg - an SGL ray-tracing pipeline traces two ray types, one
     CHECK((co_await first_wrong_cell(ctx, shaders::raytracing_pipeline::path)) == "");
 }
 
+ASYNC_INVOCABLE_TEST("sg - an SGL trace whose flags are combined at run time traces what constant flags would",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::raytracing_pipeline))
+        SKIP("this device has no ray-tracing pipelines");
+
+    // a `has` that answered wrong, or an `&` or `|` lowered wrong, forces the rays opaque or culls them, and the cutout
+    // any hit then keeps or loses cells it should not
+    CHECK((co_await first_wrong_cell(ctx, shaders::raytracing_pipeline::flagged_path)) == "");
+}
+
 // `reordered_path`'s raygen asks for its invocations to be regrouped before it traces, which changes which of them run
 // together and nothing they compute: a real reordering on a device with the feature, and no instruction elsewhere.
 ASYNC_INVOCABLE_TEST("sg - an SGL raygen that reorders its invocations traces what it would have traced",
