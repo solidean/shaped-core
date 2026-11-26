@@ -905,7 +905,7 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
   A native route bitcasts: SPIR-V's `OpBitcast` between a double and a `uint2`, and DXIL's `splitDouble` and `makeDouble` (EMIT-196).
 * **EMIT-258** SPIR-V's atomics of workgroup memory state `Workgroup` scope, and every other `Device`.
   A 64-bit atomic store of workgroup memory is an `OpAtomicExchange`, and a load an `OpAtomicOr` of 0, as DXC writes them.
-  Intel's vulkan driver reads wrong after either plain form: [bug-sgl-intel-vulkan-shared-64-bit-atomic-load-store](../../issues/bug-sgl-intel-vulkan-shared-64-bit-atomic-load-store.md).
+  AMD's vulkan driver reads wrong after the plain forms: [bug-sgl-amd-vulkan-shared-64-bit-atomic-load-store](../../issues/bug-sgl-amd-vulkan-shared-64-bit-atomic-load-store.md).
 * **EMIT-259** Every target writes an `affine3` in GPU memory as CHK-518's three rows.
   HLSL declares it `row_major float3x4`, and a buffer of them holds each in a struct of one field: DXC's DXIL drops a `row_major` written in a buffer's template.
   WGSL's `mat3x4f` and MSL's `float3x4` hold the rows as their own columns.

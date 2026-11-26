@@ -1,0 +1,69 @@
+; A workgroup's 64-bit sum: thread 0 zeroes it, every thread of 64 adds 2^33 plus its index, thread 0 reads it back.
+; The total is 2^39 + 2016: 0x80 in the high word and 0x7e0 in the low.
+; run.py fills in the store that zeroes it, the read of the total and the scope, one row of the readme's table at a time.
+               OpCapability Shader
+               OpCapability Int64
+               OpCapability Int64Atomics
+               OpMemoryModel Logical GLSL450
+               OpEntryPoint GLCompute %main "main" %lid %sum %out
+               OpExecutionMode %main LocalSize 64 1 1
+               OpDecorate %lid BuiltIn LocalInvocationIndex
+               OpDecorate %words ArrayStride 4
+               OpMemberDecorate %block 0 Offset 0
+               OpDecorate %block Block
+               OpDecorate %out DescriptorSet 0
+               OpDecorate %out Binding 0
+       %void = OpTypeVoid
+         %fn = OpTypeFunction %void
+       %bool = OpTypeBool
+       %uint = OpTypeInt 32 0
+      %ulong = OpTypeInt 64 0
+      %words = OpTypeRuntimeArray %uint
+      %block = OpTypeStruct %words
+   %p_block = OpTypePointer StorageBuffer %block
+    %p_word = OpTypePointer StorageBuffer %uint
+ %p_in_uint = OpTypePointer Input %uint
+%p_wg_ulong = OpTypePointer Workgroup %ulong
+        %lid = OpVariable %p_in_uint Input
+        %sum = OpVariable %p_wg_ulong Workgroup
+        %out = OpVariable %p_block StorageBuffer
+     %uint_0 = OpConstant %uint 0
+     %uint_1 = OpConstant %uint 1
+ %workgroup = OpConstant %uint 2
+     %uint_32 = OpConstant %uint 32
+      %scope = OpConstant %uint SCOPE
+    %relaxed = OpConstant %uint 0
+; AcquireRelease | WorkgroupMemory
+    %barrier = OpConstant %uint 264
+    %ulong_0 = OpConstant %ulong 0
+  %two_to_33 = OpConstant %ulong 8589934592
+       %main = OpFunction %void None %fn
+      %entry = OpLabel
+          %i = OpLoad %uint %lid
+      %first = OpIEqual %bool %i %uint_0
+               OpSelectionMerge %zeroed None
+               OpBranchConditional %first %zero %zeroed
+       %zero = OpLabel
+               STORE
+               OpBranch %zeroed
+     %zeroed = OpLabel
+               OpControlBarrier %workgroup %workgroup %barrier
+        %i64 = OpUConvert %ulong %i
+       %part = OpIAdd %ulong %two_to_33 %i64
+     %before = OpAtomicIAdd %ulong %sum %scope %relaxed %part
+               OpControlBarrier %workgroup %workgroup %barrier
+               OpSelectionMerge %done None
+               OpBranchConditional %first %read %done
+       %read = OpLabel
+               LOAD
+        %low = OpUConvert %uint %total
+    %shifted = OpShiftRightLogical %ulong %total %uint_32
+       %high = OpUConvert %uint %shifted
+     %p_low = OpAccessChain %p_word %out %uint_0 %uint_0
+               OpStore %p_low %low
+    %p_high = OpAccessChain %p_word %out %uint_0 %uint_1
+               OpStore %p_high %high
+               OpBranch %done
+       %done = OpLabel
+               OpReturn
+               OpFunctionEnd
