@@ -4,6 +4,8 @@ refs:
   - file: libs/graphics/shaped-graphics/tests/compute/compute-diagnostic-routes-test.cc
   - file: libs/graphics/shaped-graphics/tests/shaders/sgl_mixed/diagnostic_routes.sgl
   - test: "sg - a compute stage's failed assert reads the same through DXC and through the native route"
+claimed-by: Claude (for Philip Trettner)
+claimed-at: 2026-11-26T09:19Z
 ---
 
 # On AMD's dx12 driver, a value read before a failed assert's branch is the failing lane's after it
