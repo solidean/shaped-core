@@ -2,8 +2,6 @@
 created: 2026-11-13
 refs:
   - test: sv vulkan - every mode and every denoiser draws the view it draws on dx12
-claimed-by: Claude (for Philip Trettner)
-claimed-at: 2026-11-26T15:12Z
 ---
 
 # Intel's Vulkan compiler crashes the viewer test that draws every mode and denoiser
