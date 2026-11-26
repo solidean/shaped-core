@@ -53,6 +53,8 @@ def _ensure_prereqs(root: Path, preset: Preset, emsdk_path: str | None = None) -
     prereqs.ensure_sqlite(root, preset.name)
     prereqs.ensure_oidn_weights(root, preset.name)
     prereqs.ensure_fidelityfx(root, preset.name)
+    # The consuming project's own, after shaped-core's, so one may build on what those installed.
+    prereqs.ensure_project(root, preset.name)
 
 
 def _configure_one(

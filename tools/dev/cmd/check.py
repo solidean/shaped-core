@@ -53,8 +53,9 @@ SELFTESTS: dict[str, tuple[str, list[tuple[str, list[str], tuple[str, ...]]]]] =
         ("tools/dev/roots-self-test.py", [], ()),
         ("tools/dev/imports-self-test.py", [], ()),
     ]),
-    "dev-selftest-pipeline": ("the build and test pipeline: the build server and ship, benchmarks, failure sites", [
+    "dev-selftest-pipeline": ("the build and test pipeline: the build server and ship, a project's prerequisites, benchmarks, failure sites", [
         ("tools/dev/build-server-self-test.py", [], ()),
+        ("tools/dev/prereqs-self-test.py", [], ()),
         ("tools/dev/benchmarks-self-test.py", [], ()),
         ("tools/dev/symbolize-self-test.py", [], ()),
     ]),

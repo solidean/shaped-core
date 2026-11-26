@@ -3,6 +3,7 @@
 The fingerprint hashes the mtimes of CMakeLists.txt and *.cmake files, plus the sorted listing of .cc/.hh sources across the repo.
 A content change inside an existing source is the build system's job.
 This only detects when configure itself must rerun, because a cmake input changed or a source was added or removed.
+A consuming project's prerequisites add their own strings (`prereqs.Prerequisite.fingerprint`), since what they install from lies outside that walk.
 """
 
 from __future__ import annotations
@@ -11,6 +12,7 @@ import hashlib
 import os
 from pathlib import Path
 
+from . import prereqs
 from ..core import profile
 from ..project.presets import presets_files
 
@@ -48,6 +50,8 @@ def _compute(root: Path) -> str:
 
     for f in sorted(source_files):
         h.update(f"{f}\n".encode())
+
+    h.update(prereqs.project_fingerprint(root).encode())
 
     return h.hexdigest()[:20]
 
