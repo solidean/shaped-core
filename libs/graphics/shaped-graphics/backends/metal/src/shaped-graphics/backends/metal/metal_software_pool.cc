@@ -33,8 +33,13 @@ void metal_software_pool::retire_storage(sg::impl::software_pool_storage)
     _previous = nullptr;
     if (previous == nullptr)
         return;
-    _metal.residency().remove(previous);
-    _metal.epochs().defer([previous] { previous->release(); });
+    // The residency entry goes with the release, never before — see metal_residency_set.
+    _metal.epochs().defer(
+        [previous, &residency = _metal.residency()]
+        {
+            residency.remove(previous);
+            previous->release();
+        });
 }
 
 void metal_software_pool::shutdown()

@@ -3,8 +3,8 @@ created: 2026-11-13
 refs:
   - file: libs/graphics/shaped-viewer/tests/headless-viewer-test.cc:1200
   - test: "sv - a guest settled render advances no epoch of its own, and settles in its host's frames"
-claimed-by: Claude (for Julius Nehring-Wirxel)
-claimed-at: 2026-11-26T13:37Z
+closed: 2026-11-26
+resolution: fixed
 ---
 
 # A guest settled render draws nothing on metal, and the run then hangs
@@ -48,3 +48,20 @@ And two guest frames in flight at once: one at a time still fails.
 2026-11-13: the test's host is paced now, an advance every 4 ms as an app's frame loop would, and the test passes; this issue is the behavior under a host that is not.
 To reproduce, put the host loop back to `pump_for(1.0)` then `advance_epoch()` with nothing between.
 What a fix has to explain: a frame that runs on the GPU without error and leaves its target empty, once the host is thousands of epochs ahead of it.
+
+2026-11-26, measured with temporary probes, all reverted:
+Leaking every retired epoch's finalizers and allocators still failed, so nothing the epoch system frees was the cause.
+Skipping the queue's epoch signal for epochs that committed nothing made the image whole, so the GPU's lag behind its signals was the trigger.
+Never removing anything from the residency set made it whole too, at full spin, 17 million advances.
+Bisected by site, the removal that matters is a binding group's: its argument buffer left the set the moment its last handle dropped, while its release waited for the epoch.
+The queue reads the set when it hands a command buffer to the GPU, not at commit.
+A frame queued behind millions of signals is handed over long after its groups were dropped, and its kernels read their arguments as zeroes.
+A queue wait alone does not show it: a list held back by an unsignaled event keeps its residency, while one behind 100,000 epoch signals loses it in every run.
+
+## Resolution
+
+Every metal resource now leaves the residency set in the epoch-deferred step that releases it: buffers, textures, acceleration structures, binding groups and the software pool's storage.
+`metal_residency_set`'s doc states the rule.
+"sg metal - a binding group dropped while a submitted list still binds it stays resident until the list runs" pins it, failing 3 of 3 runs without the fix.
+The hang after the failure was the staging rings' checkpoint vector compacted from the front once per retired epoch, quadratic in the epochs a fast host leaves; it is a `cc::ringbuffer` now.
+The guest test keeps its paced host: unpaced it passes with the fix, but takes 5 to 97 s and up to 10 GiB retiring millions of epochs.

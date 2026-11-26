@@ -13,6 +13,19 @@ Those questions come back every time a toolchain or a driver updates, and re-der
 
 So each entry carries the answer as something runnable.
 
+## When the evidence points outside our code
+
+Driver and compiler bugs are common here, so this is the standing procedure rather than a judgment call each time.
+Once the evidence points at a driver, a runtime or a compiler, the work is three steps, in order:
+
+1. **Reduce it to a standalone repro** in this folder, by the rules below.
+   An investigation that stops at "probably the driver" is unfinished: the repro is what settles it, and what a vendor report needs.
+2. **Work around it or skip it, keyed to what was measured**: the vendor, the driver, the backend.
+   A workaround stays as narrow as the evidence, and a test that cannot run skips through a known issue, never by commenting it out.
+3. **Link the two** and record what to re-check after an update.
+
+Where the repro will not reduce, the entry still lands with what was ruled out, marked as not reduced, and the issue stays open for it.
+
 ## The rules
 
 - **One directory per bug**, kebab-case, named for the symptom rather than for the file that hit it.
@@ -61,6 +74,9 @@ So each entry carries the answer as something runnable.
 | [dxc-pixel-signature-packs-primitive-into-vertex-row](dxc-pixel-signature-packs-primitive-into-vertex-row/readme.md) | DXC 1.9.2602, drawn wrong by AMD D3D12 driver 32.0.21042.62, Radeon iGPU (RDNA 2) | reproduced standalone, not yet filed, worked around in SGL's DXIL, DXC's route a known issue on AMD |
 | [intel-d3d12-mesh-table-without-root-parameters-hangs](intel-d3d12-mesh-table-without-root-parameters-hangs/readme.md) | Intel D3D12 driver 32.0.101.9150, Arc B580 | reproduced standalone, not yet filed, worked around in sg's dx12 root signatures |
 | [d3d12-mesh-pipeline-without-topology-refuses-its-blob](d3d12-mesh-pipeline-without-topology-refuses-its-blob/readme.md) | the D3D12 runtime, WARP, Intel and AMD alike | reproduced standalone, not yet filed, worked around in sg's dx12 mesh pipelines |
+| [intel-vulkan-mixed-empty-hit-groups-crash-compiler](intel-vulkan-mixed-empty-hit-groups-crash-compiler/readme.md) | Intel Vulkan driver 1663934, Arc B580 | not reduced, not filed, worked around in sg's vulkan ray-tracing pipelines |
+| [intel-d3d12-mesh-pipeline-built-after-a-restore-draws-nothing](intel-d3d12-mesh-pipeline-built-after-a-restore-draws-nothing/readme.md) | Intel D3D12 driver 32.0.101.9150, Arc B580 | reproduced standalone, not yet filed, worked around in sg's dx12 mesh pipelines |
+| [amd-vulkan-cutout-trace-after-another-hangs](amd-vulkan-cutout-trace-after-another-hangs/readme.md) | AMD Vulkan driver 2.0.353, RDNA 2 iGPU | not reduced, not filed, skipped by a known issue in shaped-viewer's trace tests |
 | [amd-vulkan-shared-64-bit-atomic-store-keeps-high-word](amd-vulkan-shared-64-bit-atomic-store-keeps-high-word/readme.md) | AMD vulkan driver 2.0.353, Radeon iGPU (RDNA 2) | reproduced standalone, not yet filed, worked around in SGL |
 | [amd-vulkan-nonuniform-array-length-reads-first-lane](amd-vulkan-nonuniform-array-length-reads-first-lane/readme.md) | AMD vulkan driver 2.0.353, Radeon iGPU (RDNA 2) | reproduced standalone, not yet filed, worked around in SGL |
 | [amd-vulkan-variable-count-layout-size-omits-binding](amd-vulkan-variable-count-layout-size-omits-binding/readme.md) | AMD vulkan driver 2.0.353, Radeon iGPU (RDNA 2) | reproduced standalone, not yet filed, worked around in shaped-graphics |

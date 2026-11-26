@@ -3,8 +3,6 @@ created: 2026-11-07
 refs:
   - file: libs/graphics/shaped-viewer/tests/cross-backend-trace-test.cc
   - test: "sv - the path tracer through SGL's binary traces what DXC's traces, on dx12 and on vulkan"
-claimed-by: Claude (for Philip Trettner)
-claimed-at: 2026-11-26T13:32Z
 ---
 
 # On AMD's vulkan driver, the viewer's cutout trace through SGL's SPIR-V differs from DXC's in 32 pixels

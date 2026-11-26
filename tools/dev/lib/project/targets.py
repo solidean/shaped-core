@@ -203,18 +203,32 @@ def discover_targets(build_dir: Path, build_type: str) -> list[Target]:
         ]
     targets.sort(key=lambda t: t.name)
     if kinds is not None:
-        _refuse_unregistered_nexus_binaries(targets, build_dir)
+        _refuse_unregistered_nexus_binaries(targets, build_dir, load_nexus_registered(build_dir))
     return targets
 
 
-def _refuse_unregistered_nexus_binaries(targets: list[Target], build_dir: Path) -> None:
-    """Stop when an executable named like a test or example binary is missing from the manifest.
+def load_nexus_registered(build_dir: Path) -> set[str]:
+    """Every binary sc_nexus_binary registered, from the manifest's `paths`, which lists each one whatever kinds it kept.
+
+    `binaries` is not that list: a test binary `all` does not build keeps no kinds there and is left out of it.
+    """
+    try:
+        data = json.loads((build_dir / "nexus-binaries.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return set()
+    return set(data.get("binaries", {})) | set(data.get("paths", {}))
+
+
+def _refuse_unregistered_nexus_binaries(targets: list[Target], build_dir: Path, registered: set[str]) -> None:
+    """Stop when an executable named like a test or example binary was never registered with sc_nexus_binary.
 
     With a manifest, the name is a convention rather than the registration, so a binary that skipped
     sc_nexus_binary would otherwise build and pass while none of its tests run.
+    A registered test binary `all` does not build carries no kinds, and is no such binary.
     """
     missing = [t.name for t in targets
-               if t.kind == "EXECUTABLE" and t.name.endswith(("-test", "-example")) and not t.nexus_kinds]
+               if t.kind == "EXECUTABLE" and t.name.endswith(("-test", "-example")) and not t.nexus_kinds
+               and t.name not in registered]
     if missing:
         raise SystemExit(
             f"error: {', '.join(missing)} {'is' if len(missing) == 1 else 'are'} named like a nexus test or example "

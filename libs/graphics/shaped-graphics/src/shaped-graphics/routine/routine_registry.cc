@@ -355,7 +355,9 @@ void routine_registry::warn_if_pending_too_long(render_routine_base& routine)
     // have already called tick, so the obvious explanation is spent and there is nothing else to read.
     //
     // Counted in ticks rather than in acquires, because that is the thing that was supposed to make progress.
+    // And in seconds as well: a headless loop ticks 600 times in a few seconds, while a large pipeline still compiles.
     static constexpr auto k_ticks_before_warning = u64(600); // ~10 s at 60 Hz, well past any honest compile
+    static constexpr auto k_secs_before_warning = 10.0;
 
     auto const ticks = _ticks.load(cc::memory_order_relaxed);
     if (ticks < k_ticks_before_warning)
@@ -363,6 +365,8 @@ void routine_registry::warn_if_pending_too_long(render_routine_base& routine)
 
     auto const first = routine.first_pending_tick();
     if (first == 0 || ticks - first < k_ticks_before_warning)
+        return;
+    if (cc::current_time_steady_secs() - routine.first_pending_secs() < k_secs_before_warning)
         return;
     if (routine.mark_warned_pending())
         return; // already said, once, for this routine

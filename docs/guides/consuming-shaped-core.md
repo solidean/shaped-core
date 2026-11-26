@@ -64,6 +64,10 @@ The driver is mechanism under `tools/dev/lib/` plus commands under `tools/dev/cm
 - **The house-style gate** holds the project's copies of `.clang-format` and `.editorconfig` to the submodule's, so a bump that changes the style fails until `check --fix` copies them again.
 - A **`BuildServer`** in that Policy, which `dev.build_server_from_dev_toml(ROOT)` makes: on wherever ccs is installed, unless the checkout's `dev.toml` says otherwise.
   [Building and testing](building-and-testing.md#the-build-server) is what it changes.
+- **Its own prerequisites**, `Policy.prerequisites`: a `dev.Prerequisite` each, for a dependency the project installs before configuring, as shaped-core fetches DXC and SDL3.
+  `ensure(root, preset_name)` runs before every stale preset configures, after shaped-core's own and never concurrently, and must report a failure rather than raise.
+  `fingerprint(root)` is a short string over what the install is made from, mixed into the configure fingerprint, so a change to it reconfigures and so ensures again.
+  It runs on every fingerprint check, so a stat rather than a hash; a path read from the checkout's `dev.toml` is the usual input.
 - **A `CMakePresets.json` that includes ours**, `"include": ["extern/shaped-core/CMakePresets.json"]`, and adds only the presets of its own.
   The launcher paths in ours are `${fileDir}`-relative, so they find the submodule's tools wherever it is included from, and the build directories stay the project's.
   dev.py follows the include to resolve preset names.

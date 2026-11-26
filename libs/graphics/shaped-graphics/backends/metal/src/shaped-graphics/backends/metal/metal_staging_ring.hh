@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clean-core/common/assert.hh>
+#include <clean-core/container/ringbuffer.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/memory/shared_ptr.hh>
@@ -140,10 +141,10 @@ private:
 
     struct ring_state
     {
-        u64 next_pos = 0;                         ///< logical bump cursor over the u64 space, never rewound
-        u64 freed_pos = 0;                        ///< everything logically below this is reclaimable
-        u64 completed_epoch = 0;                  ///< the highest epoch retire this ring has been told about
-        cc::vector<epoch_checkpoint> checkpoints; ///< FIFO, oldest epoch at the front
+        u64 next_pos = 0;                             ///< logical bump cursor over the u64 space, never rewound
+        u64 freed_pos = 0;                            ///< everything logically below this is reclaimable
+        u64 completed_epoch = 0;                      ///< the highest epoch retire this ring has been told about
+        cc::ringbuffer<epoch_checkpoint> checkpoints; ///< FIFO, oldest epoch at the front; one per epoch, millions under a fast host
 
         /// Whether the overflow warning has already been logged since the last epoch advance.
         /// Once per epoch rather than once per reservation, which is the rate dx12's rings warn at.

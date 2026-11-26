@@ -390,7 +390,8 @@ target_compile_options(shaped-graphics-language PUBLIC $<$<CXX_COMPILER_ID:MSVC>
 # It lives with the library because it is nothing but the library behind an argument parser.
 # Run it through `uv run dev.py run sgl -- <command> …`; `dev.py check`'s `sgl-prelude` step does.
 # Gated like tools/: a dependent that adds shaped-core as a subdirectory wants the library and not our binaries.
-if(SC_BUILD_TOOLS)
+# SC_BUILD_SGL builds it without the other tools, for a dependent whose SGL shader packages compile with it.
+if(SC_BUILD_TOOLS OR SC_BUILD_SGL)
     # The Language Server Protocol, knowing no SGL: it links clean-core and babel-data alone, so an SGL include in it
     # fails to compile. It is what a shared LSP library would be extracted from.
     add_library(sgl-lsp-protocol STATIC

@@ -150,6 +150,10 @@ extra_roots=(dev.ExtraRoot("extern/api", submodule=True, checks=("crossrefs", "p
 `Policy.companions` is the opt-in repositories `dev.py companions` clones into gitignored paths, and defaults to none.
 Each is a `Companion`: a name, a clone url, a path, and the branch it follows; `init` refuses a path the project does not ignore.
 
+`Policy.prerequisites` is the project's own dependencies to install before configuring, and defaults to none.
+Each is a `Prerequisite`: an `ensure` run beside shaped-core's fetches in [prereqs.py](../tools/dev/lib/pipeline/prereqs.py), and a `fingerprint` the configure fingerprint mixes in.
+`Context` registers them with the pipeline once per invocation, since the configure pipeline and its fingerprint take a root and no Policy.
+
 The driver's *own* files are the other kind of path, and they are not policy: the pinned clang-format and its fetcher, the emsdk pin, the vendored TLS stack doctor reports on.
 They belong to shaped-core whichever project runs the driver, so lib/ finds them relative to itself (`DRIVER_ROOT`), never relative to the project root.
 

@@ -98,7 +98,7 @@ cc::result<dx12_raster_pipeline_handle> dx12_context::create_dx12_raster_pipelin
         record_pipeline_shader(desc.mesh_shader.value());
 
     require_persistent(scope);
-    // an Intel GPU restores no mesh-shaded blob; issue: bug-sg-intel-dx12-mesh-draws-nothing-after-blob-restores
+    // an Intel GPU restores no mesh-shaded blob: docs/bugs-external/intel-d3d12-mesh-pipeline-built-after-a-restore-draws-nothing
     auto const mesh_blobs = metrics.adapter().vendor_id != 0x8086 || metrics.adapter().is_software;
     auto pipeline = dx12_raster_pipeline::create(_device.Get(), cc::move(layout), desc, mesh_blobs);
     if (pipeline.has_value())

@@ -50,7 +50,8 @@ void slib::add_available_compilers(shader_library& lib)
             lib.add_compiler(create_sgl_compiler(cc::move(sgl_spirv.value()), k_sgl_options));
     }
 #else
-    // no DXC, so vulkan's SGL shaders are what SGL can write itself
+    // no DXC, so dx12's and vulkan's SGL shaders are what SGL can write itself
+    lib.add_compiler(create_sgl_dxil_compiler(k_sgl_options));
     lib.add_compiler(create_sgl_spirv_compiler(k_sgl_options));
 #endif
 
