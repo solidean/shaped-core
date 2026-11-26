@@ -2,8 +2,6 @@
 created: 2026-11-26
 refs:
   - test: sv::annotation - a box that would leave the view is pushed back inside its margins
-claimed-by: Claude (for Philip Trettner)
-claimed-at: 2026-11-26T15:29Z
 ---
 
 # The annotation test of a box pushed back inside its margins failed once, then passed on a rerun
