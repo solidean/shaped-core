@@ -1,0 +1,10 @@
+// A `bgra8_unorm` image, which SPIR-V names no format for: SGL's own SPIR-V writes it `Unknown`.
+
+require extended_image_formats
+
+binding swizzled:
+    img: out image_2d[.bgra8_unorm]
+
+// the shader writes red, green, blue and alpha; the texel's bytes hold them as blue, green, red and alpha
+@compute(8, 8) fun store_bgra8(@thread_id id: int3){swizzled}:
+    swizzled.img[id.xy] = float4(1.0, 0.5, 0.0, 0.25)

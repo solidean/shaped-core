@@ -310,6 +310,8 @@ A binding that is not `@inline` is a group.
 * **EMIT-97** A texture, an image and a sampler member are each one global minted as a buffer's is, by EMIT-85, and each has its target's own type by the table below.
 * **EMIT-98** `hlsl-vulkan` states an image's format as `[[vk::image_format]]`, in DXC's spelling, which DXC makes a typed image of.
   `hlsl-dx12` states none, since dx12 takes the format from the view, and neither does `bgra8_unorm` on vulkan, which SPIR-V has no name for.
+  SGL's own SPIR-V writes that one's format `Unknown`, with `StorageImageWriteWithoutFormat` where the entry point stores to it and `StorageImageReadWithoutFormat` where it reads it.
+  Its own DXIL writes it as it writes any other float format, a UAV of `F32`.
 * **EMIT-280** HLSL's texel of a 16-bit normalized image says its normalization, `RWTexture2D<unorm float2>` and `RWTexture2D<snorm float4>`, on both HLSL targets ([why](why/emitting.md#emit-280)).
   SGL's own DXIL states the view's component type as DXC does of that text, `UNormF32` or `SNormF32`, and its own SPIR-V names the format as `[[vk::image_format]]` does.
   Every other format's texel is its plain type.

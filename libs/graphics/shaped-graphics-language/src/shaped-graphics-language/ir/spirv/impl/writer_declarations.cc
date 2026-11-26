@@ -328,6 +328,7 @@ void writer::write_image(ir::type const& t, u32 id)
     auto format = u32(0);
     if (t.is_storage_image)
     {
+        // EMIT-98: a format SPIR-V has no name for is `Unknown`, which a read or a write states its capability for
         auto const spelled = check::k_image_formats[t.format].spirv;
         for (auto const& f : k_formats)
             if (f.spelled == spelled)
@@ -336,7 +337,7 @@ void writer::write_image(ir::type const& t, u32 id)
                 if (f.is_extended)
                     require(spv::StorageImageExtendedFormats);
             }
-        CC_ASSERT(format != 0, "every format the lowering takes has a number");
+        CC_ASSERT(format != 0 || spelled.empty(), "every format SPIR-V names has a number");
     }
     if (t.dimension == 0)
         require(t.is_storage_image ? spv::Image1D : spv::Sampled1D);

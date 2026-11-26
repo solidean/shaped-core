@@ -142,6 +142,8 @@ private:
     void find_scalings();
     /// Tells the target that `i`, of id `id`, came through an index that differs between invocations.
     void nonuniform(instruction const& i, u32 id);
+    /// A storage image of a format SPIR-V has no name for, `bgra8_unorm`, which is `Unknown` (EMIT-98).
+    [[nodiscard]] bool is_unknown_format(value_ref image) const;
     /// What a load or a store of an element goes through, `index` naming a control point or a vertex where it has one.
     [[nodiscard]] u32 element_pointer(u32 element, u32 index = 0);
     /// `TessCoord`, which is three lanes where a parameter may take two.

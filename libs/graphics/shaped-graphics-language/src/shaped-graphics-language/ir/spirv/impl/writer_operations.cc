@@ -1,6 +1,7 @@
 #include "writer.hh"
 
 #include <clean-core/common/assert.hh>
+#include <shaped-graphics-language/check/resources.hh>
 
 using namespace sgl;
 using namespace sgl::ir;
@@ -348,6 +349,12 @@ void writer::group(instruction const& i, u32 id)
     }
 }
 
+bool writer::is_unknown_format(value_ref image) const
+{
+    auto const& t = _p.at(_p.type_of(image));
+    return t.kind == type_kind::image && t.is_storage_image && check::k_image_formats[t.format].spirv.empty();
+}
+
 void writer::nonuniform(instruction const& i, u32 id)
 {
     require(spv::ShaderNonUniform);
@@ -577,6 +584,8 @@ void writer::instruction_of(u32 index)
         emit(_annotations, spv::Decorate, {id, spv::NoContraction});
     if (i.aux == k_ir_nonuniform && (i.code == op::access_chain || i.code == op::load || i.code == op::combine_sampler))
         nonuniform(i, id);
+    if ((i.code == op::image_read || i.code == op::image_write) && is_unknown_format(value_ref(operands[0])))
+        require(i.code == op::image_read ? spv::StorageImageReadWithoutFormat : spv::StorageImageWriteWithoutFormat);
 
     switch (rule.kind)
     {

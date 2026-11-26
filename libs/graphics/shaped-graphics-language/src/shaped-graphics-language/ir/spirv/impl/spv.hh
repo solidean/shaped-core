@@ -260,6 +260,8 @@ enum capability : u32
     SampledCubeArray = 45,
     ImageMSArray = 48,
     StorageImageExtendedFormats = 49,
+    StorageImageReadWithoutFormat = 55,
+    StorageImageWriteWithoutFormat = 56,
     ImageQuery = 50,
     GroupNonUniform = 61,
     GroupNonUniformVote = 62,
