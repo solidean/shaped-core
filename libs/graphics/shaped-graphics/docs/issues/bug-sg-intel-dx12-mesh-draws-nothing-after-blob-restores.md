@@ -3,6 +3,8 @@ created: 2026-11-26
 refs:
   - file: libs/graphics/shaped-graphics/backends/dx12/src/shaped-graphics/backends/dx12/dx12_bind.cc
   - test: "sg - a mesh-shaded pipeline of triangles built from its own cached blob takes it, and draws as before"
+claimed-by: Claude (for Philip Trettner)
+claimed-at: 2026-11-26T15:06Z
 ---
 
 # On the Arc, a mesh pipeline draws nothing now and then once mesh-shaded blobs were restored
