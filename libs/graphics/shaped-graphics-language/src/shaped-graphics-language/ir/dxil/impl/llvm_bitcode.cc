@@ -194,7 +194,7 @@ constexpr cc::string_view k_metadata_kinds[] = {
     "dx.precise",
 };
 /// The number `llvm.loop` takes after them, in a module whose loop asks a target's unrolling something (EMIT-291).
-/// DXC's context names the kind on first use, so a module of no such loop names none.
+/// A module of no such loop names none, so it is written as it was before the kind existed.
 constexpr cc::string_view k_metadata_kind_loop = "llvm.loop";
 constexpr u32 k_kind_loop = 19;
 /// The number of "dx.nonuniform" in `k_metadata_kinds`.

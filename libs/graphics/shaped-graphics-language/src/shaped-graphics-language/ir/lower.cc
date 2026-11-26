@@ -542,7 +542,7 @@ void lowering::once_(flat_once const& s)
 
     open_block(header);
     set_merge(merge_kind::loop, merge, next);
-    // a loop to SPIR-V alone, whose back edge DXIL's passes drop, so no loop of DXIL's that a hint would keep apart
+    // it runs one time, so it asks nothing of unrolling, and a header of none never keeps another loop's header apart
     _out.blocks[isize(_open)].hint = loop_hint::none;
     branch(body);
 
