@@ -3,6 +3,8 @@ created: 2026-11-14
 refs:
   - file: libs/graphics/shaped-rendering/tests/denoise-test.cc:985-1030
   - file: libs/graphics/shaped-rendering/tests/backends/dx12-entry.cc
+claimed-by: Claude (for Philip Trettner)
+claimed-at: 2026-11-26T09:19Z
 ---
 
 # On AMD's dx12 native-DXIL context, svgf saturates no pixel of a half-float output
