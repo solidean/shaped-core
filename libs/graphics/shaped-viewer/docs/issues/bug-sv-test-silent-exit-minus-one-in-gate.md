@@ -3,6 +3,8 @@ created: 2026-11-03
 priority: next
 refs:
   - test: shaped-viewer-test
+claimed-by: Claude (for Philip Trettner)
+claimed-at: 2026-11-26T14:26Z
 ---
 
 # shaped-viewer-test exits with -1, silently, partway through a gate's run

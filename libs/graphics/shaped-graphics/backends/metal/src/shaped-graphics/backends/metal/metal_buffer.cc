@@ -31,17 +31,17 @@ void metal_buffer::release_storage() const
     auto* const buffer = _buffer;
     _buffer = nullptr;
 
-    // Out of the residency set first, so the set stops naming an allocation that is on its way out.
-    if (buffer != nullptr)
-        _ctx.residency().remove(buffer);
-
     // The release comes before the finalizers inside the deferred callback: a finalizer reclaiming the memory a placed
     // resource sits on must never observe a live MTLBuffer still pointing into it.
+    // The residency entry goes with the release, never before — see metal_residency_set.
     _ctx.epochs().defer(
-        [buffer, finalizers = cc::move(_finalizers)]() mutable
+        [buffer, &residency = _ctx.residency(), finalizers = cc::move(_finalizers)]() mutable
         {
             if (buffer != nullptr)
+            {
+                residency.remove(buffer);
                 buffer->release();
+            }
             for (auto& f : finalizers)
                 f();
         });

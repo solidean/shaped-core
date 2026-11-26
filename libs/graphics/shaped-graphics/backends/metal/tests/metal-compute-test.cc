@@ -123,6 +123,75 @@ ASYNC_TEST("sg metal - a dispatch doubles the values it was given", exclusive("s
                             source[0] * 2u));
 }
 
+ASYNC_TEST("sg metal - a binding group dropped while a submitted list still binds it stays resident until the list "
+           "runs",
+           exclusive("slib-shader-library"))
+{
+    auto const ctx = mtl::test::make_context();
+    if (ctx == nullptr)
+        SKIP("no metal 4 device on this host");
+
+    auto const shader = co_await mtl::test::sgl_shader(*ctx, kernels::double_main);
+    auto layout = ctx->create_metal_binding_group_layout(shader.bindings, {}, sg::lifetime_scope::persistent);
+    REQUIRE(layout.has_value());
+    auto pipeline_layout_desc = sg::pipeline_layout_description{};
+    pipeline_layout_desc.groups.push_back(layout.value());
+    auto pipeline_layout = ctx->create_metal_pipeline_layout(pipeline_layout_desc, sg::lifetime_scope::persistent);
+    REQUIRE(pipeline_layout.has_value());
+    auto pipeline = ctx->create_metal_compute_pipeline({.shader = shader, .layout = pipeline_layout.value()},
+                                                       sg::lifetime_scope::persistent);
+    REQUIRE(pipeline.has_value());
+
+    constexpr auto k_count = 64;
+    auto const buffer = ctx->persistent.create_raw_buffer(k_count * isize(sizeof(u32)),
+                                                          k_copy_both | sg::buffer_usage::readwrite_buffer);
+    auto source = cc::vector<u32>::create_uninitialized(k_count);
+    for (auto i = 0; i < k_count; ++i)
+        source[i] = u32(i + 1);
+    auto const nv = sg::named_view{
+        .name = "doubled.values",
+        .view = buffer->as_raw_readwrite({.offset = 0, .size = buffer->size_in_bytes()}, isize(sizeof(u32)))};
+    auto group = ctx->create_metal_binding_group(layout.value(), cc::span<sg::named_view const>(&nv, 1), {},
+                                                 sg::lifetime_scope::persistent);
+    REQUIRE(group.has_value());
+
+    // The queue reads its residency set when it finally hands a command buffer to the GPU, not when it is committed.
+    // So the list goes in behind a backlog: a wait nobody has signaled yet, then epoch signals by the hundred thousand.
+    // Fewer than about 50,000 left the group's bytes readable in every run on an M4; 100,000 lost them in every run.
+    auto* const blocker = ctx->device()->newSharedEvent();
+    REQUIRE(blocker != nullptr);
+    ctx->queue()->wait(blocker, 1);
+    for (auto i = 0; i < 100'000; ++i)
+        ctx->advance_epoch();
+
+    auto cmd = ctx->create_command_list();
+    cmd->upload.bytes_to_buffer(buffer, cc::as_bytes(cc::span<u32 const>(source)));
+    cmd->compute.bind_pipeline(*pipeline.value());
+    cmd->compute.bind_group(0, *group.value());
+    cmd->compute.dispatch_groups(k_count, 1, 1);
+    auto future = cmd->download.bytes_from_buffer(buffer, 0, buffer->size_in_bytes());
+    ctx->submit_command_list(cc::move(cmd));
+
+    // The group's last handle goes while the list is still held back: its argument buffer is what the kernel reads.
+    CHECK(group.value().use_count() == 1);
+    group.value() = nullptr;
+    ctx->advance_epoch();
+    blocker->setSignaledValue(1);
+
+    co_await ctx->idle_completion();
+    blocker->release();
+
+    auto const bytes = future.try_get_bytes();
+    REQUIRE(bytes.has_value());
+    REQUIRE(bytes.value().size() == buffer->size_in_bytes());
+    auto const* const values = reinterpret_cast<u32 const*>(bytes.value().data());
+    auto mismatches = 0;
+    for (auto i = 0; i < k_count; ++i)
+        if (values[i] != source[i] * 2u)
+            ++mismatches;
+    CHECK(mismatches == 0).context(cc::format("{} of {} values were not doubled", mismatches, k_count));
+}
+
 // -- inline constants and array bindings -------------------------------------------------------------
 //
 // Both are paths Metal has no native form of: there are no root constants, and which elements of an array a kernel

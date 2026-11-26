@@ -1156,8 +1156,8 @@ ASYNC_INVOCABLE_TEST("sv - a guest settled render advances no epoch of its own, 
 
     // the host: its home bound to its own thread and living there, pumped and then followed by an advance, round after round
     // Paced like an app's frame loop, an advance every 4 ms.
-    // A host spinning its advances outruns the GPU by thousands of epochs a guest frame.
-    // On metal the guest's image then comes back empty: bug-sv-guest-settled-render-empty-on-metal.
+    // A host spinning its advances runs millions of epochs ahead of the GPU, which is a test of its own and a costly one here.
+    // On metal it lost a dropped binding group's residency; sg's metal compute tests pin that directly.
     auto home = cc::atomic<cc::thread_bound_scheduler*>(nullptr);
     auto stop = cc::atomic<bool>(false);
     auto host_advances = cc::atomic<i64>(0);

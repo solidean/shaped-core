@@ -1,5 +1,7 @@
 ---
 created: 2026-11-05
+claimed-by: Claude (for Julius Nehring-Wirxel)
+claimed-at: 2026-11-26T14:28Z
 ---
 
 # sg's WebGPU timestamp can close before the dispatches recorded ahead of it have run

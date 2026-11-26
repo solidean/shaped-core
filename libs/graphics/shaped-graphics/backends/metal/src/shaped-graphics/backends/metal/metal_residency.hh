@@ -20,6 +20,10 @@
 ///
 /// Every mutation is followed by `commit`, which is what publishes the change to the queue.
 /// An addition is also followed by `requestResidency`, without which work right after it could miss it.
+///
+/// **A removal reaches work already committed**: the queue reads the set when a command buffer runs, not when it is committed.
+/// So an allocation leaves the set in the same epoch-deferred step that releases it, never when its last handle drops.
+/// Removed early, a resource a lagging GPU has yet to reach reads zeroes and takes no writes, with no error anywhere.
 class sg::backend::metal::metal_residency_set
 {
 public:
