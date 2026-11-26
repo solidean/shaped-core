@@ -7,6 +7,7 @@
 #include <clean-core/thread/async_coroutine.hh>
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
+#include <nexus/tests/known_issues.hh>
 #include <nexus/tests/thorough.hh> // nx::is_thorough
 #include <shaped-graphics/all.hh>
 #include <shaped-viewer/all.hh>
@@ -595,6 +596,8 @@ ASYNC_TEST("sv vulkan - the path tracer traces what it traces on dx12, to roundi
         SKIP("no vulkan device");
     if (auto const reason = cannot_trace(*ctx.value()); reason.has_value())
         SKIP(reason.value());
+    if (auto const* issue = sg::known_issue_affecting(*ctx.value(), "amd-vulkan-cutout-trace-after-another-hangs"))
+        nx::skip_known_issue(issue->id, issue->symptom);
 
     auto reference = cc::optional<sg::context_handle>();
 #if SV_TEST_HAS_DX12
@@ -677,6 +680,12 @@ ASYNC_TEST("sv - the path tracer through SGL's binary traces what DXC's traces, 
     auto vulkan_reference = sg::create_vulkan_context({.enable_validation_layers = true, .native_spirv = false});
     auto vulkan_native = sg::create_vulkan_context({.enable_validation_layers = true, .native_spirv = true});
     if (vulkan_reference.has_value() && vulkan_native.has_value() && !cannot_trace(*vulkan_native.value()).has_value())
+    {
+        // after the DXIL half, which the issue leaves alone
+        if (auto const* issue = sg::known_issue_affecting(*vulkan_native.value(), "amd-vulkan-cutout-trace-after-"
+                                                                                  "another-hangs"))
+            nx::skip_known_issue(issue->id, issue->symptom);
         co_await held_to_dxc(vulkan_native.value(), vulkan_reference.value(), "SPIR-V");
+    }
 }
 #endif

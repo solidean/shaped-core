@@ -13,3 +13,5 @@ under some seeds (7555890705584158751, 2820548425156727883), a pipeline built wi
 The same seeds draw every pipeline with mesh blobs skipped, whether the stream states its topology or not, and AMD draws all of them with blobs restored.
 So `dx12_bind.cc` restores no mesh-shaded blob on an Intel GPU.
 Not known: what the restore leaves behind in the driver, and whether a standalone repro can show it.
+Possibly the driver cache bug of known issue `intel-d3d12-cached-pso-draws-nothing`, met within one process: a restore that draws nothing, no call failing.
+[intel-d3d12-cached-pso-draws-nothing](../../../../../docs/bugs-external/intel-d3d12-cached-pso-draws-nothing/readme.md) reproduces that one.
