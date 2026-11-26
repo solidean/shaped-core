@@ -634,7 +634,7 @@ TEST("sgl source - a dropped value: the call's statements stay, and a rest that 
              "    return target_(vec4f(x, x, x, 1.0));\n"
              "}\n");
     CHECK(function_text(quiet_drops, quiet_drops_body, sgl::emit::target::hlsl_dx12)
-              .contains("    saturate(x + graded_1_result);\n"));
+              .contains("    (void)(saturate(x + graded_1_result));\n"));
     CHECK(function_text(quiet_drops, quiet_drops_body, sgl::emit::target::msl)
               .contains("    (void)(saturate(x + graded_1_result));\n"));
 }

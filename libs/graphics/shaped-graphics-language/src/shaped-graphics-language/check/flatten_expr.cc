@@ -1586,18 +1586,20 @@ auto sgl::check::impl::flattener::call_closure(ast::expr_id id,
     auto const outer_decision = inlined_decision;
     auto const outer_site = decision_site;
     auto decision = outer_decision;
+    auto site = outer_site;
     if (!values.empty() && is_valid(values[0]))
         if (auto const d = decision_of(entry.at(values[0]).type); d != stage::none)
         {
             decision = d;
             // the program's call that reached the prelude's trace, which runs the decision
-            for (auto const& site : entry.at(current()->chain))
-                if (!c.is_prelude_file(site.file))
-                    decision_site = site;
+            for (auto const& s : entry.at(current()->chain))
+                if (!c.is_prelude_file(s.file))
+                    site = s;
         }
     if (is_valid(f.function))
     {
         inlined_decision = decision;
+        decision_site = site;
         auto const inlined = inline_bound(id, f.function, values, slots, argument_closures);
         inlined_decision = outer_decision;
         decision_site = outer_site;
@@ -1645,6 +1647,7 @@ auto sgl::check::impl::flattener::call_closure(ast::expr_id id,
                       .bindings = f.bindings,
                       .instance = f.instance});
     inlined_decision = decision;
+    decision_site = site;
     auto const value = flatten_expr(l.body.value);
     inlined_decision = outer_decision;
     decision_site = outer_site;

@@ -1187,3 +1187,42 @@ TEST("sgl emit - the nvapi fill of opacity micromaps writes nothing, at 6.6 (EMI
         }
     }
 }
+
+TEST("sgl emit - HLSL drops a name's, a member's or a construction's value as a void cast too")
+{
+    // DXC refuses an expression statement with no effect under -Werror, a bare name and a member access as well
+    constexpr auto program = "binding work:\n"
+                             "    values: mut buffer[float]\n"
+                             "@compute(64) fun cs(@thread_id id: int3){work}:\n"
+                             "    let n = work.values[id.x]\n"
+                             "    let v = float2(n, 2.0 * n)\n"
+                             "    let _ = n\n"
+                             "    let _ = v.y\n"
+                             "    let _ = float2(n, n)\n"
+                             "    work.values[id.x] = n + v.x\n";
+    for (auto const t : {target::hlsl_dx12, target::hlsl_vulkan})
+    {
+        auto const e = emit_source(program, 0, t);
+        REQUIRE(sgl::emit::dump_errors(e) == "");
+        auto const& text = e.text;
+        auto bare = false;
+        auto at = isize(0);
+        while (at < text.size())
+        {
+            auto end = at;
+            while (end < text.size() && text[end] != '\n')
+                ++end;
+            auto line = text.subview({.offset = at, .size = end - at});
+            at = end + 1;
+            while (!line.empty() && line[0] == ' ')
+                line = line.subview({.offset = 1, .size = line.size() - 1});
+            // a statement that is a value alone: no assignment, no declaration, no call of a function with an effect
+            if (line.ends_with(";") && !line.contains("=") && !line.starts_with("(void)") && !line.starts_with("return")
+                && !line.contains("(") && !line.starts_with("struct") && !line.contains(" "))
+                bare = true;
+            if (line == "float2(n, n);" || line.starts_with("float2(") && line.ends_with(");"))
+                bare = true;
+        }
+        CHECK(!bare).dump("text", text);
+    }
+}

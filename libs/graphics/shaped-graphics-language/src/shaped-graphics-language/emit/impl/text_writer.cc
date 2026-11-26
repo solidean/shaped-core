@@ -1839,8 +1839,12 @@ struct writer
                 auto text = cc::string();
                 if (p.e.at(v.value).type == checked_module::void_type)
                     text = cc::format("{};", value.text);
-                // an operation whose value is dropped, `let _ = n * 2`, which DXC refuses as an unused result
-                else if (d.language() == builtins::language::hlsl && value.binds != level::primary)
+                // a dropped value with no effect, `let _ = n * 2` or a pure call's, which DXC refuses as unused; a call
+                // with an effect stays a statement, since DXC drops a void cast of what it takes as pure
+                else if (d.language() == builtins::language::hlsl
+                         && (evaluated == nullptr || evaluated->callee == symbol_id::none
+                             || p.m.at(evaluated->callee).info < 0
+                             || p.m.functions[p.m.at(evaluated->callee).info].is_pure))
                     text = cc::format("(void)({});", value.text);
                 else
                     d.write_eval(text, value.text);

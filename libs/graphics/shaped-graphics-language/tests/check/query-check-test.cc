@@ -304,6 +304,39 @@ TEST("sgl check - a decision writes no workgroup memory, which the group's other
     }
 }
 
+TEST("sgl check - a texture sample in a pixel stage's trace decision is refused once")
+{
+    // CHK-284: the sample takes derivatives, which a decision's non-uniform control flow cannot give
+    auto const count = [](cc::string_view report)
+    {
+        auto n = 0;
+        for (auto at = report.find("non-uniform-control-flow"); at >= 0;
+             at = report.subview(at + 1).find("non-uniform-control-flow") < 0
+                    ? -1
+                    : at + 1 + report.subview(at + 1).find("non-uniform-control-flow"))
+            ++n;
+        return n;
+    };
+    for (auto const ray : {cc::string_view("probe()"), cc::string_view("ray(origin = pos3(v.uv.x, 0.0, -1.0), "
+                                                                       "direction = vec3(0.0, 0.0, 1.0))")})
+    {
+        auto const report = reports_for(cc::format("{}binding mats:\n"
+                                                   "    albedo: texture_2d[float4]\n"
+                                                   "    s: sampler\n"
+                                                   "struct varyings:\n"
+                                                   "    @position position: hpos4\n"
+                                                   "    uv: float2\n"
+                                                   "@pixel fun shade_ps(v: varyings){{scene, mats}} -> float4:\n"
+                                                   "    let h = scene.world.trace({}, c => if mats.albedo.sample(v.uv, "
+                                                   "mats.s).w > 0.5 => "
+                                                   "hit_decision.accept else hit_decision.ignore)\n"
+                                                   "    return float4(h.t)\n",
+                                                   scene, ray));
+        CHECK(report.contains("non-uniform-control-flow")).dump("report", report).dump("ray", ray);
+        CHECK(count(report) == 1).dump("report", report).dump("ray", ray);
+    }
+}
+
 TEST("sgl check - a mixed query that skips triangles is a query of its boxes")
 {
     // CHK-553: the flags a target forbids beside `skip_triangles` are left out, and the boxes are met
