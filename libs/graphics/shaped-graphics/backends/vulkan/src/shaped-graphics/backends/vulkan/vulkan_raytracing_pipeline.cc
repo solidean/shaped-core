@@ -19,6 +19,17 @@ struct staged_module
     cc::string entry_point;
 };
 
+/// A closest hit that does nothing, which an empty hit group gets on an Intel GPU: it leaves the payload as no closest hit would.
+/// Intel's Vulkan compiler crashes building some pipelines of eight hit groups or more where empty ones sit beside others.
+/// shaped-viewer's issue bug-sv-vulkan-denoiser-modes-crash-intel-compiler has the measurements.
+/// `spirv-as --target-env vulkan1.2` of: RayTracingKHR, SPV_KHR_ray_tracing, entry point ClosestHitKHR "main", which returns.
+constexpr u32 noop_closest_hit[] = {
+    0x07230203, 0x00010500, 0x00070000, 0x00000005, 0x00000000, 0x00020011, 0x0000117f, 0x0006000a, 0x5f565053,
+    0x5f52484b, 0x5f796172, 0x63617274, 0x00676e69, 0x0003000e, 0x00000000, 0x00000001, 0x0005000f, 0x000014c4,
+    0x00000001, 0x6e69616d, 0x00000000, 0x00020013, 0x00000002, 0x00030021, 0x00000003, 0x00000002, 0x00050036,
+    0x00000002, 0x00000001, 0x00000000, 0x00000003, 0x000200f8, 0x00000004, 0x000100fd, 0x00010038,
+};
+
 [[nodiscard]] VkShaderStageFlagBits to_vk_rt_stage(sg::shader_stage s)
 {
     switch (s)
@@ -128,6 +139,8 @@ cc::result<vulkan_raytracing_pipeline_handle> vulkan_raytracing_pipeline::create
         general_group(idx);
     }
 
+    auto const fills_empty_groups = ctx.metrics.adapter().vendor_id == 0x8086 && !ctx.metrics.adapter().is_software;
+    auto noop_stage = -1;
     pipeline->_hit_base = int(groups.size());
     for (auto const& h : desc.hit_shaders)
     {
@@ -163,6 +176,24 @@ cc::result<vulkan_raytracing_pipeline_handle> vulkan_raytracing_pipeline::create
             if (idx < 0)
                 return cc::error("vkCreateShaderModule failed for an intersection shader");
             group.intersectionShader = u32(idx);
+        }
+        if (fills_empty_groups && !procedural && !h.closest_hit.has_value() && !h.any_hit.has_value())
+        {
+            if (noop_stage < 0)
+            {
+                auto const info = VkShaderModuleCreateInfo{
+                    .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+                    .codeSize = sizeof(noop_closest_hit),
+                    .pCode = noop_closest_hit,
+                };
+                VkShaderModule module = VK_NULL_HANDLE;
+                if (vkCreateShaderModule(ctx._device, &info, nullptr, &module) != VK_SUCCESS)
+                    return cc::error("vkCreateShaderModule failed for the empty hit groups' closest hit");
+                modules.push_back({.module = module, .entry_point = cc::string::create_copy_c_str_materialized("main")});
+                stage_bits.push_back(VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR);
+                noop_stage = int(modules.size()) - 1;
+            }
+            group.closestHitShader = u32(noop_stage);
         }
         groups.push_back(group);
     }
