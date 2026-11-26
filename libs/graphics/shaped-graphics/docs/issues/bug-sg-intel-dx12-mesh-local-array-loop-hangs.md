@@ -2,6 +2,8 @@
 created: 2026-11-26
 refs:
   - file: docs/bugs-external/dxc-pixel-signature-packs-primitive-into-vertex-row/shaders.hlsl
+claimed-by: Claude (for Philip Trettner)
+claimed-at: 2026-11-26T10:05Z
 ---
 
 # Intel's dx12 driver hangs the device on a mesh stage that writes its vertices from a loop over a local array
