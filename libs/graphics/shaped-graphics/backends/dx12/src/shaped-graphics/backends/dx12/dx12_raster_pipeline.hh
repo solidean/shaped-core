@@ -14,9 +14,11 @@ class sg::backend::dx12::dx12_raster_pipeline final : public sg::raster_pipeline
 public:
     explicit dx12_raster_pipeline(D3D12_PRIMITIVE_TOPOLOGY ia_topology) : topology(ia_topology) {}
 
+    /// `mesh_blobs` false keeps a mesh-shaded pipeline away from cached blobs whatever its stage, as `skips_cached_blob` says.
     [[nodiscard]] static cc::result<dx12_raster_pipeline_handle> create(ID3D12Device* device,
                                                                         dx12_pipeline_layout_handle layout,
-                                                                        sg::raster_pipeline_description const& desc);
+                                                                        sg::raster_pipeline_description const& desc,
+                                                                        bool mesh_blobs);
 
     /// The PSO's serialized blob via ID3D12PipelineState::GetCachedBlob; empty on failure.
     [[nodiscard]] cc::pinned_data<byte const> cached_pipeline_data() const override;
@@ -27,9 +29,10 @@ public:
     /// Null for every other topology, whose PSO cuts no strip.
     ComPtr<ID3D12PipelineState> pipeline_state_16;
 
-    /// Set for a mesh-shaded or a view-instanced pipeline, which neither restores from a cached blob nor hands one out.
-    /// A mesh-shaded blob is refused on every restore, a run after the one that stored it, with the debug layer reporting a description that does not match.
-    /// Why is open: bug-sg-dx12-mesh-pipeline-blob-refused.
+    /// Set for a view-instanced pipeline, and for a mesh-shaded one on an Intel GPU or whose stage declares no triangles,
+    /// which neither restores from a cached blob nor hands one out.
+    /// D3D12 refuses a mesh-shaded pipeline's own blob unless its stream states the stage's topology, which dx12 does for triangles alone.
+    /// Once the Arc B580 restored mesh-shaded blobs, later mesh-shaded pipelines drew nothing now and then, blob or none.
     /// A view-instanced blob crashes Intel's driver on a restore in another process: docs/bugs-external/intel-d3d12-view-instanced-cached-blob-crashes.
     bool skips_cached_blob = false;
     D3D12_PRIMITIVE_TOPOLOGY topology; // set on the IA at bind_pipeline (the PSO records only the family)

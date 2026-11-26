@@ -1,6 +1,7 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/assertf.hh>
-#include <clean-core/common/utility.hh> // cc::move
+#include <clean-core/common/utility.hh> // cc::move, cc::memcpy
+#include <clean-core/error/optional.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/string/string.hh>
@@ -24,6 +25,44 @@ D3D12_DEPTH_STENCILOP_DESC to_stencil_face(sg::stencil_face const& f)
     d.StencilPassOp = to_d3d12_stencil_op(f.pass);
     d.StencilFunc = to_d3d12_comparison(f.compare);
     return d;
+}
+
+/// Triangles where a mesh stage's DXIL container declares them in its `PSV0` part, and none for lines or a part it cannot read.
+/// Byte 24 of the part's runtime info is the stage kind, 13 for a mesh stage, and byte 27 `DXIL::MeshOutputTopology`, 2 for triangles.
+cc::optional<D3D12_PRIMITIVE_TOPOLOGY_TYPE> mesh_output_topology(cc::span<byte const> container)
+{
+    auto const u32_at = [&](isize offset) -> cc::optional<u32>
+    {
+        if (offset < 0 || offset + 4 > container.size())
+            return {};
+        auto value = u32(0);
+        cc::memcpy(&value, container.data() + offset, 4);
+        return value;
+    };
+    if (container.size() < 32 || container[0] != byte('D') || container[1] != byte('X') || container[2] != byte('B')
+        || container[3] != byte('C'))
+        return {};
+    auto const parts = u32_at(28).value();
+    for (auto k = u32(0); k < parts; ++k)
+    {
+        auto const offset = u32_at(32 + 4 * isize(k));
+        if (!offset.has_value())
+            return {};
+        auto const fourcc = u32_at(isize(offset.value()));
+        auto const size = u32_at(isize(offset.value()) + 4);
+        if (!fourcc.has_value() || !size.has_value() || fourcc.value() != 0x30565350u) // "PSV0"
+            continue;
+        auto const body = isize(offset.value()) + 8;
+        auto const info_size = u32_at(body);
+        if (!info_size.has_value() || info_size.value() < 28 || 4 + isize(info_size.value()) > isize(size.value())
+            || body + 4 + 28 > container.size())
+            return {};
+        auto const info = container.data() + body + 4;
+        if (u32(info[24]) != 13 || u32(info[27]) != 2)
+            return {};
+        return D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+    }
+    return {};
 }
 
 /// One subobject of a pipeline-state stream, aligned the way D3D12 walks a stream: a type tag, then its value.
@@ -114,6 +153,10 @@ struct mesh_stream
     stream_subobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_RENDER_TARGET_FORMATS, D3D12_RT_FORMAT_ARRAY> rtv_formats;
     stream_subobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_DEPTH_STENCIL_FORMAT, DXGI_FORMAT> dsv_format;
     stream_subobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_SAMPLE_DESC, DXGI_SAMPLE_DESC> sample_desc;
+    /// The mesh stage's own output topology, which a stated one must match, or undefined: `mesh_output_topology`.
+    /// Without it, D3D12 refuses the pipeline's own cached blob:
+    /// docs/bugs-external/d3d12-mesh-pipeline-without-topology-refuses-its-blob reproduces it.
+    stream_subobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_PRIMITIVE_TOPOLOGY, D3D12_PRIMITIVE_TOPOLOGY_TYPE> topology;
     stream_subobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_CACHED_PSO, D3D12_CACHED_PIPELINE_STATE> cached;
 };
 
@@ -142,6 +185,8 @@ HRESULT create_mesh_shaded(ID3D12Device* device,
         stream.rtv_formats.value.RTFormats[i] = pso.RTVFormats[i];
     stream.dsv_format.value = pso.DSVFormat;
     stream.sample_desc.value = pso.SampleDesc;
+    stream.topology.value = mesh_output_topology(desc.mesh_shader.value().bytecode.span())
+                                .value_or(D3D12_PRIMITIVE_TOPOLOGY_TYPE_UNDEFINED);
     stream.cached.value = pso.CachedPSO;
 
     auto const stream_desc
@@ -152,7 +197,8 @@ HRESULT create_mesh_shaded(ID3D12Device* device,
 
 cc::result<dx12_raster_pipeline_handle> dx12_raster_pipeline::create(ID3D12Device* device,
                                                                      dx12_pipeline_layout_handle layout,
-                                                                     sg::raster_pipeline_description const& desc)
+                                                                     sg::raster_pipeline_description const& desc,
+                                                                     bool mesh_blobs)
 {
     CC_ASSERT(layout != nullptr, "raster pipeline requires a pipeline_layout");
     auto const is_mesh_shaded = desc.mesh_shader.has_value();
@@ -334,7 +380,10 @@ cc::result<dx12_raster_pipeline_handle> dx12_raster_pipeline::create(ID3D12Devic
     pso.Flags = D3D12_PIPELINE_STATE_FLAG_NONE;
 
     // See dx12_pipeline_layout::has_static_samplers and dx12_raster_pipeline::skips_cached_blob.
-    pipeline->skips_cached_blob = is_mesh_shaded || desc.view_count > 1;
+    pipeline->skips_cached_blob
+        = desc.view_count > 1
+       || (is_mesh_shaded
+           && (!mesh_blobs || !mesh_output_topology(desc.mesh_shader.value().bytecode.span()).has_value()));
     auto const cached = layout->has_static_samplers || pipeline->skips_cached_blob ? cc::span<byte const>()
                                                                                    : desc.cached_pipeline.span();
     if (!cached.empty())
