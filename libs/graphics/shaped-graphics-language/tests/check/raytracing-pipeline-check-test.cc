@@ -357,10 +357,10 @@ TEST("sgl check - a callables table holds callables of one parameter, and a call
           == "invalid-pipeline user:[zeroed] zeroed takes other, and this table's callables take operand\n");
     CHECK(reports(cc::string(callables) + "callables ops = (.host, doubled)\n")
           == "invalid-pipeline user:[.host] `.host` stands last among the callables\n");
-    // CHK-343: the host's callables follow every listed one, so the table they join is the module's last
+    // CHK-343: the host's callables follow every listed one, so the table they join is the section's last
     CHECK(reports(cc::string(callables) + "callables ops = (doubled, .host)\ncallables more = (doubled)\n")
           == "invalid-pipeline user:[callables ops = (doubled, .host)] ops takes the host's callables, so it is the "
-             "module's last callables table: the host's follow every listed one\n");
+             "last table of the program's callable section: the host's follow every listed one\n");
     // CHK-344: the call hands over a place of the table's parameter type
     auto const table = cc::string(callables) + "callables ops = (doubled)\n";
     CHECK(reports(table + "@raygen fun go(@launch_id id: int3):\n    let mut v = operand(1.0)\n    ops[id.x](mut v)\n")

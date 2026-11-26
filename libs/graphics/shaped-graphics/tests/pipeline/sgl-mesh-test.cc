@@ -247,3 +247,40 @@ ASYNC_INVOCABLE_TEST("sg - an indirect mesh draw reads its workgroup counts from
             }
     }
 }
+
+// D3D12 refuses a mesh-shaded pipeline's own blob unless its stream states the stage's topology, which dx12 does for triangles.
+// An Intel GPU restores none: docs/bugs-external/d3d12-mesh-pipeline-without-topology-refuses-its-blob.
+ASYNC_INVOCABLE_TEST("sg - a mesh-shaded pipeline of triangles built from its own cached blob takes it, and draws as "
+                     "before",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::mesh_shader))
+        SKIP("this device has no mesh stage");
+
+    auto const& adapter = ctx->metrics.adapter();
+    auto const restores
+        = ctx->backend() == sg::backend_kind::dx12 && (adapter.vendor_id != 0x8086 || adapter.is_software);
+    auto desc = co_await sg::test::sgl_shaders::meshes::covered.description(*ctx, {}, {});
+    auto const first = co_await ctx->uncached.create_raster_pipeline_async(desc);
+    desc.cached_pipeline = first->cached_pipeline_data();
+    if (restores)
+        CHECK(!desc.cached_pipeline.empty());
+    auto const restored = co_await ctx->uncached.create_raster_pipeline_async(desc);
+    if (ctx->backend() == sg::backend_kind::dx12)
+        CHECK(restored->used_cached_pipeline() == restores);
+
+    auto target = mesh_target();
+    target.target_set = sg::test::sgl_shaders::meshes::painted::name;
+    auto const pixels = co_await sg_test::draw_offscreen(*ctx, target,
+                                                         [&](sg::rendering_scope& scope)
+                                                         {
+                                                             scope.bind_pipeline(*restored);
+                                                             scope.draw_mesh_tasks(1);
+                                                         });
+    for (auto y = 0; y < size; ++y)
+        for (auto x = 0; x < size; ++x)
+            CHECK(pixels[0].rgba8(x, y) == tg::vec4i(0, 255, 0, 255)).context(cc::format("pixel ({}, {})", x, y));
+}

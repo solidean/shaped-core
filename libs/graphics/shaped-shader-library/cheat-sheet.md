@@ -507,7 +507,7 @@ cmd.raytracing.build_blas(tris, sg::accel_build_flag::fast_trace, path_t::ray_co
 path_t::definition()                           // slib::raytracing_pipeline_definition — what everything above reads
 
 // registration order (every index a constant): raygen 0 | miss r = ray type r | hit g*ray_count + r (listed groups,
-//   then the host's) | callables: the module's in declaration order, then the host's
+//   then the host's) | callables: the program's callable section in its order, then the host's
 // geometry i of an instance on ray type r reaches record offset_of(row) + i*ray_count + r, on every backend
 
 #include <shaped-shader-library/raytracing_pipeline.hh>

@@ -500,7 +500,7 @@ The payload size is the largest payload of its set, and the attribute size the l
 With `.host`, the attribute size is the 32-byte cap, since a host's group may be procedural and report up to it.
 
 * **One binding layout serves every shader of the pipeline**, so their binding lists agree by position, as a raster pipeline's stages do, and they list one `@inline` binding at most.
-  The callables of the module's tables are shaders of every pipeline, so theirs agree too.
+  The callables of the program's callable section are shaders of every pipeline, so theirs agree too.
 * **Each listed group is for the pipeline's set.**
 * **Every trace its shaders make is of a ray type of its set**, since a trace's contribution, multiplier and miss are positions in that set.
 
@@ -546,9 +546,11 @@ callables ops = (doubled, negated, .host)
     operands.values[id.x] = float4(v.x, 0.0, 0.0, 0.0)
 ```
 
-* **A table is the module's, not a pipeline's**: every ray-tracing pipeline of the module holds every table, packed in declaration order.
-  So a table's place in the callable section is a constant of the module, and a stage that calls one compiles once, whichever pipeline it joins.
-* **`.host` stands last in its table, and a table taking it is the module's last**, since the host's callables follow every listed one.
+* **A table is the program's, not a pipeline's**: every ray-tracing pipeline of the program holds its **callable section**, every table of the modules it reaches (CHK-562).
+  A used module's tables come before its user's, modules free to come in either order by name, and a module's tables in declaration order, so the program's own come last.
+  So a table's place in the callable section is a constant of the program, and a stage that calls one compiles once, whichever pipeline it joins.
+  A module of the library the program does not reach takes no place, and `describe` lists each table with its place.
+* **`.host` stands last in its table, and a table taking it is the section's last**, since the host's callables follow every listed one.
   An index past a table's listed callables reaches what follows them, which is only the host's for that last table.
   Nothing checks an index at run time.
 

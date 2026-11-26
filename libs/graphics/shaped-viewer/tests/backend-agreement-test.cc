@@ -103,7 +103,7 @@ ASYNC_TEST("sv vulkan - every mode and every denoiser draws the view it draws on
     if (!agreement::can_trace(*vulkan.value()))
         SKIP("no inline ray tracing on vulkan, or no SGL compiler");
     if (auto const& adapter = vulkan.value()->metrics.adapter(); adapter.vendor_id == 0x8086 && !adapter.is_software)
-        SKIP("Intel's Vulkan compiler crashes the process here; issue: "
+        SKIP("Intel's Vulkan compiler crashes the process past the traced modes; issue: "
              "bug-sv-vulkan-denoiser-modes-crash-intel-compiler");
     // The debug layer has to be active before the process's first dx12 device, and this test may race dx12-entry.cc's
     // drivers to it, so the reference asks for the layer exactly as they do.

@@ -319,6 +319,9 @@ struct sgl::check::checked_module
     cc::vector<i32> reached_library_files;
     /// Parallel to `files`: the module each file belongs to; empty for the prelude's and for a program that names none.
     cc::vector<cc::string> file_modules;
+    /// The program's callable section: the callables tables of the modules it reaches, in their order (CHK-562).
+    /// Each check makes it anew, so a table of a module the program does not use is never in it.
+    cc::vector<symbol_id> callable_tables;
 
     /// Only the entry points that checked without an error; a broken one has diagnostics and no flat tree.
     cc::vector<flat_entry_point> entry_points;
@@ -379,6 +382,9 @@ struct sgl::check::checked_module
     /// The name the program names `id` by from outside any scope: bare for the prelude's and its own module's, and
     /// `m.name` for another module's (CHK-348), which is also how a compile sets a module's option (CHK-354).
     [[nodiscard]] cc::string qualified_name_of(symbol_id id) const;
+    /// Where the callables table `table` starts in the program's callable section: how many callables the tables
+    /// before it hold (CHK-562); -1 for a table not in it.
+    [[nodiscard]] i32 callable_offset_of(symbol_id table) const;
     /// The identifier an instance of a generic struct is named by, `pair_float_int` for `pair[float, int]`, every
     /// character no identifier holds written `_` (EMIT-179); the target text mints it, and the description names it so.
     [[nodiscard]] cc::string instance_identifier_of(type_id id) const;

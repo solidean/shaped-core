@@ -131,7 +131,7 @@ Everything a pipeline states reaches the host as one generated symbol per pipeli
 
 * A raster pipeline of a vertex and a pixel stage, or of a vertex stage alone, with geometry and tessellation stages between them (CHK-307).
 * A value is a literal, `true`, `false`, a case, `.host`, `.none`, or a paren literal of those.
-* A `@raytracing pipeline`, its hit groups and the module's callables tables, by [CHK-330 to CHK-332 and CHK-343](semantics/checking.md#ray-tracing).
+* A `@raytracing pipeline`, its hit groups and the program's callable section, by [CHK-330 to CHK-332, CHK-343 and CHK-562](semantics/checking.md#ray-tracing).
   Its settings are `rays`, `raygen`, `miss.<ray>`, `hit_groups` and `max_recursion_depth`, which [raytracing.md](raytracing.md#the-pipeline-declaration) lists.
   What a raster pipeline states as sizes and a depth, it derives: the payload size, the attribute size and the trace depth.
 

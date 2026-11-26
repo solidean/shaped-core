@@ -32,6 +32,7 @@ inline constexpr auto cache_mode_env_var = cc::string_view("SC_BLOB_CACHE");
 /// Opened on the first call and never at static-init time, creating its directory if it is missing.
 /// Never fails: a directory that cannot be made, or a build with no SQLite backend, hands back a cache that misses on
 /// everything — which is what makes calling this unconditionally correct.
+/// The cache logs why it misses once: a storage failure as a warning, and a build with no SQLite backend as information.
 [[nodiscard]] blob_cache& default_cache();
 
 /// Installs `cache` as what default_cache() returns; nullptr restores the lazily-opened one.

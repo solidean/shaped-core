@@ -665,6 +665,18 @@ cc::string sgl::check::checked_module::qualified_name_of(symbol_id id) const
     return module.empty() ? cc::string(at(id).name) : cc::format("{}.{}", module, at(id).name);
 }
 
+i32 sgl::check::checked_module::callable_offset_of(symbol_id table) const
+{
+    auto offset = 0;
+    for (auto const t : callable_tables)
+    {
+        if (t == table)
+            return offset;
+        offset += i32(pipelines[at(t).info].records.count);
+    }
+    return -1;
+}
+
 cc::string sgl::check::checked_module::instance_identifier_of(type_id id) const
 {
     // a closing bracket is dropped, since every one ends the name or stands before another, and a constant argument

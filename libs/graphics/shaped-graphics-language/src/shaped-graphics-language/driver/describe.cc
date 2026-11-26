@@ -540,25 +540,20 @@ described_raytracing_pipeline describe_raytracing_pipeline(check::checked_module
         result.max_attribute_size = check::checked_module::max_attribute_bytes;
     for (auto const b : m.at(p.layout))
         result.layout.push_back(host_name_of(m, b));
-    // CHK-343: every table of the module, packed in declaration order
+    // CHK-562: every table of the program's callable section, in its order
     auto tables = cc::vector<check::pipeline_info const*>();
-    for (auto const& t : m.pipelines)
-        if (t.kind == check::pipeline_kind::callables && m.is_reached_file(m.at(t.symbol).file))
-            tables.push_back(&t);
-    for (auto i = isize(0); i < tables.size(); ++i)
-        for (auto j = i + 1; j < tables.size(); ++j)
-            if (index_of(tables[j]->symbol) < index_of(tables[i]->symbol))
-                cc::swap(tables[i], tables[j]);
+    for (auto const t : m.callable_tables)
+        tables.push_back(&m.pipelines[m.at(t).info]);
     for (auto const* const t : tables)
     {
         for (auto const entry : m.at(t->records))
         {
-            result.callables.push_back(m.at(entry).name);
+            result.callables.push_back(m.qualified_name_of(entry));
             features |= m.functions[m.at(entry).info].features;
             add_options_of(m, entry, options);
         }
         result.has_host_callables = result.has_host_callables || t->has_host_callables;
-        // CHK-343: only the module's last table takes the host's
+        // CHK-343: only the section's last table takes the host's
         if (t->has_host_callables)
         {
             result.host_callable_parameter = host_type_name_of(m, t->callable_parameter);
@@ -630,16 +625,14 @@ described_raytracing_pipeline describe_raytracing_pipeline(check::checked_module
 
 described_callables describe_callables(check::checked_module const& m, check::pipeline_info const& p)
 {
-    auto result = described_callables{.name = m.at(p.symbol).name,
+    // CHK-348: a module's table and callables by the names the program gives them, `m.name`
+    auto result = described_callables{.name = m.qualified_name_of(p.symbol),
                                       .parameter = host_type_name_of(m, p.callable_parameter),
                                       .parameter_shape = check::hex_of(check::structural_hash(m, p.callable_parameter)),
-                                      .has_host = p.has_host_callables};
+                                      .has_host = p.has_host_callables,
+                                      .offset = m.callable_offset_of(p.symbol)};
     for (auto const entry : m.at(p.records))
-        result.entries.push_back(m.at(entry).name);
-    for (auto const& t : m.pipelines)
-        if (t.kind == check::pipeline_kind::callables && index_of(t.symbol) < index_of(p.symbol)
-            && m.is_reached_file(m.at(t.symbol).file))
-            result.offset += i32(t.records.count);
+        result.entries.push_back(m.qualified_name_of(entry));
     return result;
 }
 
@@ -1149,12 +1142,16 @@ cc::result<sgl::module_description, cc::string> sgl::describe(describe_request c
         if (p.kind == check::pipeline_kind::hit_group)
             result.hit_groups.push_back(describe_hit_group(m, p));
         else if (p.kind == check::pipeline_kind::callables)
-            result.callables.push_back(describe_callables(m, p));
+            continue;
         else if (p.kind == check::pipeline_kind::raytracing)
             result.raytracing_pipelines.push_back(describe_raytracing_pipeline(m, p, legal));
         else
             result.pipelines.push_back(describe_pipeline(m, p, legal));
     }
+    // CHK-562: the program's whole callable section, its modules' tables too, so a host builds no index by hand
+    if (!is_module)
+        for (auto const t : m.callable_tables)
+            result.callables.push_back(describe_callables(m, m.pipelines[m.at(t).info]));
     // every ray set of the program, a pipeline naming it or not, and every module's a pipeline or a hit group of the
     // program names, as `m.set` (CHK-329)
     auto named_sets = cc::vector<check::symbol_id>();

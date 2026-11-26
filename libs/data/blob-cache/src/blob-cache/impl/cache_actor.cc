@@ -64,7 +64,8 @@ public:
         auto result = open_database(msg.config.path);
         if (result.has_error())
         {
-            degrade(cc::move(result.error()));
+            // A build with no SQLite backend chose to persist nothing, which is no failure to warn about.
+            degrade(cc::move(result.error()), sql::is_available());
             msg.promise->push_error(cc::async_error::make_error(cc::any_error(cc::string(_degrade_reason))));
             return;
         }
@@ -379,7 +380,8 @@ private:
 
     /// One flag, one code path, one message.
     /// An absent backend, a missing directory, a read-only file, a full disk and mid-run corruption all land here, and every later message then answers as an empty cache.
-    void degrade(cc::any_error error)
+    /// `is_failure` false reports it as information: a build with no SQLite backend misses by design.
+    void degrade(cc::any_error error, bool is_failure = true)
     {
         _db = {};
         _is_open = false;
@@ -391,7 +393,10 @@ private:
 
         // A WARNING, never an error: deleting all cache data can never affect correctness, so a storage failure
         // degrades the cache to a permanent miss rather than failing anything a caller asked for.
-        CC_LOG_WARNING("cache degraded to always-miss: {}", _degrade_reason);
+        if (is_failure)
+            CC_LOG_WARNING("cache degraded to always-miss: {}", _degrade_reason);
+        else
+            CC_LOG_INFO("cache misses on everything: {}", _degrade_reason);
 
         if (_on_error.is_valid())
             _on_error(_degrade_reason);
