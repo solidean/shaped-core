@@ -1,9 +1,9 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/assertf.hh>
 #include <clean-core/common/utility.hh> // cc::move, cc::memcpy
-#include <clean-core/error/optional.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/error/optional.hh>
 #include <clean-core/string/string.hh>
 #include <shaped-graphics/backends/dx12/dx12_format.hh>
 #include <shaped-graphics/backends/dx12/dx12_pipeline_layout.hh>
@@ -185,8 +185,8 @@ HRESULT create_mesh_shaded(ID3D12Device* device,
         stream.rtv_formats.value.RTFormats[i] = pso.RTVFormats[i];
     stream.dsv_format.value = pso.DSVFormat;
     stream.sample_desc.value = pso.SampleDesc;
-    stream.topology.value = mesh_output_topology(desc.mesh_shader.value().bytecode.span())
-                                .value_or(D3D12_PRIMITIVE_TOPOLOGY_TYPE_UNDEFINED);
+    stream.topology.value
+        = mesh_output_topology(desc.mesh_shader.value().bytecode.span()).value_or(D3D12_PRIMITIVE_TOPOLOGY_TYPE_UNDEFINED);
     stream.cached.value = pso.CachedPSO;
 
     auto const stream_desc
@@ -382,8 +382,7 @@ cc::result<dx12_raster_pipeline_handle> dx12_raster_pipeline::create(ID3D12Devic
     // See dx12_pipeline_layout::has_static_samplers and dx12_raster_pipeline::skips_cached_blob.
     pipeline->skips_cached_blob
         = desc.view_count > 1
-       || (is_mesh_shaded
-           && (!mesh_blobs || !mesh_output_topology(desc.mesh_shader.value().bytecode.span()).has_value()));
+       || (is_mesh_shaded && (!mesh_blobs || !mesh_output_topology(desc.mesh_shader.value().bytecode.span()).has_value()));
     auto const cached = layout->has_static_samplers || pipeline->skips_cached_blob ? cc::span<byte const>()
                                                                                    : desc.cached_pipeline.span();
     if (!cached.empty())

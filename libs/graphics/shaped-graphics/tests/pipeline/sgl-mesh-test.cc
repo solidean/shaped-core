@@ -250,7 +250,8 @@ ASYNC_INVOCABLE_TEST("sg - an indirect mesh draw reads its workgroup counts from
 
 // D3D12 refuses a mesh-shaded pipeline's own blob unless its stream states the stage's topology, which dx12 does for triangles.
 // An Intel GPU restores none: docs/bugs-external/d3d12-mesh-pipeline-without-topology-refuses-its-blob.
-ASYNC_INVOCABLE_TEST("sg - a mesh-shaded pipeline of triangles built from its own cached blob takes it, and draws as before",
+ASYNC_INVOCABLE_TEST("sg - a mesh-shaded pipeline of triangles built from its own cached blob takes it, and draws as "
+                     "before",
                      (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
@@ -260,7 +261,8 @@ ASYNC_INVOCABLE_TEST("sg - a mesh-shaded pipeline of triangles built from its ow
         SKIP("this device has no mesh stage");
 
     auto const& adapter = ctx->metrics.adapter();
-    auto const restores = ctx->backend() == sg::backend_kind::dx12 && (adapter.vendor_id != 0x8086 || adapter.is_software);
+    auto const restores
+        = ctx->backend() == sg::backend_kind::dx12 && (adapter.vendor_id != 0x8086 || adapter.is_software);
     auto desc = co_await sg::test::sgl_shaders::meshes::covered.description(*ctx, {}, {});
     auto const first = co_await ctx->uncached.create_raster_pipeline_async(desc);
     desc.cached_pipeline = first->cached_pipeline_data();

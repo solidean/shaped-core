@@ -25,5 +25,6 @@ Next: Windows' silent process exit monitoring (gflags, SilentProcessExit) names 
 ## Log
 
 **2026-11-26: a way to meet it outside the gate, on the Arc B580.**
-`uv run dev.py test "mesh" --repeat 6` lost shaped-viewer-test this way in about one iteration in five, its log ending a few seconds in after `sv: grew the vertex pool to 131072 vertices`, with no results file and no crash report.
+`uv run dev.py test "mesh" --repeat 6` lost shaped-viewer-test this way in about one iteration in five.
+Its log ended a few seconds in, after `sv: grew the vertex pool to 131072 vertices`, with no results file and no crash report.
 Not measured: the exit code, and whether it happens without the other binaries the pattern runs beside it.
