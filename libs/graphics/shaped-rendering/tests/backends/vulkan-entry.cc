@@ -55,4 +55,6 @@ ASYNC_TEST("sr vulkan")
     }
 }
 
+static bool const sr_vulkan_native_registered
+    = sr_test::register_backend("sr vulkan - native-spirv", "vulkan-native-spirv");
 static bool const sr_vulkan_registered = sr_test::register_backend("sr vulkan", "vulkan");

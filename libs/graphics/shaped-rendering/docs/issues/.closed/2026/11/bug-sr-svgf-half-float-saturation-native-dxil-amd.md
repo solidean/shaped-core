@@ -3,8 +3,8 @@ created: 2026-11-14
 refs:
   - file: libs/graphics/shaped-rendering/tests/denoise-test.cc:985-1030
   - file: libs/graphics/shaped-rendering/tests/backends/dx12-entry.cc
-claimed-by: Claude (for Philip Trettner)
-claimed-at: 2026-11-26T09:19Z
+closed: 2026-11-26
+resolution: obsolete
 ---
 
 # On AMD's dx12 native-DXIL context, svgf saturates no pixel of a half-float output
@@ -34,3 +34,10 @@ static bool const sr_dx12_native_registered = sr_test::register_backend("sr dx12
 ```
 
 then `uv run dev.py test shaped-rendering-test --test-args "saturate a pixel past a half float"`, or run the whole binary, whose `sr dx12 - native-dxil` test runs it.
+
+## Log
+
+**2026-11-26: no longer reproduces at `4ebe9a45f`, on the same driver, 32.0.21042.62.**
+Run by name through the alias bug-sr-single-test-alias-skips-native-dxil added, `SC_GPU=amd`, it passes on every context, five runs of five.
+The whole `shaped-rendering-test` passes on the AMD iGPU too, 552 tests.
+Which commit fixed it was not bisected; the half conversions of EVAL-96 and the DXIL writer's `LegacyF32ToF16` changed since, and are the likely ones.

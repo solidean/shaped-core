@@ -109,4 +109,5 @@ ASYNC_TEST("sr dx12 - hardware")
 }
 
 static bool const sr_dx12_warp_registered = sr_test::register_backend("sr dx12 - warp", "dx12-warp");
+static bool const sr_dx12_native_registered = sr_test::register_backend("sr dx12 - native-dxil", "dx12-native-dxil");
 static bool const sr_dx12_hw_registered = sr_test::register_backend("sr dx12 - hardware", "dx12-hw");
