@@ -76,7 +76,7 @@ That order is what makes each index a compile-time constant rather than a lookup
 - **raygen** handle 0 is the pipeline's raygen.
 - **miss** handle r is ray type r's miss, in the ray set's order, so a trace of ray type r misses into r.
 - **hit** handle `g * ray_count + r` is hit group g's shader for ray type r: the listed groups first, then the host's in the order handed over.
-- **callable** handle k is the module's callables in their declared order, then the host's.
+- **callable** handle k is the program's callable section in its order (SGL's CHK-562, each table's place in `describe`), then the host's.
 
 A table places its raygen, misses and callables at the index equal to the handle, and `add_row(table, g)` places group g's `ray_count` hit shaders consecutively.
 So a row's `offset_of` is what an instance takes, and ray type r of geometry i reaches `offset + i * ray_count + r` on every backend.

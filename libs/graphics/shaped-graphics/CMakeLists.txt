@@ -535,6 +535,7 @@ if(SC_BUILD_TESTS)
                 raytracing_end_search.sgl:*
                 raytracing_open.sgl:*
                 raytracing_callables.sgl:*
+                raytracing_callables_used.sgl:*
                 pixel_semantics.sgl:*
                 view_unread.sgl:*
                 sampling.sgl:*

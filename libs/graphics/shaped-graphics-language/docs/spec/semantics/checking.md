@@ -1739,11 +1739,16 @@ HLSL writes it on dx12 and vulkan; WebGPU has none, and sg's metal backend does 
 * **CHK-343** `callables name = (…)` is a **callables table**: `@callable` entry points of one parameter type, and `.host` last for the host's ([why](why/checking.md#chk-343)).
   A table lists at least one callable, a block of settings is none, and `.host` anywhere but last is `invalid-pipeline`.
   So is a callable of another parameter type, whose detail names both.
-  The tables of a module pack in declaration order, so a table that takes `.host` is the module's last, or `invalid-pipeline`.
+  The host's callables follow the last table of the program's callable section (CHK-562), so a table that takes `.host` is that last one, or `invalid-pipeline`.
 * **CHK-344** `table[i](mut p)` calls the callable at the run-time index `i` of a callables table, an `int`.
   It takes one argument, marked `mut`, or `no-matching-overload`, which is a place of exactly the table's parameter type, or `type-mismatch`.
-  It gives `void`, and is the target's call of the callable at the table's place in the module's section plus `i`.
+  It gives `void`, and is the target's call of the callable at the table's place in the program's callable section (CHK-562) plus `i`.
   Its builtin is `@stages(.raygen, .closest_hit, .miss, .callable)`, and a test that reaches one is `unsupported-yet`, as by CHK-329.
+* **CHK-562** A program's **callable section** holds the callables tables of the modules it reaches, its own module's included, and those of no other module ([why](why/checking.md#chk-562)).
+  A module's tables follow those of every module it uses, and of the modules that may come next, the one whose name sorts first by its bytes comes first, so the program's own module comes last.
+  Within a module, its tables stand in declaration order: its library files in the library's order (CHK-346), then the program's file.
+  A table's place is the number of callables the tables before it list, and the host's callables follow the last table's.
+  How the program is checked, and the modules of the library it does not reach, change no place.
 
 ### Queries
 
@@ -1823,7 +1828,7 @@ HLSL writes it on dx12 and vulkan; WebGPU has none, and sg's metal backend does 
   Each setting but `miss.<ray>` stands once, and each `miss.<ray>` once per ray type.
   Its raygen, its misses and the closest hits of its listed groups trace ray types of its set alone, since a trace's contribution, multiplier and miss are positions in that set.
   `max_recursion_depth` is an `int` literal from 1 to 31, which a pipeline with `.host` declares and any other does not.
-  Every shader it names, and every callable of the module's tables (CHK-343), lists the same binding at every position their lists share.
+  Every shader it names, and every callable of the program's callable section (CHK-562), lists the same binding at every position their lists share.
   `@inline` bindings are left out of that, and they list one `@inline` binding at most.
   Any other setting, and breaking any of these, is `invalid-pipeline`.
 * **CHK-332** A pipeline's **trace graph** has an edge from each ray type to every ray type its miss, or its closest hit in a listed group, traces ([why](why/checking.md#chk-332)).

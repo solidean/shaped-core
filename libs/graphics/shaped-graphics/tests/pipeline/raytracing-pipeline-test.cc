@@ -720,6 +720,52 @@ ASYNC_INVOCABLE_TEST("sg - an SGL ray-tracing pipeline calls the module's callab
     }
 }
 
+// raytracing_callables_used.sgl's `stepping`: its raygen uses a module, so it is checked behind the library's whole chain,
+// which holds `aside_callables`'s table too.
+// Thread i calls callable `i % 2` of `steps`, which starts the callable section the host's table holds: a table of a
+// module the raygen never reaches moves neither (CHK-562).
+
+ASYNC_INVOCABLE_TEST("sg - an SGL raygen that uses a module calls its own callables where its table holds them",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::raytracing_pipeline))
+        SKIP("this device has no ray-tracing pipelines");
+
+    namespace used = shaders::raytracing_callables_used;
+    auto const desc = co_await used::stepping.description(*ctx);
+    auto const pipeline = co_await ctx->cached.acquire_raytracing_pipeline(desc);
+    REQUIRE(pipeline != nullptr);
+    auto const table_description = used::stepping_t::table_description(pipeline);
+    CHECK(table_description.callable.size() == 2);
+    auto const table = ctx->uncached.create_raytracing_shader_table(table_description);
+    REQUIRE(table != nullptr);
+
+    constexpr auto count = 8;
+    auto const usage = sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src;
+    auto const values = ctx->persistent.create_buffer_from_data(cc::vector<tg::vec4f>::create_defaulted(count), usage);
+    auto cmd = ctx->create_command_list();
+    auto const layout = ctx->cached.acquire_binding_group_layout<used::stepped>();
+    auto const group
+        = ctx->transient.create_binding_group(*cmd, layout, used::stepped{.values = values.as_readwrite_buffer()});
+    cmd->raytracing.bind_pipeline(*pipeline);
+    cmd->raytracing.bind_group(0, *group);
+    cmd->raytracing.dispatch_rays(*table, sg::raygen_index(0), count);
+    auto const back = cmd->download.data_from_buffer(values);
+    ctx->submit_command_list(cc::move(cmd));
+
+    auto const got = co_await back.data();
+    REQUIRE(got.size() == count);
+    for (auto i = 0; i < count; ++i)
+    {
+        auto const x = float(i + 1);
+        auto const want = i % 2 == 0 ? 3 * x : x + 10;
+        CHECK(got[i][0] == want).context(cc::format("thread {}", i));
+    }
+}
+
 // What the host hands over is checked against the declaration before anything compiles, and every refusal is an async
 // error of the awaited result, never a throw at the call.
 

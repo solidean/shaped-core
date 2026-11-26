@@ -1,0 +1,16 @@
+// A module no shader of the package uses, with a callables table of its own.
+// The library's chain checks it ahead of every program, and it takes no place in their callable sections (CHK-562):
+// `raytracing_callables_used.sgl`, which uses another module of the library, still calls its own `steps` at 0 and 1.
+module aside_callables
+require raytracing_pipeline
+
+struct aside_operand:
+    x: float
+
+@callable fun aside_zeroed(v: mut aside_operand):
+    v.x = 0.0
+
+@callable fun aside_halved(v: mut aside_operand):
+    v.x = v.x * 0.5
+
+callables aside_ops = (aside_zeroed, aside_halved)

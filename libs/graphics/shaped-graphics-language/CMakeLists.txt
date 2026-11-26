@@ -605,6 +605,7 @@ if(SC_BUILD_TESTS)
         tests/driver/target-type-test.cc
         tests/driver/target-layout-test.cc
         tests/driver/describe-test.cc
+        tests/driver/callable-section-test.cc
         tests/driver/entry-interface-test.cc
         tests/driver/source-differential-test.cc
         tests/driver/test-source-test.cc
