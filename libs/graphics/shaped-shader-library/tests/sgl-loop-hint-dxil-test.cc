@@ -196,3 +196,244 @@ TEST("slib - SGL's DXIL marks each back edge of an @unroll(false) loop as DXC's 
             .dump("theirs", theirs.value());
     }
 }
+
+namespace
+{
+/// More shapes a hinted loop may take: nested in the inclusive range's own loop, walked, bounded, and left at once.
+constexpr cc::string_view k_shapes = "binding io:\n"
+                                     "    source: buffer[float]\n"
+                                     "    target: mut buffer[float]\n"
+                                     "\n"
+                                     "@compute(64) fun rolled_around_plain(@thread_id id: int3){io}:\n"
+                                     "    let mut total = 0.0\n"
+                                     "    @unroll(false)\n"
+                                     "    for k in 0 ..= id.y:\n"
+                                     "        for i in 0 ..= id.x:\n"
+                                     "            total += io.source[i + k]\n"
+                                     "    io.target[id.x] = total\n"
+                                     "\n"
+                                     "@compute(64) fun plain_around_rolled(@thread_id id: int3){io}:\n"
+                                     "    let mut total = 0.0\n"
+                                     "    for k in 0 ..= id.y:\n"
+                                     "        @unroll(false)\n"
+                                     "        for i in 0 ..= id.x:\n"
+                                     "            total += io.source[i + k]\n"
+                                     "    io.target[id.x] = total\n"
+                                     "\n"
+                                     "@compute(64) fun rolled_around_rolled(@thread_id id: int3){io}:\n"
+                                     "    let mut total = 0.0\n"
+                                     "    @unroll(false)\n"
+                                     "    for k in 0 ..= id.y:\n"
+                                     "        @unroll(false)\n"
+                                     "        for i in 0 ..= id.x:\n"
+                                     "            total += io.source[i + k]\n"
+                                     "    io.target[id.x] = total\n"
+                                     "\n"
+                                     "@compute(64) fun walked(@thread_id id: int3){io}:\n"
+                                     "    let mut total = 0.0\n"
+                                     "    @unroll(false)\n"
+                                     "    for i in (0 ..< 64).by(3).reversed:\n"
+                                     "        total += io.source[i + id.x]\n"
+                                     "    io.target[id.x] = total\n"
+                                     "\n"
+                                     "@compute(64) fun bounded(@thread_id id: int3){io}:\n"
+                                     "    let mut total = 0.0\n"
+                                     "    @unroll(false)\n"
+                                     "    @max_iterations(16)\n"
+                                     "    for i in 0 ..< id.x:\n"
+                                     "        total += io.source[i]\n"
+                                     "    io.target[id.x] = total\n"
+                                     "\n"
+                                     "@compute(64) fun left_then_plain(@thread_id id: int3){io}:\n"
+                                     "    let mut total = 0.0\n"
+                                     "    @unroll(false)\n"
+                                     "    for i in 0 ..< id.x:\n"
+                                     "        total += io.source[i]\n"
+                                     "        break\n"
+                                     "    for k in 0 ..= id.y:\n"
+                                     "        total += io.source[k] * 2.0\n"
+                                     "    io.target[id.x] = total\n"
+                                     "\n"
+                                     "@compute(64) fun left_then_rolled(@thread_id id: int3){io}:\n"
+                                     "    let mut total = 0.0\n"
+                                     "    @unroll(false)\n"
+                                     "    for i in 0 ..< id.x:\n"
+                                     "        total += io.source[i]\n"
+                                     "        break\n"
+                                     "    @unroll(false)\n"
+                                     "    for k in 0 ..= id.y:\n"
+                                     "        total += io.source[k] * 2.0\n"
+                                     "    io.target[id.x] = total\n"
+                                     "\n"
+                                     "@compute(64) fun plain_around_left(@thread_id id: int3){io}:\n"
+                                     "    let mut total = 0.0\n"
+                                     "    for k in 0 ..= id.y:\n"
+                                     "        @unroll(false)\n"
+                                     "        for i in 0 ..< id.x:\n"
+                                     "            total += io.source[i]\n"
+                                     "            break\n"
+                                     "        total += io.source[k] * 2.0\n"
+                                     "    io.target[id.x] = total\n";
+
+/// Each entry point of `k_shapes`, and how many loops of its DXIL keep the hint; a loop left at once is no loop.
+constexpr hinted_entry k_shape_entries[] = {
+    {"rolled_around_plain", 1}, {"plain_around_rolled", 1}, {"rolled_around_rolled", 2}, {"walked", 1}, {"bounded", 1},
+    {"left_then_plain", 0},     {"left_then_rolled", 1},    {"plain_around_left", 0},
+};
+
+/// The number a disassembly writes from `at` on, as the `12` of `%12`.
+[[nodiscard]] isize number_at(cc::string_view text, isize at)
+{
+    auto n = isize(0);
+    while (at < text.size() && text[at] >= '0' && text[at] <= '9')
+        n = n * 10 + (text[at++] - '0');
+    return n;
+}
+
+/// A terminator of SGL's disassembled function: the block it ends, the blocks it goes to, and its `!llvm.loop` node.
+struct terminator_line
+{
+    isize block = 0;
+    cc::vector<isize> targets;
+    isize loop = -1;
+};
+
+/// The `br` and `switch` terminators of the one function in `disassembly`, and its blocks in the order it lays them out.
+/// SGL lays its blocks out each after its dominators, so an edge to a block at or before its own is a back edge, and
+/// the block it goes to the loop's header.
+[[nodiscard]] cc::vector<terminator_line> terminators_of(cc::string_view disassembly, cc::vector<isize>& laid_out)
+{
+    auto found = cc::vector<terminator_line>();
+    auto block = isize(0);
+    auto in_function = false;
+    auto pending = cc::optional<terminator_line>();
+    auto const note = [&](cc::string_view line, terminator_line& t)
+    {
+        for (auto at = line.find("label %"); at >= 0; at = line.find("label %", at + 1))
+            t.targets.push_back(number_at(line, at + 7));
+        if (auto const at = line.find("!llvm.loop !"); at >= 0)
+            t.loop = number_at(line, at + 12);
+    };
+    for (auto const line : lines_with(disassembly, ""))
+    {
+        if (line.starts_with("define "))
+        {
+            in_function = true;
+            laid_out.push_back(0);
+            continue;
+        }
+        if (!in_function)
+            continue;
+        if (line.starts_with("}"))
+            break;
+        if (line.starts_with("; <label>:"))
+        {
+            block = number_at(line, 10);
+            laid_out.push_back(block);
+            continue;
+        }
+        // a switch's cases stand on lines of their own, its node after the closing bracket
+        if (pending.has_value())
+        {
+            note(line, pending.value());
+            if (line.contains("]"))
+            {
+                found.push_back(pending.value());
+                pending = {};
+            }
+            continue;
+        }
+        if (line.starts_with("  br "))
+        {
+            auto t = terminator_line{.block = block};
+            note(line, t);
+            found.push_back(cc::move(t));
+        }
+        else if (line.starts_with("  switch "))
+        {
+            pending = terminator_line{.block = block};
+            note(line, pending.value());
+        }
+    }
+    return found;
+}
+
+[[nodiscard]] isize place_in(cc::span<isize const> laid_out, isize block)
+{
+    for (auto k = isize(0); k < laid_out.size(); ++k)
+        if (laid_out[k] == block)
+            return k;
+    return -1;
+}
+
+/// What LLVM's loop analysis reads of a loop's hint: every latch of the loop names the loop's one node, or none names
+/// any; a branch that goes back to no header names none; and `rolled` loops name one, each its own.
+void check_back_edges(cc::string_view name, cc::string_view disassembly, isize rolled)
+{
+    auto laid_out = cc::vector<isize>();
+    auto const lines = terminators_of(disassembly, laid_out);
+    auto headers = cc::vector<isize>();
+    auto nodes = cc::vector<isize>();
+    for (auto const& t : lines)
+    {
+        auto is_back = false;
+        for (auto const to : t.targets)
+        {
+            if (place_in(laid_out, to) > place_in(laid_out, t.block))
+                continue;
+            is_back = true;
+            auto known = isize(-1);
+            for (auto k = isize(0); k < headers.size(); ++k)
+                if (headers[k] == to)
+                    known = k;
+            if (known < 0)
+            {
+                headers.push_back(to);
+                nodes.push_back(t.loop);
+                continue;
+            }
+            // a latch that names another node than the loop's other latches, or none where they name one, drops it
+            CHECK(nodes[known] == t.loop).dump("entry", name).dump("header", to).dump("ours", disassembly);
+        }
+        if (!is_back)
+            CHECK(t.loop == -1).dump("entry", name).dump("block", t.block).dump("ours", disassembly);
+    }
+    auto marked = isize(0);
+    for (auto k = isize(0); k < nodes.size(); ++k)
+    {
+        marked += nodes[k] >= 0 ? 1 : 0;
+        for (auto j = k + 1; j < nodes.size(); ++j)
+            CHECK((nodes[k] < 0 || nodes[k] != nodes[j])).dump("entry", name).dump("ours", disassembly);
+    }
+    CHECK(marked == rolled).dump("entry", name).dump("ours", disassembly);
+}
+} // namespace
+
+TEST("slib - every back edge of an @unroll(false) loop names its loop's node, and no other branch names one (EMIT-291)")
+{
+    auto compiler = ssc::dxc::compiler::create();
+    if (compiler.has_error())
+        SKIP("no DXC");
+    // with the debug info too, whose module DXC disassembles in the program's place and numbers its metadata anew
+    auto const run = [&](cc::string_view source, cc::span<hinted_entry const> entries)
+    {
+        for (auto const level : {sgl::emit::debug_info::none, sgl::emit::debug_info::full})
+            for (auto const& entry : entries)
+            {
+                auto const native = sgl::compile_to_text({.source = source,
+                                                          .entry_point = entry.name,
+                                                          .target = sgl::emit::target::hlsl_dx12,
+                                                          .native = sgl::emit::native_route::require,
+                                                          .native_debug_info = level});
+                REQUIRE(native.has_value()).dump("entry", entry.name).dump("error", native.has_error() ? native.error() : "");
+                auto const refused = compiler.value().validate(native.value().dxil);
+                CHECK(!refused.has_value()).dump("entry", entry.name).dump("validator", refused.value_or(cc::string()));
+                auto const ours = compiler.value().disassemble(native.value().dxil);
+                REQUIRE(ours.has_value());
+                CHECK(rolled_loops(ours.value()) == entry.rolled).dump("entry", entry.name).dump("ours", ours.value());
+                check_back_edges(entry.name, ours.value(), entry.rolled);
+            }
+    };
+    run(k_hinted, k_hinted_entries);
+    run(k_shapes, k_shape_entries);
+}

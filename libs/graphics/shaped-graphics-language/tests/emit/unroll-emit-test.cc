@@ -417,3 +417,99 @@ TEST("sgl emit - an unrolled for past 256 copies is a loop that asks nothing of 
     REQUIRE(dxil.has_value()).dump("error", dxil.has_error() ? dxil.error() : cc::string());
     CHECK(!dxil.value().text.contains(" rolled\n"));
 }
+
+namespace
+{
+/// More shapes a hinted loop may take: nested in the inclusive range's own loop, walked, bounded, and with a subgroup
+/// operation, which keeps DXIL's passes structured.
+constexpr cc::string_view k_shapes = "require subgroups\n"
+                                     "\n"
+                                     "binding io:\n"
+                                     "    source: buffer[float]\n"
+                                     "    target: mut buffer[float]\n"
+                                     "    n: int\n"
+                                     "    limit: float\n"
+                                     "\n"
+                                     "@compute(64) fun rolled_around_plain(@thread_id id: int3){io}:\n"
+                                     "    let mut total = 0.0\n"
+                                     "    @unroll(false)\n"
+                                     "    for k in 0 ..= id.y:\n"
+                                     "        for i in 0 ..= id.x:\n"
+                                     "            total += io.source[i + k]\n"
+                                     "    io.target[id.x] = total\n"
+                                     "\n"
+                                     "@compute(64) fun plain_around_rolled(@thread_id id: int3){io}:\n"
+                                     "    let mut total = 0.0\n"
+                                     "    for k in 0 ..= id.y:\n"
+                                     "        @unroll(false)\n"
+                                     "        for i in 0 ..= id.x:\n"
+                                     "            total += io.source[i + k]\n"
+                                     "    io.target[id.x] = total\n"
+                                     "\n"
+                                     "@compute(64) fun walked(@thread_id id: int3){io}:\n"
+                                     "    let mut total = 0.0\n"
+                                     "    @unroll(false)\n"
+                                     "    for i in (0 ..< 64).by(3).reversed:\n"
+                                     "        total += io.source[i + id.x]\n"
+                                     "    io.target[id.x] = total\n"
+                                     "\n"
+                                     "@compute(64) fun bounded(@thread_id id: int3){io}:\n"
+                                     "    let mut total = 0.0\n"
+                                     "    @unroll(false)\n"
+                                     "    @max_iterations(16)\n"
+                                     "    for i in 0 ..< id.x:\n"
+                                     "        total += io.source[i]\n"
+                                     "    io.target[id.x] = total\n"
+                                     "\n"
+                                     "@compute(64) fun waved(@thread_id id: int3){io}:\n"
+                                     "    let mut total = 0.0\n"
+                                     "    for k in 0 ..< io.n:\n"
+                                     "        @unroll(false)\n"
+                                     "        for i in 0 ..< io.n:\n"
+                                     "            total += subgroup_add(io.source[i + k])\n"
+                                     "            if total > io.limit => break\n"
+                                     "            if io.source[i] < 0.0 => continue\n"
+                                     "            total += 1.0\n"
+                                     "    io.target[id.x] = total\n";
+
+constexpr u32 k_rolled_around_plain_controls[] = {k_dont_unroll, k_none};
+constexpr u32 k_plain_around_rolled_controls[] = {k_none, k_dont_unroll};
+constexpr u32 k_walked_controls[] = {k_dont_unroll};
+constexpr u32 k_bounded_controls[] = {k_dont_unroll};
+constexpr u32 k_waved_controls[] = {k_none, k_dont_unroll};
+constexpr hinted_entry k_shape_entries[] = {
+    {"rolled_around_plain", k_rolled_around_plain_controls},
+    {"plain_around_rolled", k_plain_around_rolled_controls},
+    {"walked", k_walked_controls},
+    {"bounded", k_bounded_controls},
+    {"waved", k_waved_controls},
+};
+} // namespace
+
+TEST("sgl emit - @unroll(false) on an inclusive range's loop, a walk, a bounded loop and a subgroup's loop is "
+     "DontUnroll "
+     "on its loop alone (EMIT-291)")
+{
+    auto const validates = has_spirv_val();
+    for (auto const& entry : k_shape_entries)
+    {
+        auto const e = native_of(k_shapes, entry.name, sgl::emit::target::hlsl_vulkan);
+        REQUIRE(e.has_value()).dump("entry", entry.name).dump("error", e.has_error() ? e.error() : cc::string());
+        auto const controls = loop_controls(e.value().spirv);
+        REQUIRE(controls.size() == entry.controls.size()).dump("entry", entry.name);
+        for (auto k = isize(0); k < controls.size(); ++k)
+            CHECK(controls[k] == entry.controls[k]).dump("entry", entry.name).dump("loop", k);
+        if (validates)
+            CHECK(spirv_val_takes(e.value().spirv, entry.name)).dump("entry", entry.name);
+
+        // DXIL's passes keep the hint on the header of the loop it was written on alone
+        auto const d = native_of(k_shapes, entry.name, sgl::emit::target::hlsl_dx12);
+        REQUIRE(d.has_value()).dump("entry", entry.name).dump("error", d.has_error() ? d.error() : cc::string());
+        auto rolled = isize(0);
+        for (auto const c : entry.controls)
+            rolled += c == k_dont_unroll ? 1 : 0;
+        CHECK(occurrences(d.value().text, " rolled\n") == rolled).dump("entry", entry.name).dump("program", d.value().text);
+    }
+    if (!validates)
+        SKIP("no spirv-val on the path");
+}
