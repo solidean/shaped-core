@@ -169,6 +169,8 @@ private:
     /// The first tick at which this routine was observed pending, and whether the stuck-pending warning has fired.
     /// Bookkeeping for routine_registry::warn_if_pending_too_long, kept here because it is per routine.
     [[nodiscard]] u64 first_pending_tick() const { return _first_pending_tick.load(cc::memory_order_relaxed); }
+    /// When, on the steady clock, `first_pending_tick` was noted; meaningless while it is 0.
+    [[nodiscard]] double first_pending_secs() const { return _first_pending_secs.load(cc::memory_order_relaxed); }
     void note_pending_at(u64 tick);
     void clear_pending_mark();
 
@@ -176,6 +178,7 @@ private:
     [[nodiscard]] bool mark_warned_pending() { return _warned_pending.exchange(true); }
 
     cc::atomic<u64> _first_pending_tick = 0;
+    cc::atomic<double> _first_pending_secs = 0.0;
     cc::atomic<bool> _warned_pending = false;
 
     /// Set by fail_init from inside a phase, cleared when the phases re-run at a new generation.
