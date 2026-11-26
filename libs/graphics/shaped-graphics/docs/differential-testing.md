@@ -95,7 +95,8 @@ On a matching context a difference logs at info, naming the issue, where it woul
 **A known line that stops diverging fails**, against the reference and against the interpreter: a fixed driver retires its line, and the issue gets checked.
 A trailing `precise` scopes a line to [the strict-floor twin](#the-strict-floor-twin) alone.
 A trailing `across` scopes it to the tests that hold one GPU to another, the reference and the backends of one machine.
-Those see a difference both APIs allow, a conversion rounded toward zero against one rounded to nearest, which the interpreter's ranges pass.
+Those pass two values that both lie in the interpreter's range, but a file held `exact` commits only a hash of each output.
+So there a conversion rounded toward zero against one rounded to nearest still differs, though both APIs allow it.
 A matching context is never what the others are held to, and a refresh writes no reference from it.
 Two routes of one matching context are not held to each other, since one driver folding both alike proves nothing.
 
@@ -113,7 +114,10 @@ One driver compiles both routes' IR, so a difference there is a difference in wh
 **An override of that bound is a known divergence, and names its issue in the comment block.**
 Two APIs get the looser `across` bound, since their drivers round transcendentals and fold expressions as they like.
 
-The first run found one such divergence, [bug-sgl-dxil-division-and-normalize-round-unlike-dxc](../../shaped-graphics-language/docs/issues/bug-sgl-dxil-division-and-normalize-round-unlike-dxc.md).
+**Two GPU results also agree where both lie within the bound of [the interpreter's range](#the-interpreter) for the element.**
+At `.fast` DXC reassociates and contracts what SGL's own DXIL writes in source order, as the level allows, and one driver then rounds the two apart.
+The range holds both orders, so neither needs a looser bound; an element the interpreter bounds by nothing is held to the bound alone.
+The reference test does the same for the elements a reference commits.
 
 ## The interpreter
 
@@ -188,7 +192,7 @@ It is plain text, one line per thing it holds, so a diff says exactly what moved
 - Any other output is 64 of its elements, spread through it, each as its bits and, for a reader, its value.
 
 Each entry point's block names the configuration that wrote it.
-Every configuration of every machine is held to it at the file's `across` bound, so a reference written on one GPU checks every other.
+Every configuration of every machine is held to it at the file's `across` bound, or through the interpreter's range as two routes are, so a reference written on one GPU checks every other.
 A corpus file without a reference fails, naming how to write one.
 
 To write or rewrite them, run the test with `SC_DIFFERENTIAL_REFRESH=1`:

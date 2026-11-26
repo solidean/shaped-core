@@ -1,7 +1,5 @@
 // differential: setup floats
-// differential: routes relative 0.00001
 // differential: across relative 0.00001
-// The routes' bound, until SGL's DXIL normalizes as DXC's does; issue: bug-sgl-dxil-division-and-normalize-round-unlike-dxc
 // Across APIs a relative bound, since output 2 sums three products to a small value, where an ulp of it says nothing.
 // Vector and matrix math as a transform or a lighting pass writes it: dot, cross, normalize, and a matrix times a vector.
 use diff_floats

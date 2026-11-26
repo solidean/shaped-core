@@ -217,7 +217,12 @@ bool register_setup(setup s);
 
 /// Where `b` strays from `a` beyond `t`: one line per output that differs, naming the first elements that do.
 /// An element `a` bounds is held to its range, `t` measured from the nearer end.
-[[nodiscard]] cc::vector<cc::string> differences(run_result const& a, run_result const& b, tolerance t);
+/// Given `ranges`, the interpreter's run, an element of two GPU results passes too where both are within `t` of the
+/// range it allows: two targets may each take a departure their level licenses, and land on either side of it.
+[[nodiscard]] cc::vector<cc::string> differences(run_result const& a,
+                                                 run_result const& b,
+                                                 tolerance t,
+                                                 run_result const* ranges = nullptr);
 
 /// The most of `t`'s measure any element of `b` takes to be held to `a`, from the nearer end of a range `a` bounds;
 /// 0 where `b` is `a`, or inside its ranges, everywhere.
@@ -241,5 +246,9 @@ bool register_setup(setup s);
 [[nodiscard]] cc::string reference_lines(workload const& w, run_result const& r);
 
 /// Where `r` strays from the lines `reference` holds for `w`, at `w`'s `across` bound; one line per difference, or one naming an output it lacks.
-[[nodiscard]] cc::vector<cc::string> against_reference(cc::string_view reference, workload const& w, run_result const& r);
+/// Given `ranges`, the interpreter's run, an element passes where it and the reference are both within the range.
+[[nodiscard]] cc::vector<cc::string> against_reference(cc::string_view reference,
+                                                       workload const& w,
+                                                       run_result const& r,
+                                                       run_result const* ranges = nullptr);
 } // namespace sg_diff

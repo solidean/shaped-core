@@ -5,8 +5,8 @@ refs:
   - file: libs/graphics/shaped-graphics/tests/differential/corpus/float_arithmetic.sgl
   - file: libs/graphics/shaped-graphics/tests/differential/corpus/vector_math.sgl
   - test: sg differential - every corpus entry point computes alike on each route this context takes
-claimed-by: Claude (for Philip Trettner)
-claimed-at: 2026-11-26T06:57Z
+closed: 2026-11-26
+resolution: fixed
 ---
 
 # SGL's DXIL divides and normalizes unlike DXC's, so one dx12 driver rounds the two routes apart
@@ -29,3 +29,13 @@ The hypothesis, not yet traced: the two write `fdiv` and `normalize` with differ
 
 Until then both files hold their routes to `relative 0.00001` in their comment blocks, naming this issue.
 Closing it means the two lower alike, or a decision that they need not, and the override coming out either way.
+
+## Log
+
+**2026-11-26: neither the division nor `normalize` lowers differently; DXC reorders, as `.fast` allows.**
+The two routes' DXIL of `rounded_operations`, disassembled with `dxc -dumpbin`, carry the same `fdiv fast` and the same instructions.
+DXC's LLVM reassociates `a * b + a / b - (a - b)` into `((a / b - a) + b) + a * b`, and `mix`'s sum likewise; SGL's DXIL keeps the source's order.
+In `vectors` DXC contracts three products into `FMad` and splits a `dot3` into its steps, where SGL's DXIL keeps the products and the `dot3`.
+Both are departures `.fast` licenses (EVAL-6), so neither route is wrong, and the interpreter's bounding run holds both.
+So two GPU results of an element now agree where both lie within the bound of the interpreter's range for it, and both files' `routes` overrides came out.
+The Arc B580 and the AMD iGPU pass every differential test without them, on dx12 and vulkan.

@@ -109,6 +109,24 @@ constexpr isize k_named_elements = 4;
     return within(cc::bit_cast<u32>(fb < least ? least : most), b, t);
 }
 
+/// Whether two GPU results `a` and `b` of one element both lie within `t` of the range `ranges` allows it.
+/// An element `ranges` bounds by nothing, or does not bound, holds them to each other alone.
+[[nodiscard]] bool both_in_range(
+    sg_diff::run_result const* ranges, isize output, cc::string_view name, isize e, u32 a, u32 b, sg_diff::tolerance t)
+{
+    if (ranges == nullptr || output >= ranges->outputs.size() || ranges->outputs[output].name != name)
+        return false;
+    auto const& bounds = ranges->outputs[output].bounds;
+    if (bounds.size() <= 2 * e + 1)
+        return false;
+    auto const least = bounds[2 * e];
+    auto const most = bounds[2 * e + 1];
+    if (least - least != 0.0f || most - most != 0.0f)
+        return false;
+    return within_range(least, most, a, t, ranges->ranges_are_hulls)
+        && within_range(least, most, b, t, ranges->ranges_are_hulls);
+}
+
 [[nodiscard]] cc::string text_of(u32 bits, sg_diff::tolerance t)
 {
     if (t.kind == sg_diff::tolerance::measure::exact)
@@ -443,7 +461,7 @@ sg::async_compiled_shader sg_diff::compiled_on(sg::context const& ctx, route con
     return asset.acquire(r.format, kept);
 }
 
-cc::vector<cc::string> sg_diff::differences(run_result const& a, run_result const& b, tolerance t)
+cc::vector<cc::string> sg_diff::differences(run_result const& a, run_result const& b, tolerance t, run_result const* ranges)
 {
     auto lines = cc::vector<cc::string>();
     if (a.outputs.size() != b.outputs.size())
@@ -475,6 +493,8 @@ cc::vector<cc::string> sg_diff::differences(run_result const& a, run_result cons
             auto const most = is_bounded ? x.bounds[2 * e + 1] : 0.0f;
             auto const is_ranged = is_bounded && least == least && most == most;
             if (is_ranged ? within_range(least, most, ys[e], kept, a.ranges_are_hulls) : within(xs[e], ys[e], kept))
+                continue;
+            if (!is_bounded && both_in_range(ranges, i, x.name, e, xs[e], ys[e], kept))
                 continue;
             if (differing < k_named_elements)
                 named.appendf("{}[{}] {} against {}{}", named.empty() ? "" : ", ", e, text_of(ys[e], kept),
@@ -612,11 +632,15 @@ cc::string sg_diff::reference_lines(workload const& w, run_result const& r)
     return text;
 }
 
-cc::vector<cc::string> sg_diff::against_reference(cc::string_view reference, workload const& w, run_result const& r)
+cc::vector<cc::string> sg_diff::against_reference(cc::string_view reference,
+                                                  workload const& w,
+                                                  run_result const& r,
+                                                  run_result const* ranges)
 {
     auto lines = cc::vector<cc::string>();
-    for (auto const& o : r.outputs)
+    for (auto output = isize(0); output < r.outputs.size(); ++output)
     {
+        auto const& o = r.outputs[output];
         auto const count = o.bytes.size() / 4;
         auto const* const words = reinterpret_cast<u32 const*>(o.bytes.data());
         auto seen = isize(0);
@@ -662,7 +686,8 @@ cc::vector<cc::string> sg_diff::against_reference(cc::string_view reference, wor
                     cc::format("{}: the line '{}' does not parse, or names no element of {}", o.name, line, count));
                 continue;
             }
-            if (within(u32(bits.value()), words[index.value()], w.across))
+            if (within(u32(bits.value()), words[index.value()], w.across)
+                || both_in_range(ranges, output, o.name, index.value(), u32(bits.value()), words[index.value()], w.across))
                 continue;
             if (differing < k_named_elements)
                 named.appendf("{}[{}] {} against {}", named.empty() ? "" : ", ", index.value(),

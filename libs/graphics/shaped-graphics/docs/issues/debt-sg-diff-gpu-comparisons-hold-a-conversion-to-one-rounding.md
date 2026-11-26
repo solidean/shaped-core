@@ -21,3 +21,13 @@ So a GPU that rounds toward zero, AMD's, differs from a reference written on one
 
 Hold a GPU to a reference through the interpreter's ranges rather than bit for bit: an element passes where both are ends of one range, or where it is within the file's tolerance as now.
 The reference could then commit its machine's results with the ranges beside them, or the test could run the interpreter for the ranges as the interpreter test does.
+
+## Log
+
+**2026-11-26: done for every file not held `exact`.**
+The routes, the machine's backends and the reference now pass an element where both GPU results lie within the bound of the interpreter's range.
+`half_arithmetic.sgl`'s AMD lines came out with it.
+`half_math.sgl` is held `exact`, so its reference is a hash per output and has no element to hold to a range; its AMD lines stay.
+What is left is one of two:
+- a reference of an `exact` file whose interpreter run is ranged commits its elements rather than a hash;
+- or the reference test holds that file to the interpreter's two roundings alone.

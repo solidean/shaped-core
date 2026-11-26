@@ -54,10 +54,26 @@ void judge(sg_diff::workload const& w,
                     known->issue, lines.front());
 }
 
+/// The interpreter's run of `w`, whose ranges let two GPU results that each take a licensed departure agree;
+/// none where the interpreter cannot run it, and the GPUs are then held to each other alone.
+/// Interprets on `host`'s device home, where a setup's half that builds on the device does so.
+cc::shared_async<cc::optional<sg_diff::run_result>> ranges_of(sg_diff::workload const& w, sg::context& host)
+{
+    if (auto* const home = host.device_home())
+        co_await cc::async_resume_on(*home);
+    auto oracle = sg_diff::interpreted(w, host);
+    if (oracle.has_error() || oracle.value().skipped.has_value())
+        co_return cc::nullopt;
+    co_return cc::move(oracle.value());
+}
+
 /// Runs `w` on every configuration and holds each to the first one that ran, at the tolerance their relation calls for.
 /// A configuration the file knows to diverge runs last, so it is never what the others are held to, and only logs.
 cc::shared_async<cc::unit> held_alike(sg_diff::workload const& w, cc::span<configuration const> all)
 {
+    if (all.empty())
+        co_return;
+    auto const ranges = co_await ranges_of(w, *all[0].ctx);
     auto configurations = cc::vector<configuration const*>();
     for (auto const& c : all)
         if (w.known_between_gpus(*c.ctx) == nullptr)
@@ -85,7 +101,8 @@ cc::shared_async<cc::unit> held_alike(sg_diff::workload const& w, cc::span<confi
             continue;
         }
         auto const tolerance = c.ctx == reference_of->ctx ? w.routes : w.across;
-        auto const lines = sg_diff::differences(reference.value(), result, tolerance);
+        auto const lines
+            = sg_diff::differences(reference.value(), result, tolerance, ranges.has_value() ? &ranges.value() : nullptr);
         // two routes of one known driver may agree with each other, so agreeing proves nothing here
         if (auto const* const known = w.known_between_gpus(*c.ctx); known != nullptr)
         {
@@ -251,6 +268,7 @@ ASYNC_TEST("sg differential - every corpus entry point computes what its committ
                                             w.file, sg_diff::reference_name(w), k_refresh_variable));
             continue;
         }
+        auto const ranges = co_await ranges_of(w, *configurations[0].ctx);
         for (auto const& c : configurations)
         {
             auto const result = co_await sg_diff::run(c.ctx.get(), &w, c.route);
@@ -263,7 +281,9 @@ ASYNC_TEST("sg differential - every corpus entry point computes what its committ
                                                  w.entry, o.name, c.ctx->metrics.adapter().name, c.route.name);
                     write_text(name, cc::string_view(reinterpret_cast<char const*>(o.bytes.data()), o.bytes.size()));
                 }
-            judge(w, c, sg_diff::reference_name(w), sg_diff::against_reference(reference.value(), w, result), "across");
+            judge(w, c, sg_diff::reference_name(w),
+                  sg_diff::against_reference(reference.value(), w, result, ranges.has_value() ? &ranges.value() : nullptr),
+                  "across");
         }
     }
 }
