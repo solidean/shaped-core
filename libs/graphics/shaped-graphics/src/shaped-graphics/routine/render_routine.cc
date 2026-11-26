@@ -1,4 +1,5 @@
 #include <clean-core/common/profiling.hh>
+#include <clean-core/common/time.hh>
 #include <shaped-graphics/command_list/command_list.hh> // cmd.context()
 #include <shaped-graphics/routine/reload_generation.hh>
 #include <shaped-graphics/routine/render_routine_base.hh>
@@ -130,7 +131,8 @@ void render_routine_base::note_pending_at(u64 tick)
     // The FIRST tick it was pending at is what the age is measured from, so a routine that has been stuck since the
     // start does not look freshly pending on every sweep.
     u64 expected = 0;
-    (void)_first_pending_tick.compare_exchange_strong(expected, tick, cc::memory_order_relaxed);
+    if (_first_pending_tick.compare_exchange_strong(expected, tick, cc::memory_order_relaxed))
+        _first_pending_secs.store(cc::current_time_steady_secs(), cc::memory_order_relaxed);
 }
 
 void render_routine_base::clear_pending_mark()
