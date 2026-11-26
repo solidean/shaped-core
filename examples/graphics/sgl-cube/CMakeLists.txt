@@ -1,7 +1,7 @@
 # The rotating cube with its shader in SGL: one cube.sgl for every backend, where rotating-cube has a language per backend.
 #
-# Gated rather than broken, like its sibling: it needs a backend to create a context on and a compiler for that
-# backend's format, and a cross-compile CI leg builds every target.
+# Gated rather than broken, like its sibling: it needs a backend to create a context on, and a cross-compile CI leg
+# builds every target.
 
 sc_resolve_example_backend(_sgl_cube_backend _sgl_cube_mode SUPPORTS dx12 vulkan webgpu metal)
 
@@ -14,15 +14,9 @@ if(_sgl_cube_mode STREQUAL "stub")
 endif()
 
 # The package's language does NOT follow the backend, which is the point of this example.
-# What follows it is the compiler behind the SGL edge: DXC for dx12 and vulkan, ssc::msl for metal, and none at all
-# for webgpu.
-if(_sgl_cube_backend STREQUAL "shaped-graphics-webgpu")
-    # nothing to require: WGSL is the source the backend compiles itself
-elseif(_sgl_cube_backend STREQUAL "shaped-graphics-metal")
-    if(NOT SC_HAS_METAL_COMPILER)
-        return()
-    endif()
-elseif(NOT SC_HAS_DXC_COMPILER)
+# No backend needs a compiler beside SGL's own: it writes DXIL for dx12, SPIR-V for vulkan and WGSL for webgpu itself,
+# and metal's edge is ssc::msl, which every Apple build has.
+if(_sgl_cube_backend STREQUAL "shaped-graphics-metal" AND NOT SC_HAS_METAL_COMPILER)
     return()
 endif()
 

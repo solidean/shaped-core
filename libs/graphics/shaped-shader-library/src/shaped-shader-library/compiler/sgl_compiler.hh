@@ -73,4 +73,9 @@ namespace slib
 /// The edge `sgl -> spirv` with no compiler behind it: SGL writes the module itself, and an entry point it has no
 /// lowering for yet fails to compile.
 [[nodiscard]] std::unique_ptr<shader_compiler> create_sgl_spirv_compiler(sgl_compiler_options const& options = {});
+
+/// The edge `sgl -> dxil` with no compiler behind it: SGL writes the DXIL itself, and an entry point it has no
+/// lowering for yet fails to compile.
+/// So dx12 needs no DXC for SGL; a context draws through this edge whether or not it set `native_dxil`.
+[[nodiscard]] std::unique_ptr<shader_compiler> create_sgl_dxil_compiler(sgl_compiler_options const& options = {});
 } // namespace slib

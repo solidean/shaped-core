@@ -14,17 +14,17 @@ void metal_accel_storage::release(cc::vector<cc::unique_function<void()>>& final
     auto* const accel = _accel;
     _accel = nullptr;
 
-    // Out of the residency set first, so the set stops naming an allocation that is on its way out.
-    if (accel != nullptr)
-        _ctx.residency().remove(accel);
-
     // Handed to the epoch rather than released here: a submitted command buffer may still be tracing against this, and
     // the epoch is what knows when it is not.
+    // The residency entry goes with it, never before — see metal_residency_set.
     _ctx.epochs().defer(
-        [accel, taken = cc::move(finalizers)]() mutable
+        [accel, &residency = _ctx.residency(), taken = cc::move(finalizers)]() mutable
         {
             if (accel != nullptr)
+            {
+                residency.remove(accel);
                 accel->release();
+            }
             for (auto& f : taken)
                 f();
         });

@@ -102,7 +102,12 @@ metal_binding_group::~metal_binding_group()
         return;
     auto* const buffer = _arguments;
     _arguments = nullptr;
-    _ctx.residency().remove(buffer);
-    _ctx.epochs().defer([buffer] { buffer->release(); });
+    // The residency entry goes with the release, never before — see metal_residency_set.
+    _ctx.epochs().defer(
+        [buffer, &residency = _ctx.residency()]
+        {
+            residency.remove(buffer);
+            buffer->release();
+        });
 }
 } // namespace sg::backend::metal

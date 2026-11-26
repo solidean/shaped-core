@@ -175,14 +175,15 @@ static_assert(
 class sgl_shader_compiler final : public slib::shader_compiler
 {
 public:
-    /// `inner` may be null for spirv alone, which SGL then writes itself and nothing compiles.
+    /// `inner` may be null for spirv or dxil, named by `native_format`, which SGL then writes itself and nothing compiles.
     sgl_shader_compiler(std::unique_ptr<slib::shader_compiler> inner,
+                        sg::shader_format native_format,
                         cc::optional<bcache::blob_cache*> persistent_cache,
                         bool diagnostics,
                         sgl::check::undefined_guard guards_undefined,
                         bool keeps_module_artifacts)
       : _inner(cc::move(inner)),
-        _format(_inner != nullptr ? _inner->target_format() : sg::shader_format::spirv),
+        _format(_inner != nullptr ? _inner->target_format() : native_format),
         _target(target_of(_format)),
         _persistent_cache(persistent_cache),
         _diagnostics(diagnostics),
@@ -341,8 +342,8 @@ private:
         auto polyfill_pass = cc::string();
         auto const is_spirv = _target == sgl::emit::target::hlsl_vulkan;
         auto const is_dxil = _target == sgl::emit::target::hlsl_dx12;
-        auto const requires_native
-            = (is_spirv && (_inner == nullptr || desc.native_spirv)) || (is_dxil && desc.native_dxil);
+        auto const requires_native = (is_spirv && (_inner == nullptr || desc.native_spirv))
+                                  || (is_dxil && (_inner == nullptr || desc.native_dxil));
         auto native = requires_native ? sgl::emit::native_route::require : sgl::emit::native_route::text;
         for (auto const& o : desc.options)
         {
@@ -659,14 +660,22 @@ std::unique_ptr<slib::shader_compiler> slib::create_sgl_compiler(std::unique_ptr
                                                                  sgl_compiler_options const& options)
 {
     CC_ASSERT(inner != nullptr, "an SGL compiler needs the compiler that builds its text");
-    return std::make_unique<sgl_shader_compiler>(cc::move(inner), options.persistent_cache, options.diagnostics,
+    auto const format = inner->target_format();
+    return std::make_unique<sgl_shader_compiler>(cc::move(inner), format, options.persistent_cache, options.diagnostics,
                                                  sgl::check::undefined_guard(options.guards_undefined),
                                                  options.keeps_module_artifacts);
 }
 
 std::unique_ptr<slib::shader_compiler> slib::create_sgl_spirv_compiler(sgl_compiler_options const& options)
 {
-    return std::make_unique<sgl_shader_compiler>(nullptr, options.persistent_cache, options.diagnostics,
-                                                 sgl::check::undefined_guard(options.guards_undefined),
-                                                 options.keeps_module_artifacts);
+    return std::make_unique<sgl_shader_compiler>(
+        nullptr, sg::shader_format::spirv, options.persistent_cache, options.diagnostics,
+        sgl::check::undefined_guard(options.guards_undefined), options.keeps_module_artifacts);
+}
+
+std::unique_ptr<slib::shader_compiler> slib::create_sgl_dxil_compiler(sgl_compiler_options const& options)
+{
+    return std::make_unique<sgl_shader_compiler>(
+        nullptr, sg::shader_format::dxil, options.persistent_cache, options.diagnostics,
+        sgl::check::undefined_guard(options.guards_undefined), options.keeps_module_artifacts);
 }

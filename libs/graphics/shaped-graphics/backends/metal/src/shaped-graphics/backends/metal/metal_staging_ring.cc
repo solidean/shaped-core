@@ -151,18 +151,17 @@ void metal_staging_ring::on_epochs_completed(sg::epoch completed)
 
 void metal_staging_ring::reclaim(ring_state& s)
 {
-    auto retired = isize(0);
-    for (auto const& cp : s.checkpoints)
+    while (!s.checkpoints.empty())
     {
+        auto const& cp = s.checkpoints.front();
         if (u64(cp.epoch_id) > s.completed_epoch)
             break;
         if (cp.outstanding != nullptr && cp.outstanding->load(std::memory_order_acquire) != 0)
             break; // a download still owes a copy out of these bytes, whatever the fence says
 
         s.freed_pos = cp.end_pos; // checkpoints are monotonic in epoch and in end_pos
-        ++retired;
+        (void)s.checkpoints.pop_front();
     }
-    s.checkpoints.remove_from_to(0, retired);
 }
 
 metal_staging_ring::debug_cursors metal_staging_ring::debug_cursor_state()

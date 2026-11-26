@@ -34,14 +34,15 @@ void metal_texture::release_storage() const
     auto* const texture = _texture;
     _texture = nullptr;
 
-    if (texture != nullptr)
-        _ctx.residency().remove(texture);
-
+    // The residency entry goes with the release, never before — see metal_residency_set.
     _ctx.epochs().defer(
-        [texture, finalizers = cc::move(_finalizers)]() mutable
+        [texture, &residency = _ctx.residency(), finalizers = cc::move(_finalizers)]() mutable
         {
             if (texture != nullptr)
+            {
+                residency.remove(texture);
                 texture->release();
+            }
             for (auto& f : finalizers)
                 f();
         });

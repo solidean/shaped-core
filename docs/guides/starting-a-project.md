@@ -96,7 +96,8 @@ The graphics stack builds in a project as in shaped-core, with a few lines of it
 - **`SC_BUILD_SGL` is ON**: every SGL shader package, shaped-rendering's own among them, compiles with the `sgl` tool at build time, and a consuming project builds no tools otherwise.
   Configure refuses an SGL package without it.
 - **A backend is a target to link**, `shaped-graphics-dx12`, `-vulkan`, `-metal` or `-webgpu`, each present only where it builds: test for it with `if(TARGET ...)`.
-  `SC_HAS_DXC_COMPILER` and `SC_HAS_METAL_COMPILER` say whether the compiler behind an SGL package exists.
+  **SGL needs no DXC**: on dx12 and vulkan it writes DXIL and SPIR-V itself, and `slib::add_available_compilers` registers those edges in a build without DXC.
+  `SC_HAS_DXC_COMPILER` and `SC_HAS_METAL_COMPILER` say whether a compiler for HLSL or MSL exists, which only a package in those languages needs.
 - **Shaders are a package on the executable**: `sc_add_shader_package(TARGET <exe> NAME <pkg> NAMESPACE shaders SOURCE_DIR shaders LANGUAGE sgl SHADERS <file>.sgl:*)`.
   The package stages DXC's DLLs beside its target itself.
 - **On Windows the executable stages its other DLLs**, SDL3's among them: `sc_stage_runtime_dlls(<exe> DLLS "$<TARGET_RUNTIME_DLLS:<exe>>")`.
