@@ -136,10 +136,6 @@ ASYNC_INVOCABLE_TEST("sg - a double's maths, bits and fma compute alike through 
         SKIP("this context takes no native route");
     if (ctx->prefers_native_dxil() || ctx->prefers_native_spirv())
         SKIP("this context takes SGL's binary for every package, so there is no DXC route to compare with");
-    // TEMPORARY(bug-sgl-dxil-double-inverse-sqrt-differs-from-dxc-on-amd): the two routes' shapes round apart there.
-    if (takes_dxil && ctx->metrics.adapter().vendor_id == 0x1002)
-        SKIP("on AMD's dx12 driver a double's inverse_sqrt differs by an ULP between the routes; "
-             "issue: bug-sgl-dxil-double-inverse-sqrt-differs-from-dxc-on-amd");
 
     auto values = double_inputs();
     // (1 + 2^-27)^2 - (1 + 2^-27) is 2^-27 + 2^-54, which a product rounded first loses the last of

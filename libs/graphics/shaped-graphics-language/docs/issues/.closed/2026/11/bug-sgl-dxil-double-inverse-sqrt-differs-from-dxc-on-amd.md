@@ -3,8 +3,8 @@ created: 2026-11-07
 refs:
   - file: libs/graphics/shaped-graphics/tests/shaders/sgl_mixed/double_routes.sgl
   - file: libs/graphics/shaped-graphics/tests/compute/compute-double-maths-test.cc
-claimed-by: Claude (for Philip Trettner)
-claimed-at: 2026-11-26T06:57Z
+closed: 2026-11-26
+resolution: fixed
 ---
 
 # On AMD's dx12 driver, a double's inverse_sqrt differs by an ULP between SGL's DXIL and DXC's
@@ -19,3 +19,11 @@ The fixture runs at `@float(.fast)`, so a rewrite of `a - b` against `a + (-b)` 
 
 Not yet known: which rewrite on our side changes the shape, and whether the result stays within the helper's stated bound on AMD (only the route agreement was checked).
 `TEMPORARY(bug-sgl-dxil-double-inverse-sqrt-differs-from-dxc-on-amd)` skips the bit-for-bit route check on an AMD dx12 context.
+
+## Log
+
+**2026-11-26: fixed in `core.sgl`, by leaving `.fast` no order to choose.**
+`double_inverse_root_of_mantissa`'s Newton step was `y * (1.5 - 0.5 * m * y * y)`, a chain of products and a sum that `.fast` lets DXC's LLVM regroup, and AMD's driver rounds the regrouped shape an ULP apart.
+Each step is now `fma(0.5 * y, fma(-(m * y), y, 1), y)`: one product into each `fma`, so no target has a choice to make, and the residual is computed with one rounding fewer.
+The fixture's route check runs on AMD's dx12 again and agrees to the bit, and Intel's still does.
+Raising the helper to `.precise` was the other way, but CHK-435 would then raise every entry point that takes a double's root.

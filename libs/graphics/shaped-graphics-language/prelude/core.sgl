@@ -183,10 +183,11 @@ fun int4.from_bits(u: uint4) => reinterpret_as_int(u)
     return {m = double.from_bits(uint2(w.x, (w.y & 0x800fffffu) | (exponent << 20u))), j = j, scale = scale}
 
 /// 1 / sqrt(m) for m in 1 to 4: the float's estimate, then two Newton steps take it from 22 bits past 53.
+/// Each step is `fma`s over single products, so `.fast` leaves a target no order to choose and every route rounds alike.
 @internal fun double_inverse_root_of_mantissa(m: double) -> double:
     let mut y = inverse_sqrt(m as float) as double
-    y = y * (1.5f64 - 0.5f64 * m * y * y)
-    return y * (1.5f64 - 0.5f64 * m * y * y)
+    y = fma(0.5f64 * y, fma(-(m * y), y, 1.0f64), y)
+    return fma(0.5f64 * y, fma(-(m * y), y, 1.0f64), y)
 
 /// Within an ULP of the root: the last step corrects by the residual `fma` computes.
 @internal fun double_sqrt(x: double) -> double:
