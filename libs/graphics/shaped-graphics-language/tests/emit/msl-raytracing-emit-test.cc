@@ -57,7 +57,7 @@ TEST("sgl emit msl - every stage of sg's ray-tracing pipeline writes, and all ag
     for (auto const& [entry, text] : stages)
         names.appendf("{} ", entry);
     CHECK(names
-          == "primary sky open_sky shade cutout shadow_cutout sphere shade_sphere reordered_primary "
+          == "primary sky open_sky shade cutout shadow_cutout sphere shade_sphere flagged_primary reordered_primary "
              "hit_reordered_primary inspected_primary pictured_primary "
              "pictured_sky "
              "counted_primary counted_shade counted_sky asserted_primary asserted_shade asserted_sky "
