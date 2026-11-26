@@ -1,0 +1,46 @@
+// Subgroup operations in a raygen, a closest hit and a miss (CHK-376, CHK-568): each stage sums its invocations a subgroup
+// at a time and adds the sum once per subgroup, so the counts are exact however the device groups the invocations.
+require raytracing_pipeline
+require subgroups
+
+binding grouped:
+    world: acceleration_structure[.triangles]
+    // [0] the launches, [1] the raygen's subgroups, [2] the widest column, [3] the closest hits, [4] the misses
+    counts: mut buffer[atomic[uint]]
+
+struct grouped_payload:
+    is_hit: int
+
+rays grouped_rays:
+    surface: grouped_payload
+
+// One ray per cell of an 8 x 8 grid, along +z from z = -1, as raytracing_pipeline.sgl's `primary` traces them.
+@raygen fun grouped_primary(@launch_id id: int3){grouped}:
+    let launched = subgroup_add(1u)
+    let widest = subgroup_max(id.x as uint)
+    if subgroup_elect():
+        grouped.counts[0].add(launched)
+        grouped.counts[1].add(1u)
+        grouped.counts[2].max(widest)
+    let mut p = grouped_payload(0)
+    let r = ray(origin = pos3((id.x as float) + 0.25, (id.y as float) + 0.5, -1.0), direction = vec3(0.0, 0.0, 1.0))
+    trace(grouped.world, r, grouped_rays.surface, mut p)
+
+@closest_hit fun grouped_shade(h: triangle_hit, p: mut grouped_payload){grouped}:
+    p.is_hit = 1
+    let hits = subgroup_add(1u)
+    if subgroup_elect() => grouped.counts[3].add(hits)
+
+@miss fun grouped_sky(p: mut grouped_payload){grouped}:
+    p.is_hit = 0
+    let misses = subgroup_add(1u)
+    if subgroup_elect() => grouped.counts[4].add(misses)
+
+hit_group grouped_hits for grouped_rays:
+    surface = (closest_hit = grouped_shade)
+
+@raytracing pipeline grouped_path:
+    rays = grouped_rays
+    raygen = grouped_primary
+    miss.surface = grouped_sky
+    hit_groups = (grouped_hits)

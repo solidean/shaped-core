@@ -1553,9 +1553,20 @@ A **subgroup** is the invocations the hardware runs in lockstep: a wave on AMD, 
 A **quad** is four of them: in a pixel stage the 2x2 pixels a derivative compares, and in a compute stage four consecutive invocations of a subgroup.
 The stage inputs `@subgroup_size` and `@subgroup_invocation_id` (CHK-271) are its size and this invocation's index in it.
 
-* **CHK-376** The **subgroup operations** are the builtins of the table below; each needs `subgroups` (CHK-322) and is `@stages(.pixel, .compute)` ([why](why/checking.md#chk-376)).
+* **CHK-376** The **subgroup operations** are the builtins of the table below; each needs `subgroups` (CHK-322) ([why](why/checking.md#chk-376)).
+  Each is `@stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable)`, but the quad operations, which are `@stages(.pixel, .compute)`.
   A number is a numeric scalar of the prelude, and every operation that takes a number takes a vector of numbers too, componentwise.
   A lane that names no invocation of the subgroup, at run time, gives a value the language does not specify, whichever operation names it.
+* **CHK-568** `subgroups` grants the raygen, closest-hit, miss and callable stages wherever it grants ray-tracing stages at all ([why](why/checking.md#chk-568)).
+  A device has `subgroups` only if it has the operations in every stage it runs, which sg's `feature::subgroups` says.
+  dx12's `WaveOps` covers DXR's stages already, and metal runs those stages as its raygen kernel and the visible functions it calls.
+  A vulkan device with ray-tracing pipelines has it only where its `supportedStages` holds the four stages' bits too.
+* **CHK-569** In a ray-tracing stage, the subgroup is the invocations the device runs together at the call ([why](why/checking.md#chk-569)).
+  A trace, a callable's call (CHK-344) and a reorder (CHK-433) may regroup them.
+  Uniform control flow is judged as anywhere else, so an operation at a stage's top level, or after a trace that every invocation reached, stands.
+  Its result is a value like any other, but what it says of lanes names the subgroup it was taken in: a ballot's bits, an elect's answer, and a lane a shuffle computed.
+  A regroup between it and its use may have changed that subgroup, and the lane then names another invocation or none, which CHK-376 leaves unspecified.
+* **CHK-570** `@subgroup_size` and `@subgroup_invocation_id` stay pixel and compute inputs (CHK-271), since EMIT-147 reads them at the top of the entry point, which a regroup would leave stale.
 * **CHK-377** A subgroup operation stands only in uniform control flow, judged as CHK-282 judges a barrier, and its result is non-uniform ([why](why/checking.md#chk-377)).
   Control flow that differs between subgroups alone is uniform enough for it (CHK-537).
 * **CHK-378** The lane of `subgroup_broadcast` is a constant `int` from 0 to 127, and the lane of `quad_broadcast` a constant from 0 to 3, or each is `invalid-constant-argument`.

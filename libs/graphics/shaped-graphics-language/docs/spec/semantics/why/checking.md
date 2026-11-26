@@ -792,6 +792,21 @@ An `if` with an `else` is a `case` over a `bool` in all but its spelling, and it
 An arm with an effect, or one that must not be computed, runs only where it is taken.
 That is the control-flow half of HLSL's `?:`; `select` is the other half (CHK-365).
 
+## CHK-568
+
+A feature of its own would make portable code ask a second question that only Vulkan can answer differently, and on Metal it would refuse code whose stages are compute there.
+Vulkan reports subgroup stages per stage because it covers more hardware; D3D12 grants wave operations in every DXR stage with `WaveOps`, so a desktop device with ray tracing has them.
+The cost is a Vulkan device with ray-tracing pipelines whose `supportedStages` lacks one of the four bits: it loses `subgroups` whole.
+Of the reports on vulkan.gpuinfo.org with ray-tracing bits (2026-11-24), 4 of about 3,980 lack the callable bit, and 53 lack the any-hit bit, which these stages do not need.
+The any-hit and intersection stages run as often and in such groups as the traversal decides (CHK-404's reasoning), so a subgroup there is no group a program can reason about.
+
+## CHK-569
+
+DXR and Vulkan let the device regroup a ray-tracing stage's invocations wherever it calls another shader, which is how a hit's invocations come from rays of other launch positions.
+SER's reorder does it on purpose.
+A reduction and an elect taken between two such calls are exact over the invocations that ran them together, which is all a count of a stage's invocations needs.
+Checking that no lane-naming value crosses a regroup would be a data-flow analysis of its own, so the rule states the meaning and leaves the check for later.
+
 ## CHK-376
 
 The whole family is designed at once so that it has one naming pass, one feature and one uniformity rule; the quad swaps a single-pass mip reduction needs are three of them.

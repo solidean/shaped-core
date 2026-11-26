@@ -137,7 +137,9 @@ enum class sg::feature
     shader_int16,
 
     /// A compute or pixel shader may use subgroup operations: vote, ballot, reductions, prefix sums, shuffles and quads.
+    /// A raygen, closest-hit, miss or callable shader may use them too, but the quad ones.
     /// D3D12 grants them with `WaveOps`, Vulkan when its subgroup properties cover those stages and operations.
+    /// A Vulkan device with ray-tracing pipelines must cover the four ray-tracing stages too, or it has none.
     /// Vulkan also needs linear compute derivatives, the groups DXC writes a compute stage's quad operations in.
     /// WebGPU grants them with the optional `subgroups` feature, and Metal always.
     subgroups,

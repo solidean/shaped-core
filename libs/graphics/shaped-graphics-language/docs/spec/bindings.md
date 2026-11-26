@@ -353,7 +353,7 @@ An entry point must declare each of those itself: by its file, by a binding it l
 | a ray-tracing stage, a trace of a ray type, a callable's call | `sg::feature::raytracing_pipeline`, which WebGPU lacks |
 | a value of `half` or of its vectors | `sg::feature::shader_f16`, WebGPU's `shader-f16`; counted where the entry point holds one |
 | a value of `short`, `ushort` or their vectors | `sg::feature::shader_int16`, which WebGPU lacks |
-| a subgroup operation, `@subgroup_size`, `@subgroup_invocation_id` | `sg::feature::subgroups`, WebGPU's `subgroups` |
+| a subgroup operation, `@subgroup_size`, `@subgroup_invocation_id` | `sg::feature::subgroups`, WebGPU's `subgroups`; the operations but the quad ones also take the raygen, closest-hit, miss and callable stages, and a device has it only with them in every stage it runs (CHK-568) |
 | `@coherent` on a member ([Coherent memory](#coherent-memory)) | `sg::feature::device_coherence`, which WebGPU lacks |
 | `@atomic` on an image member ([Atomics](#atomics)) | `sg::feature::image_atomics`, which core WebGPU lacks |
 | `compare_exchange_strong` in a pixel stage ([Atomics](#atomics)) | `sg::feature::helper_lane_query`, which WebGPU lacks |

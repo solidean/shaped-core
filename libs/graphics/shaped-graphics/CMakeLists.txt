@@ -531,6 +531,7 @@ if(SC_BUILD_TESTS)
                 raytracing.sgl:*
                 ptlas_records.sgl:*
                 raytracing_pipeline.sgl:*
+                raytracing_subgroups.sgl:*
                 raytracing_scenes.sgl:*
                 raytracing_transforms.sgl:*
                 raytracing_end_search.sgl:*

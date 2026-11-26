@@ -413,3 +413,55 @@ TEST("sgl check - subgroup_elect needs subgroups, and what it gives differs with
                               "        work.output[li] = if subgroup_elect() => 1.0 else 0.0\n"))
               .contains(non_uniform));
 }
+
+TEST("sgl check - the subgroup operations but the quad ones stand in the raygen, closest-hit, miss and callable stages")
+{
+    // CHK-376, CHK-568: one feature, whatever the stage; the any-hit and intersection stages, and the quad operations,
+    // stay without them, as do the subgroup's stage inputs (CHK-570)
+    auto const pipeline
+        = [](cc::string_view raygen_body, cc::string_view any_hit_body = "    return hit_decision.accept\n")
+    {
+        return reports_for(cc::format("require raytracing_pipeline, subgroups\n"
+                                      "binding frame:\n"
+                                      "    world: acceleration_structure[.triangles]\n"
+                                      "    counts: mut buffer[atomic[uint]]\n"
+                                      "struct radiance:\n"
+                                      "    t: float\n"
+                                      "rays path_rays:\n"
+                                      "    surface: radiance\n"
+                                      "@raygen fun primary(@launch_id id: int3){{frame}}:\n"
+                                      "{}"
+                                      "    let mut p = radiance(0.0)\n"
+                                      "    trace(frame.world, ray(origin = pos3(0.0, 0.0, 0.0), direction = vec3(0.0, "
+                                      "0.0, 1.0)), path_rays.surface, mut p)\n"
+                                      "@miss fun sky(p: mut radiance){{frame}}:\n"
+                                      "    let misses = subgroup_add(1u)\n"
+                                      "    if subgroup_elect() => frame.counts[1].add(misses)\n"
+                                      "@closest_hit fun shade(h: triangle_hit, p: mut radiance){{frame}}:\n"
+                                      "    p.t = subgroup_max(h.t)\n"
+                                      "@any_hit fun decide(c: triangle_candidate, p: mut radiance) -> hit_decision:\n"
+                                      "{}"
+                                      "hit_group shaded for path_rays:\n"
+                                      "    surface = (closest_hit = shade, any_hit = decide)\n"
+                                      "@raytracing pipeline path:\n"
+                                      "    rays = path_rays\n"
+                                      "    raygen = primary\n"
+                                      "    miss.surface = sky\n"
+                                      "    hit_groups = (shaded)\n",
+                                      raygen_body, any_hit_body));
+    };
+    auto const accepted = pipeline("    let most = subgroup_max(id.x as uint)\n"
+                                   "    if subgroup_elect() => frame.counts[0].max(most)\n");
+    CHECK(accepted == "").dump("report", accepted);
+    auto const quad = pipeline("    let x = quad_swap_x(id.x)\n");
+    CHECK(quad.contains("stage-not-allowed")).dump("report", quad);
+    auto const any_hit = pipeline("", "    if subgroup_any(c.t > 1.0) => return hit_decision.ignore\n"
+                                      "    return hit_decision.accept\n");
+    CHECK(any_hit.contains("stage-not-allowed")).dump("report", any_hit);
+    auto const lane = reports_for("require raytracing_pipeline, subgroups\n"
+                                  "binding frame:\n"
+                                  "    counts: mut buffer[atomic[uint]]\n"
+                                  "@raygen fun primary(@launch_id id: int3, @subgroup_size n: int){frame}:\n"
+                                  "    frame.counts[0].add(n as uint)\n");
+    CHECK(lane != "").dump("report", lane);
+}

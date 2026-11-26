@@ -4148,781 +4148,781 @@ struct exchange_result[T]:
 // Each needs `subgroups`, stands only in uniform control flow, and gives a value that differs
 // within a workgroup (CHK-376, CHK-377).
 /// Whether `b` holds in every invocation of the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_all(b: bool) -> bool
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_all(b: bool) -> bool
 /// Whether `b` holds in any invocation of the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_any(b: bool) -> bool
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_any(b: bool) -> bool
 /// Bit `i` set where invocation `i`'s `b` holds.
-@builtin @stages(.pixel, .compute) fun subgroup_ballot(b: bool) -> uint4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_ballot(b: bool) -> uint4
 /// Whether this is the lowest-indexed active invocation of the subgroup, which exactly one is.
-@builtin @stages(.pixel, .compute) fun subgroup_elect() -> bool
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_elect() -> bool
 /// The sum of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_add(x: float) -> float
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_add(x: float) -> float
 /// The sum of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_add(x: float2) -> float2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_add(x: float2) -> float2
 /// The sum of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_add(x: float3) -> float3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_add(x: float3) -> float3
 /// The sum of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_add(x: float4) -> float4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_add(x: float4) -> float4
 /// The sum of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_add(x: int) -> int
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_add(x: int) -> int
 /// The sum of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_add(x: int2) -> int2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_add(x: int2) -> int2
 /// The sum of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_add(x: int3) -> int3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_add(x: int3) -> int3
 /// The sum of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_add(x: int4) -> int4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_add(x: int4) -> int4
 /// The sum of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_add(x: uint) -> uint
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_add(x: uint) -> uint
 /// The sum of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_add(x: uint2) -> uint2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_add(x: uint2) -> uint2
 /// The sum of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_add(x: uint3) -> uint3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_add(x: uint3) -> uint3
 /// The sum of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_add(x: uint4) -> uint4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_add(x: uint4) -> uint4
 /// The sum of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_add(x: half) -> half
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_add(x: half) -> half
 /// The sum of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_add(x: half2) -> half2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_add(x: half2) -> half2
 /// The sum of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_add(x: half3) -> half3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_add(x: half3) -> half3
 /// The sum of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_add(x: half4) -> half4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_add(x: half4) -> half4
 /// The sum of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_add(x: short) -> short
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_add(x: short) -> short
 /// The sum of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_add(x: short2) -> short2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_add(x: short2) -> short2
 /// The sum of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_add(x: short3) -> short3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_add(x: short3) -> short3
 /// The sum of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_add(x: short4) -> short4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_add(x: short4) -> short4
 /// The sum of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_add(x: ushort) -> ushort
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_add(x: ushort) -> ushort
 /// The sum of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_add(x: ushort2) -> ushort2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_add(x: ushort2) -> ushort2
 /// The sum of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_add(x: ushort3) -> ushort3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_add(x: ushort3) -> ushort3
 /// The sum of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_add(x: ushort4) -> ushort4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_add(x: ushort4) -> ushort4
 /// The product of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_mul(x: float) -> float
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_mul(x: float) -> float
 /// The product of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_mul(x: float2) -> float2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_mul(x: float2) -> float2
 /// The product of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_mul(x: float3) -> float3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_mul(x: float3) -> float3
 /// The product of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_mul(x: float4) -> float4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_mul(x: float4) -> float4
 /// The product of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_mul(x: int) -> int
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_mul(x: int) -> int
 /// The product of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_mul(x: int2) -> int2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_mul(x: int2) -> int2
 /// The product of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_mul(x: int3) -> int3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_mul(x: int3) -> int3
 /// The product of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_mul(x: int4) -> int4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_mul(x: int4) -> int4
 /// The product of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_mul(x: uint) -> uint
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_mul(x: uint) -> uint
 /// The product of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_mul(x: uint2) -> uint2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_mul(x: uint2) -> uint2
 /// The product of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_mul(x: uint3) -> uint3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_mul(x: uint3) -> uint3
 /// The product of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_mul(x: uint4) -> uint4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_mul(x: uint4) -> uint4
 /// The product of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_mul(x: half) -> half
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_mul(x: half) -> half
 /// The product of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_mul(x: half2) -> half2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_mul(x: half2) -> half2
 /// The product of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_mul(x: half3) -> half3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_mul(x: half3) -> half3
 /// The product of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_mul(x: half4) -> half4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_mul(x: half4) -> half4
 /// The product of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_mul(x: short) -> short
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_mul(x: short) -> short
 /// The product of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_mul(x: short2) -> short2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_mul(x: short2) -> short2
 /// The product of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_mul(x: short3) -> short3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_mul(x: short3) -> short3
 /// The product of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_mul(x: short4) -> short4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_mul(x: short4) -> short4
 /// The product of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_mul(x: ushort) -> ushort
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_mul(x: ushort) -> ushort
 /// The product of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_mul(x: ushort2) -> ushort2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_mul(x: ushort2) -> ushort2
 /// The product of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_mul(x: ushort3) -> ushort3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_mul(x: ushort3) -> ushort3
 /// The product of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_mul(x: ushort4) -> ushort4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_mul(x: ushort4) -> ushort4
 /// The minimum of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_min(x: float) -> float
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_min(x: float) -> float
 /// The minimum of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_min(x: float2) -> float2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_min(x: float2) -> float2
 /// The minimum of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_min(x: float3) -> float3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_min(x: float3) -> float3
 /// The minimum of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_min(x: float4) -> float4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_min(x: float4) -> float4
 /// The minimum of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_min(x: int) -> int
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_min(x: int) -> int
 /// The minimum of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_min(x: int2) -> int2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_min(x: int2) -> int2
 /// The minimum of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_min(x: int3) -> int3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_min(x: int3) -> int3
 /// The minimum of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_min(x: int4) -> int4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_min(x: int4) -> int4
 /// The minimum of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_min(x: uint) -> uint
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_min(x: uint) -> uint
 /// The minimum of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_min(x: uint2) -> uint2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_min(x: uint2) -> uint2
 /// The minimum of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_min(x: uint3) -> uint3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_min(x: uint3) -> uint3
 /// The minimum of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_min(x: uint4) -> uint4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_min(x: uint4) -> uint4
 /// The minimum of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_min(x: half) -> half
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_min(x: half) -> half
 /// The minimum of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_min(x: half2) -> half2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_min(x: half2) -> half2
 /// The minimum of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_min(x: half3) -> half3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_min(x: half3) -> half3
 /// The minimum of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_min(x: half4) -> half4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_min(x: half4) -> half4
 /// The minimum of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_min(x: short) -> short
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_min(x: short) -> short
 /// The minimum of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_min(x: short2) -> short2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_min(x: short2) -> short2
 /// The minimum of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_min(x: short3) -> short3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_min(x: short3) -> short3
 /// The minimum of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_min(x: short4) -> short4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_min(x: short4) -> short4
 /// The minimum of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_min(x: ushort) -> ushort
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_min(x: ushort) -> ushort
 /// The minimum of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_min(x: ushort2) -> ushort2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_min(x: ushort2) -> ushort2
 /// The minimum of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_min(x: ushort3) -> ushort3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_min(x: ushort3) -> ushort3
 /// The minimum of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_min(x: ushort4) -> ushort4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_min(x: ushort4) -> ushort4
 /// The maximum of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_max(x: float) -> float
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_max(x: float) -> float
 /// The maximum of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_max(x: float2) -> float2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_max(x: float2) -> float2
 /// The maximum of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_max(x: float3) -> float3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_max(x: float3) -> float3
 /// The maximum of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_max(x: float4) -> float4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_max(x: float4) -> float4
 /// The maximum of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_max(x: int) -> int
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_max(x: int) -> int
 /// The maximum of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_max(x: int2) -> int2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_max(x: int2) -> int2
 /// The maximum of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_max(x: int3) -> int3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_max(x: int3) -> int3
 /// The maximum of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_max(x: int4) -> int4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_max(x: int4) -> int4
 /// The maximum of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_max(x: uint) -> uint
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_max(x: uint) -> uint
 /// The maximum of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_max(x: uint2) -> uint2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_max(x: uint2) -> uint2
 /// The maximum of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_max(x: uint3) -> uint3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_max(x: uint3) -> uint3
 /// The maximum of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_max(x: uint4) -> uint4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_max(x: uint4) -> uint4
 /// The maximum of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_max(x: half) -> half
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_max(x: half) -> half
 /// The maximum of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_max(x: half2) -> half2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_max(x: half2) -> half2
 /// The maximum of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_max(x: half3) -> half3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_max(x: half3) -> half3
 /// The maximum of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_max(x: half4) -> half4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_max(x: half4) -> half4
 /// The maximum of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_max(x: short) -> short
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_max(x: short) -> short
 /// The maximum of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_max(x: short2) -> short2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_max(x: short2) -> short2
 /// The maximum of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_max(x: short3) -> short3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_max(x: short3) -> short3
 /// The maximum of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_max(x: short4) -> short4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_max(x: short4) -> short4
 /// The maximum of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_max(x: ushort) -> ushort
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_max(x: ushort) -> ushort
 /// The maximum of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_max(x: ushort2) -> ushort2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_max(x: ushort2) -> ushort2
 /// The maximum of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_max(x: ushort3) -> ushort3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_max(x: ushort3) -> ushort3
 /// The maximum of `x` over the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_max(x: ushort4) -> ushort4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_max(x: ushort4) -> ushort4
 /// The bits `x` has in every invocation of the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_bit_and(x: int) -> int
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_bit_and(x: int) -> int
 /// The bits `x` has in every invocation of the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_bit_and(x: int2) -> int2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_bit_and(x: int2) -> int2
 /// The bits `x` has in every invocation of the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_bit_and(x: int3) -> int3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_bit_and(x: int3) -> int3
 /// The bits `x` has in every invocation of the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_bit_and(x: int4) -> int4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_bit_and(x: int4) -> int4
 /// The bits `x` has in every invocation of the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_bit_and(x: uint) -> uint
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_bit_and(x: uint) -> uint
 /// The bits `x` has in every invocation of the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_bit_and(x: uint2) -> uint2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_bit_and(x: uint2) -> uint2
 /// The bits `x` has in every invocation of the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_bit_and(x: uint3) -> uint3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_bit_and(x: uint3) -> uint3
 /// The bits `x` has in every invocation of the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_bit_and(x: uint4) -> uint4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_bit_and(x: uint4) -> uint4
 /// The bits `x` has in every invocation of the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_bit_and(x: short) -> short
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_bit_and(x: short) -> short
 /// The bits `x` has in every invocation of the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_bit_and(x: short2) -> short2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_bit_and(x: short2) -> short2
 /// The bits `x` has in every invocation of the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_bit_and(x: short3) -> short3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_bit_and(x: short3) -> short3
 /// The bits `x` has in every invocation of the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_bit_and(x: short4) -> short4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_bit_and(x: short4) -> short4
 /// The bits `x` has in every invocation of the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_bit_and(x: ushort) -> ushort
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_bit_and(x: ushort) -> ushort
 /// The bits `x` has in every invocation of the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_bit_and(x: ushort2) -> ushort2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_bit_and(x: ushort2) -> ushort2
 /// The bits `x` has in every invocation of the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_bit_and(x: ushort3) -> ushort3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_bit_and(x: ushort3) -> ushort3
 /// The bits `x` has in every invocation of the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_bit_and(x: ushort4) -> ushort4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_bit_and(x: ushort4) -> ushort4
 /// The bits `x` has in any invocation of the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_bit_or(x: int) -> int
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_bit_or(x: int) -> int
 /// The bits `x` has in any invocation of the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_bit_or(x: int2) -> int2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_bit_or(x: int2) -> int2
 /// The bits `x` has in any invocation of the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_bit_or(x: int3) -> int3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_bit_or(x: int3) -> int3
 /// The bits `x` has in any invocation of the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_bit_or(x: int4) -> int4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_bit_or(x: int4) -> int4
 /// The bits `x` has in any invocation of the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_bit_or(x: uint) -> uint
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_bit_or(x: uint) -> uint
 /// The bits `x` has in any invocation of the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_bit_or(x: uint2) -> uint2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_bit_or(x: uint2) -> uint2
 /// The bits `x` has in any invocation of the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_bit_or(x: uint3) -> uint3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_bit_or(x: uint3) -> uint3
 /// The bits `x` has in any invocation of the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_bit_or(x: uint4) -> uint4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_bit_or(x: uint4) -> uint4
 /// The bits `x` has in any invocation of the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_bit_or(x: short) -> short
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_bit_or(x: short) -> short
 /// The bits `x` has in any invocation of the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_bit_or(x: short2) -> short2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_bit_or(x: short2) -> short2
 /// The bits `x` has in any invocation of the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_bit_or(x: short3) -> short3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_bit_or(x: short3) -> short3
 /// The bits `x` has in any invocation of the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_bit_or(x: short4) -> short4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_bit_or(x: short4) -> short4
 /// The bits `x` has in any invocation of the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_bit_or(x: ushort) -> ushort
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_bit_or(x: ushort) -> ushort
 /// The bits `x` has in any invocation of the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_bit_or(x: ushort2) -> ushort2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_bit_or(x: ushort2) -> ushort2
 /// The bits `x` has in any invocation of the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_bit_or(x: ushort3) -> ushort3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_bit_or(x: ushort3) -> ushort3
 /// The bits `x` has in any invocation of the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_bit_or(x: ushort4) -> ushort4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_bit_or(x: ushort4) -> ushort4
 /// The bits `x` has in an odd number of invocations of the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_bit_xor(x: int) -> int
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_bit_xor(x: int) -> int
 /// The bits `x` has in an odd number of invocations of the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_bit_xor(x: int2) -> int2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_bit_xor(x: int2) -> int2
 /// The bits `x` has in an odd number of invocations of the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_bit_xor(x: int3) -> int3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_bit_xor(x: int3) -> int3
 /// The bits `x` has in an odd number of invocations of the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_bit_xor(x: int4) -> int4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_bit_xor(x: int4) -> int4
 /// The bits `x` has in an odd number of invocations of the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_bit_xor(x: uint) -> uint
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_bit_xor(x: uint) -> uint
 /// The bits `x` has in an odd number of invocations of the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_bit_xor(x: uint2) -> uint2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_bit_xor(x: uint2) -> uint2
 /// The bits `x` has in an odd number of invocations of the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_bit_xor(x: uint3) -> uint3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_bit_xor(x: uint3) -> uint3
 /// The bits `x` has in an odd number of invocations of the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_bit_xor(x: uint4) -> uint4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_bit_xor(x: uint4) -> uint4
 /// The bits `x` has in an odd number of invocations of the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_bit_xor(x: short) -> short
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_bit_xor(x: short) -> short
 /// The bits `x` has in an odd number of invocations of the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_bit_xor(x: short2) -> short2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_bit_xor(x: short2) -> short2
 /// The bits `x` has in an odd number of invocations of the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_bit_xor(x: short3) -> short3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_bit_xor(x: short3) -> short3
 /// The bits `x` has in an odd number of invocations of the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_bit_xor(x: short4) -> short4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_bit_xor(x: short4) -> short4
 /// The bits `x` has in an odd number of invocations of the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_bit_xor(x: ushort) -> ushort
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_bit_xor(x: ushort) -> ushort
 /// The bits `x` has in an odd number of invocations of the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_bit_xor(x: ushort2) -> ushort2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_bit_xor(x: ushort2) -> ushort2
 /// The bits `x` has in an odd number of invocations of the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_bit_xor(x: ushort3) -> ushort3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_bit_xor(x: ushort3) -> ushort3
 /// The bits `x` has in an odd number of invocations of the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_bit_xor(x: ushort4) -> ushort4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_bit_xor(x: ushort4) -> ushort4
 /// The sum of `x` over the invocations below this one.
-@builtin @stages(.pixel, .compute) fun subgroup_exclusive_add(x: float) -> float
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_exclusive_add(x: float) -> float
 /// The sum of `x` over the invocations below this one.
-@builtin @stages(.pixel, .compute) fun subgroup_exclusive_add(x: float2) -> float2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_exclusive_add(x: float2) -> float2
 /// The sum of `x` over the invocations below this one.
-@builtin @stages(.pixel, .compute) fun subgroup_exclusive_add(x: float3) -> float3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_exclusive_add(x: float3) -> float3
 /// The sum of `x` over the invocations below this one.
-@builtin @stages(.pixel, .compute) fun subgroup_exclusive_add(x: float4) -> float4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_exclusive_add(x: float4) -> float4
 /// The sum of `x` over the invocations below this one.
-@builtin @stages(.pixel, .compute) fun subgroup_exclusive_add(x: int) -> int
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_exclusive_add(x: int) -> int
 /// The sum of `x` over the invocations below this one.
-@builtin @stages(.pixel, .compute) fun subgroup_exclusive_add(x: int2) -> int2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_exclusive_add(x: int2) -> int2
 /// The sum of `x` over the invocations below this one.
-@builtin @stages(.pixel, .compute) fun subgroup_exclusive_add(x: int3) -> int3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_exclusive_add(x: int3) -> int3
 /// The sum of `x` over the invocations below this one.
-@builtin @stages(.pixel, .compute) fun subgroup_exclusive_add(x: int4) -> int4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_exclusive_add(x: int4) -> int4
 /// The sum of `x` over the invocations below this one.
-@builtin @stages(.pixel, .compute) fun subgroup_exclusive_add(x: uint) -> uint
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_exclusive_add(x: uint) -> uint
 /// The sum of `x` over the invocations below this one.
-@builtin @stages(.pixel, .compute) fun subgroup_exclusive_add(x: uint2) -> uint2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_exclusive_add(x: uint2) -> uint2
 /// The sum of `x` over the invocations below this one.
-@builtin @stages(.pixel, .compute) fun subgroup_exclusive_add(x: uint3) -> uint3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_exclusive_add(x: uint3) -> uint3
 /// The sum of `x` over the invocations below this one.
-@builtin @stages(.pixel, .compute) fun subgroup_exclusive_add(x: uint4) -> uint4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_exclusive_add(x: uint4) -> uint4
 /// The sum of `x` over the invocations below this one.
-@builtin @stages(.pixel, .compute) fun subgroup_exclusive_add(x: half) -> half
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_exclusive_add(x: half) -> half
 /// The sum of `x` over the invocations below this one.
-@builtin @stages(.pixel, .compute) fun subgroup_exclusive_add(x: half2) -> half2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_exclusive_add(x: half2) -> half2
 /// The sum of `x` over the invocations below this one.
-@builtin @stages(.pixel, .compute) fun subgroup_exclusive_add(x: half3) -> half3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_exclusive_add(x: half3) -> half3
 /// The sum of `x` over the invocations below this one.
-@builtin @stages(.pixel, .compute) fun subgroup_exclusive_add(x: half4) -> half4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_exclusive_add(x: half4) -> half4
 /// The sum of `x` over the invocations below this one.
-@builtin @stages(.pixel, .compute) fun subgroup_exclusive_add(x: short) -> short
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_exclusive_add(x: short) -> short
 /// The sum of `x` over the invocations below this one.
-@builtin @stages(.pixel, .compute) fun subgroup_exclusive_add(x: short2) -> short2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_exclusive_add(x: short2) -> short2
 /// The sum of `x` over the invocations below this one.
-@builtin @stages(.pixel, .compute) fun subgroup_exclusive_add(x: short3) -> short3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_exclusive_add(x: short3) -> short3
 /// The sum of `x` over the invocations below this one.
-@builtin @stages(.pixel, .compute) fun subgroup_exclusive_add(x: short4) -> short4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_exclusive_add(x: short4) -> short4
 /// The sum of `x` over the invocations below this one.
-@builtin @stages(.pixel, .compute) fun subgroup_exclusive_add(x: ushort) -> ushort
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_exclusive_add(x: ushort) -> ushort
 /// The sum of `x` over the invocations below this one.
-@builtin @stages(.pixel, .compute) fun subgroup_exclusive_add(x: ushort2) -> ushort2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_exclusive_add(x: ushort2) -> ushort2
 /// The sum of `x` over the invocations below this one.
-@builtin @stages(.pixel, .compute) fun subgroup_exclusive_add(x: ushort3) -> ushort3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_exclusive_add(x: ushort3) -> ushort3
 /// The sum of `x` over the invocations below this one.
-@builtin @stages(.pixel, .compute) fun subgroup_exclusive_add(x: ushort4) -> ushort4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_exclusive_add(x: ushort4) -> ushort4
 /// The product of `x` over the invocations below this one.
-@builtin @stages(.pixel, .compute) fun subgroup_exclusive_mul(x: float) -> float
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_exclusive_mul(x: float) -> float
 /// The product of `x` over the invocations below this one.
-@builtin @stages(.pixel, .compute) fun subgroup_exclusive_mul(x: float2) -> float2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_exclusive_mul(x: float2) -> float2
 /// The product of `x` over the invocations below this one.
-@builtin @stages(.pixel, .compute) fun subgroup_exclusive_mul(x: float3) -> float3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_exclusive_mul(x: float3) -> float3
 /// The product of `x` over the invocations below this one.
-@builtin @stages(.pixel, .compute) fun subgroup_exclusive_mul(x: float4) -> float4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_exclusive_mul(x: float4) -> float4
 /// The product of `x` over the invocations below this one.
-@builtin @stages(.pixel, .compute) fun subgroup_exclusive_mul(x: int) -> int
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_exclusive_mul(x: int) -> int
 /// The product of `x` over the invocations below this one.
-@builtin @stages(.pixel, .compute) fun subgroup_exclusive_mul(x: int2) -> int2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_exclusive_mul(x: int2) -> int2
 /// The product of `x` over the invocations below this one.
-@builtin @stages(.pixel, .compute) fun subgroup_exclusive_mul(x: int3) -> int3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_exclusive_mul(x: int3) -> int3
 /// The product of `x` over the invocations below this one.
-@builtin @stages(.pixel, .compute) fun subgroup_exclusive_mul(x: int4) -> int4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_exclusive_mul(x: int4) -> int4
 /// The product of `x` over the invocations below this one.
-@builtin @stages(.pixel, .compute) fun subgroup_exclusive_mul(x: uint) -> uint
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_exclusive_mul(x: uint) -> uint
 /// The product of `x` over the invocations below this one.
-@builtin @stages(.pixel, .compute) fun subgroup_exclusive_mul(x: uint2) -> uint2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_exclusive_mul(x: uint2) -> uint2
 /// The product of `x` over the invocations below this one.
-@builtin @stages(.pixel, .compute) fun subgroup_exclusive_mul(x: uint3) -> uint3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_exclusive_mul(x: uint3) -> uint3
 /// The product of `x` over the invocations below this one.
-@builtin @stages(.pixel, .compute) fun subgroup_exclusive_mul(x: uint4) -> uint4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_exclusive_mul(x: uint4) -> uint4
 /// The product of `x` over the invocations below this one.
-@builtin @stages(.pixel, .compute) fun subgroup_exclusive_mul(x: half) -> half
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_exclusive_mul(x: half) -> half
 /// The product of `x` over the invocations below this one.
-@builtin @stages(.pixel, .compute) fun subgroup_exclusive_mul(x: half2) -> half2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_exclusive_mul(x: half2) -> half2
 /// The product of `x` over the invocations below this one.
-@builtin @stages(.pixel, .compute) fun subgroup_exclusive_mul(x: half3) -> half3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_exclusive_mul(x: half3) -> half3
 /// The product of `x` over the invocations below this one.
-@builtin @stages(.pixel, .compute) fun subgroup_exclusive_mul(x: half4) -> half4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_exclusive_mul(x: half4) -> half4
 /// The product of `x` over the invocations below this one.
-@builtin @stages(.pixel, .compute) fun subgroup_exclusive_mul(x: short) -> short
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_exclusive_mul(x: short) -> short
 /// The product of `x` over the invocations below this one.
-@builtin @stages(.pixel, .compute) fun subgroup_exclusive_mul(x: short2) -> short2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_exclusive_mul(x: short2) -> short2
 /// The product of `x` over the invocations below this one.
-@builtin @stages(.pixel, .compute) fun subgroup_exclusive_mul(x: short3) -> short3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_exclusive_mul(x: short3) -> short3
 /// The product of `x` over the invocations below this one.
-@builtin @stages(.pixel, .compute) fun subgroup_exclusive_mul(x: short4) -> short4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_exclusive_mul(x: short4) -> short4
 /// The product of `x` over the invocations below this one.
-@builtin @stages(.pixel, .compute) fun subgroup_exclusive_mul(x: ushort) -> ushort
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_exclusive_mul(x: ushort) -> ushort
 /// The product of `x` over the invocations below this one.
-@builtin @stages(.pixel, .compute) fun subgroup_exclusive_mul(x: ushort2) -> ushort2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_exclusive_mul(x: ushort2) -> ushort2
 /// The product of `x` over the invocations below this one.
-@builtin @stages(.pixel, .compute) fun subgroup_exclusive_mul(x: ushort3) -> ushort3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_exclusive_mul(x: ushort3) -> ushort3
 /// The product of `x` over the invocations below this one.
-@builtin @stages(.pixel, .compute) fun subgroup_exclusive_mul(x: ushort4) -> ushort4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_exclusive_mul(x: ushort4) -> ushort4
 /// The sum of `x` over the invocations below this one and this one.
-@builtin @stages(.pixel, .compute) fun subgroup_inclusive_add(x: float) -> float
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_inclusive_add(x: float) -> float
 /// The sum of `x` over the invocations below this one and this one.
-@builtin @stages(.pixel, .compute) fun subgroup_inclusive_add(x: float2) -> float2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_inclusive_add(x: float2) -> float2
 /// The sum of `x` over the invocations below this one and this one.
-@builtin @stages(.pixel, .compute) fun subgroup_inclusive_add(x: float3) -> float3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_inclusive_add(x: float3) -> float3
 /// The sum of `x` over the invocations below this one and this one.
-@builtin @stages(.pixel, .compute) fun subgroup_inclusive_add(x: float4) -> float4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_inclusive_add(x: float4) -> float4
 /// The sum of `x` over the invocations below this one and this one.
-@builtin @stages(.pixel, .compute) fun subgroup_inclusive_add(x: int) -> int
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_inclusive_add(x: int) -> int
 /// The sum of `x` over the invocations below this one and this one.
-@builtin @stages(.pixel, .compute) fun subgroup_inclusive_add(x: int2) -> int2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_inclusive_add(x: int2) -> int2
 /// The sum of `x` over the invocations below this one and this one.
-@builtin @stages(.pixel, .compute) fun subgroup_inclusive_add(x: int3) -> int3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_inclusive_add(x: int3) -> int3
 /// The sum of `x` over the invocations below this one and this one.
-@builtin @stages(.pixel, .compute) fun subgroup_inclusive_add(x: int4) -> int4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_inclusive_add(x: int4) -> int4
 /// The sum of `x` over the invocations below this one and this one.
-@builtin @stages(.pixel, .compute) fun subgroup_inclusive_add(x: uint) -> uint
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_inclusive_add(x: uint) -> uint
 /// The sum of `x` over the invocations below this one and this one.
-@builtin @stages(.pixel, .compute) fun subgroup_inclusive_add(x: uint2) -> uint2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_inclusive_add(x: uint2) -> uint2
 /// The sum of `x` over the invocations below this one and this one.
-@builtin @stages(.pixel, .compute) fun subgroup_inclusive_add(x: uint3) -> uint3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_inclusive_add(x: uint3) -> uint3
 /// The sum of `x` over the invocations below this one and this one.
-@builtin @stages(.pixel, .compute) fun subgroup_inclusive_add(x: uint4) -> uint4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_inclusive_add(x: uint4) -> uint4
 /// The sum of `x` over the invocations below this one and this one.
-@builtin @stages(.pixel, .compute) fun subgroup_inclusive_add(x: half) -> half
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_inclusive_add(x: half) -> half
 /// The sum of `x` over the invocations below this one and this one.
-@builtin @stages(.pixel, .compute) fun subgroup_inclusive_add(x: half2) -> half2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_inclusive_add(x: half2) -> half2
 /// The sum of `x` over the invocations below this one and this one.
-@builtin @stages(.pixel, .compute) fun subgroup_inclusive_add(x: half3) -> half3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_inclusive_add(x: half3) -> half3
 /// The sum of `x` over the invocations below this one and this one.
-@builtin @stages(.pixel, .compute) fun subgroup_inclusive_add(x: half4) -> half4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_inclusive_add(x: half4) -> half4
 /// The sum of `x` over the invocations below this one and this one.
-@builtin @stages(.pixel, .compute) fun subgroup_inclusive_add(x: short) -> short
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_inclusive_add(x: short) -> short
 /// The sum of `x` over the invocations below this one and this one.
-@builtin @stages(.pixel, .compute) fun subgroup_inclusive_add(x: short2) -> short2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_inclusive_add(x: short2) -> short2
 /// The sum of `x` over the invocations below this one and this one.
-@builtin @stages(.pixel, .compute) fun subgroup_inclusive_add(x: short3) -> short3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_inclusive_add(x: short3) -> short3
 /// The sum of `x` over the invocations below this one and this one.
-@builtin @stages(.pixel, .compute) fun subgroup_inclusive_add(x: short4) -> short4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_inclusive_add(x: short4) -> short4
 /// The sum of `x` over the invocations below this one and this one.
-@builtin @stages(.pixel, .compute) fun subgroup_inclusive_add(x: ushort) -> ushort
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_inclusive_add(x: ushort) -> ushort
 /// The sum of `x` over the invocations below this one and this one.
-@builtin @stages(.pixel, .compute) fun subgroup_inclusive_add(x: ushort2) -> ushort2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_inclusive_add(x: ushort2) -> ushort2
 /// The sum of `x` over the invocations below this one and this one.
-@builtin @stages(.pixel, .compute) fun subgroup_inclusive_add(x: ushort3) -> ushort3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_inclusive_add(x: ushort3) -> ushort3
 /// The sum of `x` over the invocations below this one and this one.
-@builtin @stages(.pixel, .compute) fun subgroup_inclusive_add(x: ushort4) -> ushort4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_inclusive_add(x: ushort4) -> ushort4
 /// The product of `x` over the invocations below this one and this one.
-@builtin @stages(.pixel, .compute) fun subgroup_inclusive_mul(x: float) -> float
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_inclusive_mul(x: float) -> float
 /// The product of `x` over the invocations below this one and this one.
-@builtin @stages(.pixel, .compute) fun subgroup_inclusive_mul(x: float2) -> float2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_inclusive_mul(x: float2) -> float2
 /// The product of `x` over the invocations below this one and this one.
-@builtin @stages(.pixel, .compute) fun subgroup_inclusive_mul(x: float3) -> float3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_inclusive_mul(x: float3) -> float3
 /// The product of `x` over the invocations below this one and this one.
-@builtin @stages(.pixel, .compute) fun subgroup_inclusive_mul(x: float4) -> float4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_inclusive_mul(x: float4) -> float4
 /// The product of `x` over the invocations below this one and this one.
-@builtin @stages(.pixel, .compute) fun subgroup_inclusive_mul(x: int) -> int
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_inclusive_mul(x: int) -> int
 /// The product of `x` over the invocations below this one and this one.
-@builtin @stages(.pixel, .compute) fun subgroup_inclusive_mul(x: int2) -> int2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_inclusive_mul(x: int2) -> int2
 /// The product of `x` over the invocations below this one and this one.
-@builtin @stages(.pixel, .compute) fun subgroup_inclusive_mul(x: int3) -> int3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_inclusive_mul(x: int3) -> int3
 /// The product of `x` over the invocations below this one and this one.
-@builtin @stages(.pixel, .compute) fun subgroup_inclusive_mul(x: int4) -> int4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_inclusive_mul(x: int4) -> int4
 /// The product of `x` over the invocations below this one and this one.
-@builtin @stages(.pixel, .compute) fun subgroup_inclusive_mul(x: uint) -> uint
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_inclusive_mul(x: uint) -> uint
 /// The product of `x` over the invocations below this one and this one.
-@builtin @stages(.pixel, .compute) fun subgroup_inclusive_mul(x: uint2) -> uint2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_inclusive_mul(x: uint2) -> uint2
 /// The product of `x` over the invocations below this one and this one.
-@builtin @stages(.pixel, .compute) fun subgroup_inclusive_mul(x: uint3) -> uint3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_inclusive_mul(x: uint3) -> uint3
 /// The product of `x` over the invocations below this one and this one.
-@builtin @stages(.pixel, .compute) fun subgroup_inclusive_mul(x: uint4) -> uint4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_inclusive_mul(x: uint4) -> uint4
 /// The product of `x` over the invocations below this one and this one.
-@builtin @stages(.pixel, .compute) fun subgroup_inclusive_mul(x: half) -> half
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_inclusive_mul(x: half) -> half
 /// The product of `x` over the invocations below this one and this one.
-@builtin @stages(.pixel, .compute) fun subgroup_inclusive_mul(x: half2) -> half2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_inclusive_mul(x: half2) -> half2
 /// The product of `x` over the invocations below this one and this one.
-@builtin @stages(.pixel, .compute) fun subgroup_inclusive_mul(x: half3) -> half3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_inclusive_mul(x: half3) -> half3
 /// The product of `x` over the invocations below this one and this one.
-@builtin @stages(.pixel, .compute) fun subgroup_inclusive_mul(x: half4) -> half4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_inclusive_mul(x: half4) -> half4
 /// The product of `x` over the invocations below this one and this one.
-@builtin @stages(.pixel, .compute) fun subgroup_inclusive_mul(x: short) -> short
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_inclusive_mul(x: short) -> short
 /// The product of `x` over the invocations below this one and this one.
-@builtin @stages(.pixel, .compute) fun subgroup_inclusive_mul(x: short2) -> short2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_inclusive_mul(x: short2) -> short2
 /// The product of `x` over the invocations below this one and this one.
-@builtin @stages(.pixel, .compute) fun subgroup_inclusive_mul(x: short3) -> short3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_inclusive_mul(x: short3) -> short3
 /// The product of `x` over the invocations below this one and this one.
-@builtin @stages(.pixel, .compute) fun subgroup_inclusive_mul(x: short4) -> short4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_inclusive_mul(x: short4) -> short4
 /// The product of `x` over the invocations below this one and this one.
-@builtin @stages(.pixel, .compute) fun subgroup_inclusive_mul(x: ushort) -> ushort
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_inclusive_mul(x: ushort) -> ushort
 /// The product of `x` over the invocations below this one and this one.
-@builtin @stages(.pixel, .compute) fun subgroup_inclusive_mul(x: ushort2) -> ushort2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_inclusive_mul(x: ushort2) -> ushort2
 /// The product of `x` over the invocations below this one and this one.
-@builtin @stages(.pixel, .compute) fun subgroup_inclusive_mul(x: ushort3) -> ushort3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_inclusive_mul(x: ushort3) -> ushort3
 /// The product of `x` over the invocations below this one and this one.
-@builtin @stages(.pixel, .compute) fun subgroup_inclusive_mul(x: ushort4) -> ushort4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_inclusive_mul(x: ushort4) -> ushort4
 /// `x` of the invocation `lane`, a constant from 0 to 127 (CHK-378).
-@builtin @stages(.pixel, .compute) fun subgroup_broadcast(x: float, lane: int) -> float
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_broadcast(x: float, lane: int) -> float
 /// `x` of the invocation `lane`, a constant from 0 to 127 (CHK-378).
-@builtin @stages(.pixel, .compute) fun subgroup_broadcast(x: float2, lane: int) -> float2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_broadcast(x: float2, lane: int) -> float2
 /// `x` of the invocation `lane`, a constant from 0 to 127 (CHK-378).
-@builtin @stages(.pixel, .compute) fun subgroup_broadcast(x: float3, lane: int) -> float3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_broadcast(x: float3, lane: int) -> float3
 /// `x` of the invocation `lane`, a constant from 0 to 127 (CHK-378).
-@builtin @stages(.pixel, .compute) fun subgroup_broadcast(x: float4, lane: int) -> float4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_broadcast(x: float4, lane: int) -> float4
 /// `x` of the invocation `lane`, a constant from 0 to 127 (CHK-378).
-@builtin @stages(.pixel, .compute) fun subgroup_broadcast(x: int, lane: int) -> int
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_broadcast(x: int, lane: int) -> int
 /// `x` of the invocation `lane`, a constant from 0 to 127 (CHK-378).
-@builtin @stages(.pixel, .compute) fun subgroup_broadcast(x: int2, lane: int) -> int2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_broadcast(x: int2, lane: int) -> int2
 /// `x` of the invocation `lane`, a constant from 0 to 127 (CHK-378).
-@builtin @stages(.pixel, .compute) fun subgroup_broadcast(x: int3, lane: int) -> int3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_broadcast(x: int3, lane: int) -> int3
 /// `x` of the invocation `lane`, a constant from 0 to 127 (CHK-378).
-@builtin @stages(.pixel, .compute) fun subgroup_broadcast(x: int4, lane: int) -> int4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_broadcast(x: int4, lane: int) -> int4
 /// `x` of the invocation `lane`, a constant from 0 to 127 (CHK-378).
-@builtin @stages(.pixel, .compute) fun subgroup_broadcast(x: uint, lane: int) -> uint
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_broadcast(x: uint, lane: int) -> uint
 /// `x` of the invocation `lane`, a constant from 0 to 127 (CHK-378).
-@builtin @stages(.pixel, .compute) fun subgroup_broadcast(x: uint2, lane: int) -> uint2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_broadcast(x: uint2, lane: int) -> uint2
 /// `x` of the invocation `lane`, a constant from 0 to 127 (CHK-378).
-@builtin @stages(.pixel, .compute) fun subgroup_broadcast(x: uint3, lane: int) -> uint3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_broadcast(x: uint3, lane: int) -> uint3
 /// `x` of the invocation `lane`, a constant from 0 to 127 (CHK-378).
-@builtin @stages(.pixel, .compute) fun subgroup_broadcast(x: uint4, lane: int) -> uint4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_broadcast(x: uint4, lane: int) -> uint4
 /// `x` of the invocation `lane`, a constant from 0 to 127 (CHK-378).
-@builtin @stages(.pixel, .compute) fun subgroup_broadcast(x: half, lane: int) -> half
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_broadcast(x: half, lane: int) -> half
 /// `x` of the invocation `lane`, a constant from 0 to 127 (CHK-378).
-@builtin @stages(.pixel, .compute) fun subgroup_broadcast(x: half2, lane: int) -> half2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_broadcast(x: half2, lane: int) -> half2
 /// `x` of the invocation `lane`, a constant from 0 to 127 (CHK-378).
-@builtin @stages(.pixel, .compute) fun subgroup_broadcast(x: half3, lane: int) -> half3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_broadcast(x: half3, lane: int) -> half3
 /// `x` of the invocation `lane`, a constant from 0 to 127 (CHK-378).
-@builtin @stages(.pixel, .compute) fun subgroup_broadcast(x: half4, lane: int) -> half4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_broadcast(x: half4, lane: int) -> half4
 /// `x` of the invocation `lane`, a constant from 0 to 127 (CHK-378).
-@builtin @stages(.pixel, .compute) fun subgroup_broadcast(x: short, lane: int) -> short
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_broadcast(x: short, lane: int) -> short
 /// `x` of the invocation `lane`, a constant from 0 to 127 (CHK-378).
-@builtin @stages(.pixel, .compute) fun subgroup_broadcast(x: short2, lane: int) -> short2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_broadcast(x: short2, lane: int) -> short2
 /// `x` of the invocation `lane`, a constant from 0 to 127 (CHK-378).
-@builtin @stages(.pixel, .compute) fun subgroup_broadcast(x: short3, lane: int) -> short3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_broadcast(x: short3, lane: int) -> short3
 /// `x` of the invocation `lane`, a constant from 0 to 127 (CHK-378).
-@builtin @stages(.pixel, .compute) fun subgroup_broadcast(x: short4, lane: int) -> short4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_broadcast(x: short4, lane: int) -> short4
 /// `x` of the invocation `lane`, a constant from 0 to 127 (CHK-378).
-@builtin @stages(.pixel, .compute) fun subgroup_broadcast(x: ushort, lane: int) -> ushort
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_broadcast(x: ushort, lane: int) -> ushort
 /// `x` of the invocation `lane`, a constant from 0 to 127 (CHK-378).
-@builtin @stages(.pixel, .compute) fun subgroup_broadcast(x: ushort2, lane: int) -> ushort2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_broadcast(x: ushort2, lane: int) -> ushort2
 /// `x` of the invocation `lane`, a constant from 0 to 127 (CHK-378).
-@builtin @stages(.pixel, .compute) fun subgroup_broadcast(x: ushort3, lane: int) -> ushort3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_broadcast(x: ushort3, lane: int) -> ushort3
 /// `x` of the invocation `lane`, a constant from 0 to 127 (CHK-378).
-@builtin @stages(.pixel, .compute) fun subgroup_broadcast(x: ushort4, lane: int) -> ushort4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_broadcast(x: ushort4, lane: int) -> ushort4
 /// `x` of the first active invocation of the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_broadcast_first(x: float) -> float
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_broadcast_first(x: float) -> float
 /// `x` of the first active invocation of the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_broadcast_first(x: float2) -> float2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_broadcast_first(x: float2) -> float2
 /// `x` of the first active invocation of the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_broadcast_first(x: float3) -> float3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_broadcast_first(x: float3) -> float3
 /// `x` of the first active invocation of the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_broadcast_first(x: float4) -> float4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_broadcast_first(x: float4) -> float4
 /// `x` of the first active invocation of the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_broadcast_first(x: int) -> int
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_broadcast_first(x: int) -> int
 /// `x` of the first active invocation of the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_broadcast_first(x: int2) -> int2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_broadcast_first(x: int2) -> int2
 /// `x` of the first active invocation of the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_broadcast_first(x: int3) -> int3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_broadcast_first(x: int3) -> int3
 /// `x` of the first active invocation of the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_broadcast_first(x: int4) -> int4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_broadcast_first(x: int4) -> int4
 /// `x` of the first active invocation of the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_broadcast_first(x: uint) -> uint
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_broadcast_first(x: uint) -> uint
 /// `x` of the first active invocation of the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_broadcast_first(x: uint2) -> uint2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_broadcast_first(x: uint2) -> uint2
 /// `x` of the first active invocation of the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_broadcast_first(x: uint3) -> uint3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_broadcast_first(x: uint3) -> uint3
 /// `x` of the first active invocation of the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_broadcast_first(x: uint4) -> uint4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_broadcast_first(x: uint4) -> uint4
 /// `x` of the first active invocation of the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_broadcast_first(x: half) -> half
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_broadcast_first(x: half) -> half
 /// `x` of the first active invocation of the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_broadcast_first(x: half2) -> half2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_broadcast_first(x: half2) -> half2
 /// `x` of the first active invocation of the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_broadcast_first(x: half3) -> half3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_broadcast_first(x: half3) -> half3
 /// `x` of the first active invocation of the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_broadcast_first(x: half4) -> half4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_broadcast_first(x: half4) -> half4
 /// `x` of the first active invocation of the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_broadcast_first(x: short) -> short
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_broadcast_first(x: short) -> short
 /// `x` of the first active invocation of the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_broadcast_first(x: short2) -> short2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_broadcast_first(x: short2) -> short2
 /// `x` of the first active invocation of the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_broadcast_first(x: short3) -> short3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_broadcast_first(x: short3) -> short3
 /// `x` of the first active invocation of the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_broadcast_first(x: short4) -> short4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_broadcast_first(x: short4) -> short4
 /// `x` of the first active invocation of the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_broadcast_first(x: ushort) -> ushort
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_broadcast_first(x: ushort) -> ushort
 /// `x` of the first active invocation of the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_broadcast_first(x: ushort2) -> ushort2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_broadcast_first(x: ushort2) -> ushort2
 /// `x` of the first active invocation of the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_broadcast_first(x: ushort3) -> ushort3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_broadcast_first(x: ushort3) -> ushort3
 /// `x` of the first active invocation of the subgroup.
-@builtin @stages(.pixel, .compute) fun subgroup_broadcast_first(x: ushort4) -> ushort4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_broadcast_first(x: ushort4) -> ushort4
 /// `x` of the invocation `lane`, computed at run time.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle(x: float, lane: int) -> float
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle(x: float, lane: int) -> float
 /// `x` of the invocation `lane`, computed at run time.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle(x: float2, lane: int) -> float2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle(x: float2, lane: int) -> float2
 /// `x` of the invocation `lane`, computed at run time.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle(x: float3, lane: int) -> float3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle(x: float3, lane: int) -> float3
 /// `x` of the invocation `lane`, computed at run time.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle(x: float4, lane: int) -> float4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle(x: float4, lane: int) -> float4
 /// `x` of the invocation `lane`, computed at run time.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle(x: int, lane: int) -> int
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle(x: int, lane: int) -> int
 /// `x` of the invocation `lane`, computed at run time.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle(x: int2, lane: int) -> int2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle(x: int2, lane: int) -> int2
 /// `x` of the invocation `lane`, computed at run time.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle(x: int3, lane: int) -> int3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle(x: int3, lane: int) -> int3
 /// `x` of the invocation `lane`, computed at run time.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle(x: int4, lane: int) -> int4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle(x: int4, lane: int) -> int4
 /// `x` of the invocation `lane`, computed at run time.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle(x: uint, lane: int) -> uint
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle(x: uint, lane: int) -> uint
 /// `x` of the invocation `lane`, computed at run time.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle(x: uint2, lane: int) -> uint2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle(x: uint2, lane: int) -> uint2
 /// `x` of the invocation `lane`, computed at run time.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle(x: uint3, lane: int) -> uint3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle(x: uint3, lane: int) -> uint3
 /// `x` of the invocation `lane`, computed at run time.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle(x: uint4, lane: int) -> uint4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle(x: uint4, lane: int) -> uint4
 /// `x` of the invocation `lane`, computed at run time.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle(x: half, lane: int) -> half
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle(x: half, lane: int) -> half
 /// `x` of the invocation `lane`, computed at run time.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle(x: half2, lane: int) -> half2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle(x: half2, lane: int) -> half2
 /// `x` of the invocation `lane`, computed at run time.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle(x: half3, lane: int) -> half3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle(x: half3, lane: int) -> half3
 /// `x` of the invocation `lane`, computed at run time.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle(x: half4, lane: int) -> half4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle(x: half4, lane: int) -> half4
 /// `x` of the invocation `lane`, computed at run time.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle(x: short, lane: int) -> short
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle(x: short, lane: int) -> short
 /// `x` of the invocation `lane`, computed at run time.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle(x: short2, lane: int) -> short2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle(x: short2, lane: int) -> short2
 /// `x` of the invocation `lane`, computed at run time.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle(x: short3, lane: int) -> short3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle(x: short3, lane: int) -> short3
 /// `x` of the invocation `lane`, computed at run time.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle(x: short4, lane: int) -> short4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle(x: short4, lane: int) -> short4
 /// `x` of the invocation `lane`, computed at run time.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle(x: ushort, lane: int) -> ushort
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle(x: ushort, lane: int) -> ushort
 /// `x` of the invocation `lane`, computed at run time.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle(x: ushort2, lane: int) -> ushort2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle(x: ushort2, lane: int) -> ushort2
 /// `x` of the invocation `lane`, computed at run time.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle(x: ushort3, lane: int) -> ushort3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle(x: ushort3, lane: int) -> ushort3
 /// `x` of the invocation `lane`, computed at run time.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle(x: ushort4, lane: int) -> ushort4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle(x: ushort4, lane: int) -> ushort4
 /// `x` of the invocation whose index is this one's `^ mask`.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle_xor(x: float, mask: int) -> float
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle_xor(x: float, mask: int) -> float
 /// `x` of the invocation whose index is this one's `^ mask`.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle_xor(x: float2, mask: int) -> float2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle_xor(x: float2, mask: int) -> float2
 /// `x` of the invocation whose index is this one's `^ mask`.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle_xor(x: float3, mask: int) -> float3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle_xor(x: float3, mask: int) -> float3
 /// `x` of the invocation whose index is this one's `^ mask`.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle_xor(x: float4, mask: int) -> float4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle_xor(x: float4, mask: int) -> float4
 /// `x` of the invocation whose index is this one's `^ mask`.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle_xor(x: int, mask: int) -> int
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle_xor(x: int, mask: int) -> int
 /// `x` of the invocation whose index is this one's `^ mask`.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle_xor(x: int2, mask: int) -> int2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle_xor(x: int2, mask: int) -> int2
 /// `x` of the invocation whose index is this one's `^ mask`.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle_xor(x: int3, mask: int) -> int3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle_xor(x: int3, mask: int) -> int3
 /// `x` of the invocation whose index is this one's `^ mask`.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle_xor(x: int4, mask: int) -> int4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle_xor(x: int4, mask: int) -> int4
 /// `x` of the invocation whose index is this one's `^ mask`.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle_xor(x: uint, mask: int) -> uint
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle_xor(x: uint, mask: int) -> uint
 /// `x` of the invocation whose index is this one's `^ mask`.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle_xor(x: uint2, mask: int) -> uint2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle_xor(x: uint2, mask: int) -> uint2
 /// `x` of the invocation whose index is this one's `^ mask`.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle_xor(x: uint3, mask: int) -> uint3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle_xor(x: uint3, mask: int) -> uint3
 /// `x` of the invocation whose index is this one's `^ mask`.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle_xor(x: uint4, mask: int) -> uint4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle_xor(x: uint4, mask: int) -> uint4
 /// `x` of the invocation whose index is this one's `^ mask`.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle_xor(x: half, mask: int) -> half
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle_xor(x: half, mask: int) -> half
 /// `x` of the invocation whose index is this one's `^ mask`.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle_xor(x: half2, mask: int) -> half2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle_xor(x: half2, mask: int) -> half2
 /// `x` of the invocation whose index is this one's `^ mask`.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle_xor(x: half3, mask: int) -> half3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle_xor(x: half3, mask: int) -> half3
 /// `x` of the invocation whose index is this one's `^ mask`.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle_xor(x: half4, mask: int) -> half4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle_xor(x: half4, mask: int) -> half4
 /// `x` of the invocation whose index is this one's `^ mask`.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle_xor(x: short, mask: int) -> short
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle_xor(x: short, mask: int) -> short
 /// `x` of the invocation whose index is this one's `^ mask`.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle_xor(x: short2, mask: int) -> short2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle_xor(x: short2, mask: int) -> short2
 /// `x` of the invocation whose index is this one's `^ mask`.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle_xor(x: short3, mask: int) -> short3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle_xor(x: short3, mask: int) -> short3
 /// `x` of the invocation whose index is this one's `^ mask`.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle_xor(x: short4, mask: int) -> short4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle_xor(x: short4, mask: int) -> short4
 /// `x` of the invocation whose index is this one's `^ mask`.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle_xor(x: ushort, mask: int) -> ushort
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle_xor(x: ushort, mask: int) -> ushort
 /// `x` of the invocation whose index is this one's `^ mask`.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle_xor(x: ushort2, mask: int) -> ushort2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle_xor(x: ushort2, mask: int) -> ushort2
 /// `x` of the invocation whose index is this one's `^ mask`.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle_xor(x: ushort3, mask: int) -> ushort3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle_xor(x: ushort3, mask: int) -> ushort3
 /// `x` of the invocation whose index is this one's `^ mask`.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle_xor(x: ushort4, mask: int) -> ushort4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle_xor(x: ushort4, mask: int) -> ushort4
 /// `x` of the invocation `delta` below this one.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle_up(x: float, delta: int) -> float
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle_up(x: float, delta: int) -> float
 /// `x` of the invocation `delta` below this one.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle_up(x: float2, delta: int) -> float2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle_up(x: float2, delta: int) -> float2
 /// `x` of the invocation `delta` below this one.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle_up(x: float3, delta: int) -> float3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle_up(x: float3, delta: int) -> float3
 /// `x` of the invocation `delta` below this one.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle_up(x: float4, delta: int) -> float4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle_up(x: float4, delta: int) -> float4
 /// `x` of the invocation `delta` below this one.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle_up(x: int, delta: int) -> int
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle_up(x: int, delta: int) -> int
 /// `x` of the invocation `delta` below this one.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle_up(x: int2, delta: int) -> int2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle_up(x: int2, delta: int) -> int2
 /// `x` of the invocation `delta` below this one.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle_up(x: int3, delta: int) -> int3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle_up(x: int3, delta: int) -> int3
 /// `x` of the invocation `delta` below this one.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle_up(x: int4, delta: int) -> int4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle_up(x: int4, delta: int) -> int4
 /// `x` of the invocation `delta` below this one.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle_up(x: uint, delta: int) -> uint
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle_up(x: uint, delta: int) -> uint
 /// `x` of the invocation `delta` below this one.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle_up(x: uint2, delta: int) -> uint2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle_up(x: uint2, delta: int) -> uint2
 /// `x` of the invocation `delta` below this one.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle_up(x: uint3, delta: int) -> uint3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle_up(x: uint3, delta: int) -> uint3
 /// `x` of the invocation `delta` below this one.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle_up(x: uint4, delta: int) -> uint4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle_up(x: uint4, delta: int) -> uint4
 /// `x` of the invocation `delta` below this one.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle_up(x: half, delta: int) -> half
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle_up(x: half, delta: int) -> half
 /// `x` of the invocation `delta` below this one.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle_up(x: half2, delta: int) -> half2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle_up(x: half2, delta: int) -> half2
 /// `x` of the invocation `delta` below this one.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle_up(x: half3, delta: int) -> half3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle_up(x: half3, delta: int) -> half3
 /// `x` of the invocation `delta` below this one.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle_up(x: half4, delta: int) -> half4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle_up(x: half4, delta: int) -> half4
 /// `x` of the invocation `delta` below this one.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle_up(x: short, delta: int) -> short
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle_up(x: short, delta: int) -> short
 /// `x` of the invocation `delta` below this one.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle_up(x: short2, delta: int) -> short2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle_up(x: short2, delta: int) -> short2
 /// `x` of the invocation `delta` below this one.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle_up(x: short3, delta: int) -> short3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle_up(x: short3, delta: int) -> short3
 /// `x` of the invocation `delta` below this one.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle_up(x: short4, delta: int) -> short4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle_up(x: short4, delta: int) -> short4
 /// `x` of the invocation `delta` below this one.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle_up(x: ushort, delta: int) -> ushort
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle_up(x: ushort, delta: int) -> ushort
 /// `x` of the invocation `delta` below this one.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle_up(x: ushort2, delta: int) -> ushort2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle_up(x: ushort2, delta: int) -> ushort2
 /// `x` of the invocation `delta` below this one.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle_up(x: ushort3, delta: int) -> ushort3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle_up(x: ushort3, delta: int) -> ushort3
 /// `x` of the invocation `delta` below this one.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle_up(x: ushort4, delta: int) -> ushort4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle_up(x: ushort4, delta: int) -> ushort4
 /// `x` of the invocation `delta` above this one.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle_down(x: float, delta: int) -> float
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle_down(x: float, delta: int) -> float
 /// `x` of the invocation `delta` above this one.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle_down(x: float2, delta: int) -> float2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle_down(x: float2, delta: int) -> float2
 /// `x` of the invocation `delta` above this one.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle_down(x: float3, delta: int) -> float3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle_down(x: float3, delta: int) -> float3
 /// `x` of the invocation `delta` above this one.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle_down(x: float4, delta: int) -> float4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle_down(x: float4, delta: int) -> float4
 /// `x` of the invocation `delta` above this one.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle_down(x: int, delta: int) -> int
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle_down(x: int, delta: int) -> int
 /// `x` of the invocation `delta` above this one.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle_down(x: int2, delta: int) -> int2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle_down(x: int2, delta: int) -> int2
 /// `x` of the invocation `delta` above this one.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle_down(x: int3, delta: int) -> int3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle_down(x: int3, delta: int) -> int3
 /// `x` of the invocation `delta` above this one.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle_down(x: int4, delta: int) -> int4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle_down(x: int4, delta: int) -> int4
 /// `x` of the invocation `delta` above this one.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle_down(x: uint, delta: int) -> uint
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle_down(x: uint, delta: int) -> uint
 /// `x` of the invocation `delta` above this one.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle_down(x: uint2, delta: int) -> uint2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle_down(x: uint2, delta: int) -> uint2
 /// `x` of the invocation `delta` above this one.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle_down(x: uint3, delta: int) -> uint3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle_down(x: uint3, delta: int) -> uint3
 /// `x` of the invocation `delta` above this one.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle_down(x: uint4, delta: int) -> uint4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle_down(x: uint4, delta: int) -> uint4
 /// `x` of the invocation `delta` above this one.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle_down(x: half, delta: int) -> half
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle_down(x: half, delta: int) -> half
 /// `x` of the invocation `delta` above this one.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle_down(x: half2, delta: int) -> half2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle_down(x: half2, delta: int) -> half2
 /// `x` of the invocation `delta` above this one.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle_down(x: half3, delta: int) -> half3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle_down(x: half3, delta: int) -> half3
 /// `x` of the invocation `delta` above this one.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle_down(x: half4, delta: int) -> half4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle_down(x: half4, delta: int) -> half4
 /// `x` of the invocation `delta` above this one.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle_down(x: short, delta: int) -> short
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle_down(x: short, delta: int) -> short
 /// `x` of the invocation `delta` above this one.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle_down(x: short2, delta: int) -> short2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle_down(x: short2, delta: int) -> short2
 /// `x` of the invocation `delta` above this one.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle_down(x: short3, delta: int) -> short3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle_down(x: short3, delta: int) -> short3
 /// `x` of the invocation `delta` above this one.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle_down(x: short4, delta: int) -> short4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle_down(x: short4, delta: int) -> short4
 /// `x` of the invocation `delta` above this one.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle_down(x: ushort, delta: int) -> ushort
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle_down(x: ushort, delta: int) -> ushort
 /// `x` of the invocation `delta` above this one.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle_down(x: ushort2, delta: int) -> ushort2
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle_down(x: ushort2, delta: int) -> ushort2
 /// `x` of the invocation `delta` above this one.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle_down(x: ushort3, delta: int) -> ushort3
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle_down(x: ushort3, delta: int) -> ushort3
 /// `x` of the invocation `delta` above this one.
-@builtin @stages(.pixel, .compute) fun subgroup_shuffle_down(x: ushort4, delta: int) -> ushort4
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun subgroup_shuffle_down(x: ushort4, delta: int) -> ushort4
 /// `x` of the quad's horizontal neighbour.
 @builtin @stages(.pixel, .compute) fun quad_swap_x(x: float) -> float
 /// `x` of the quad's horizontal neighbour.
