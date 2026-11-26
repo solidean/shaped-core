@@ -743,6 +743,8 @@ struct sgl::check::function_info
     bool is_auto_workgroup = false;
     /// The subgroup size a `@compute` entry point asks for by `@preferred_subgroup_size(n)`; 0 where it asks none.
     i32 preferred_subgroup_size = 0;
+    /// `@early_depth_test` on a pixel entry point: the depth and stencil tests, and their writes, run before it (CHK-564).
+    bool is_early_depth_test = false;
     /// Carries `@pure`: a call of it has no effect, so nobody can tell whether or when it ran.
     /// A `@builtin` without it is assumed to have one.
     bool is_pure = false;

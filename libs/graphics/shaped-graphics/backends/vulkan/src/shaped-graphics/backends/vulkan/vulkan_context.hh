@@ -482,6 +482,9 @@ public:
             return is_raytracing_supported();
         case sg::feature::vertex_pipeline_stores:
             return _vertex_pipeline_stores;
+        case sg::feature::early_depth_test:
+            // `EarlyFragmentTests` is a core execution mode
+            return true;
         // SPIR-V's `Coherent` decoration is core, and storage-image atomics on r32 integer formats are required.
         // BaseInstance is the DrawParameters capability, which creation requires `shaderDrawParameters` for.
         case sg::feature::device_coherence:

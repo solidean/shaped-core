@@ -445,6 +445,20 @@ A pixel stage's output is its return value, all of it, which is SGL's model for 
 `@position` is the precedent: a marked member of a stage's struct that the stage link treats specially.
 A struct holding only `@depth` is how a depth-only pixel stage is written, which is what a shadow pass with a cut-out needs.
 
+## CHK-564
+
+Its use is a stage that writes memory, as an order-independent or a visibility pass does.
+Without it such a stage runs for every rasterized pixel, hidden ones included, since every target runs a stage that writes memory late unless told otherwise.
+An attribute of the entry point is HLSL's, MSL's and SPIR-V's own shape, a property of the function and not of a statement.
+D3D, Vulkan and Metal each make a depth output under forced early tests meaningless or an error, so the one rule is to refuse it (CHK-565).
+Metal makes `[[early_fragment_tests]]` an error beside a `[[depth]]` or a `[[stencil]]` output, and has been seen to ignore a sample mask under it.
+So a sample mask is refused as well, rather than meaning one thing on three targets and another on Metal.
+A forced early test writes depth before the stage runs, so a cutout that discards leaves a hole in color and none in depth (CHK-566).
+That is every target's behavior, and rarely what a port meant, so it warns rather than refuses.
+WGSL has no such attribute (CHK-567).
+Refusing it outright would refuse the common case, a shading pass at EQUAL depth with no memory write, where the attribute is a hint every driver follows anyway.
+So the feature is asked only where the order is observable.
+
 ## CHK-277
 
 A `discard` is a jump rather than a builtin call, since control flow reads as control flow: `if … => discard` ends that path the way `if … => return x` does.

@@ -322,6 +322,11 @@ enum class sg::feature
     /// Vulkan gives it only with the `independentBlend` device feature; D3D12, Metal and WebGPU always.
     /// Without it, a pipeline whose targets differ in `blend` or `write_mask` is refused.
     independent_blend,
+
+    /// A pixel stage may run its depth and stencil tests, and their writes, before it, whatever it writes to memory or
+    /// whether it discards: SGL's `@early_depth_test` on a stage where the order changes a result.
+    /// D3D12, Vulkan and Metal grant it on every device; WebGPU has no such attribute, so it never grants it.
+    early_depth_test,
 };
 
 CC_FLAG_ENUM_INDEXED(sg, feature, cc::u64);
@@ -385,8 +390,9 @@ inline constexpr feature k_all_features[] = {
     feature::readwrite_norm16_image_formats,
     feature::norm16_filtering,
     feature::independent_blend,
+    feature::early_depth_test,
 };
-static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize(feature::independent_blend) + 1,
+static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize(feature::early_depth_test) + 1,
               "k_all_features lists every feature");
 
 /// The enumerator's name, `ray_query`, which is also what SGL's `require` spells it as.
@@ -498,6 +504,8 @@ static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize
         return "norm16_filtering";
     case feature::independent_blend:
         return "independent_blend";
+    case feature::early_depth_test:
+        return "early_depth_test";
     }
     return "";
 }

@@ -1024,6 +1024,7 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
     f.entry.workgroup[2] = info.workgroup[2];
     f.entry.is_auto_workgroup = info.is_auto_workgroup;
     f.entry.preferred_subgroup_size = info.preferred_subgroup_size;
+    f.entry.is_early_depth_test = info.is_early_depth_test;
     f.entry.features = info.features;
     // CHK-527: a reserved binding an internal entry point of the prelude lists keeps its reserved place
     for (auto const binding : out.at(info.bindings))
@@ -1185,6 +1186,56 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
             });
     };
 
+    // CHK-566, CHK-567: early tests write depth before the stage, which a discard keeps and memory writes observe
+    if (info.is_early_depth_test)
+    {
+        auto const* const attribute
+            = find_attribute(s.file, ast_of(s.file).at(s.declaration).attributes, "early_depth_test");
+        for (auto const& d : f.discards)
+            of_entry(
+                [&]() -> located_diagnostic&
+                {
+                    return report_once(diagnostic_kind::early_depth_keeps_discarded, d.file,
+                                       ast::is_valid(d.expr) ? span_of(d.file, d.expr) : span_of(d.file, d.stmt),
+                                       "the depth and stencil tests ran before the stage and wrote what they pass, so "
+                                       "a discarded pixel keeps its depth and stencil and loses its color alone");
+                });
+        auto writes = false;
+        for (auto const& x : f.entry.exprs)
+            if (auto const* const call = x.node.try_as<flat_call>())
+                if (auto const* const record = out.builtin_function(call->intrinsic);
+                    record != nullptr && (record->is_atomic || record->is_image_store || record->is_bytes_store))
+                    writes = true;
+        for (auto const& st : f.entry.stmts)
+            if (auto const* const assign = st.node.try_as<flat_assign>())
+                for (auto place = assign->place; is_valid(place);)
+                {
+                    auto const& node = f.entry.at(place).node;
+                    if (node.is<flat_buffer_element>())
+                    {
+                        writes = true;
+                        break;
+                    }
+                    if (auto const* const member = node.try_as<flat_member>())
+                        place = member->object;
+                    else if (auto const* const element = node.try_as<flat_element>())
+                        place = element->object;
+                    else
+                        break;
+                }
+        if ((writes || !f.discards.empty()) && attribute != nullptr)
+        {
+            if (!notes[s.info].declared_features.has(feature::early_depth_test))
+                report_of_entry(diagnostic_kind::feature_not_declared, s.file, attribute->name,
+                                cc::format("{} needs early_depth_test, since it {}, which the order of the tests "
+                                           "changes; neither its file, a binding it lists nor its body requires it",
+                                           s.name, writes ? "writes memory through a binding" : "discards"));
+            mark_requires_used(cc::vector<symbol_id>{id}, feature_set(feature::early_depth_test));
+            if (!out.functions[s.info].features.has(feature::early_depth_test))
+                out.functions.own(s.info).features.set(feature::early_depth_test);
+            f.entry.features.set(feature::early_depth_test);
+        }
+    }
     auto used = feature_set();
     for (auto const& u : f.feature_uses)
         used |= u.features;

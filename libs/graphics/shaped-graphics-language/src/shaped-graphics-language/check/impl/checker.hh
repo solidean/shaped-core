@@ -992,6 +992,8 @@ struct checker
     [[nodiscard]] cc::fixed_array<i32, 3> workgroup_of(i32 file, ast::attribute const* a);
     /// `@preferred_subgroup_size(n)`'s `n` (CHK-371); 0 without the attribute, and after a bad one, which it reports.
     [[nodiscard]] i32 preferred_subgroup_size_of(i32 file, ast::attribute const* a, bool is_compute);
+    /// `@early_depth_test` (CHK-564, CHK-565); false without it, and after a misplaced one, which it reports.
+    [[nodiscard]] bool early_depth_test_of(i32 file, ast::attribute const* a, bool is_pixel, type_id result);
     /// `@padding(.none)` on a binding or a buffer member; anything else reports and leaves the natural padding.
     [[nodiscard]] padding_kind padding_of(i32 file, ast::attribute const* a);
     /// CHK-538: `@indexed(.select)` or `@indexed(.memory)` on a let; `unstated` without one, and after a bad one.

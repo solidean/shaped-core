@@ -1,0 +1,34 @@
+// CHK-564 to CHK-567: `@early_depth_test` runs a pixel stage's depth and stencil tests, and their writes, before it.
+// It needs `early_depth_test` only where the order changes a result: a stage that writes memory or discards.
+
+struct varyings:
+    @position position: hpos4
+    uv: float2
+
+binding pass:
+    visited: mut buffer[atomic[uint]]
+    tint: float4
+
+// a shading pass at EQUAL depth after a prepass: no memory written, no discard, so no feature, and WGSL writes it too
+@early_depth_test
+@pixel fun shade_ps(p: varyings){pass} -> float4 => pass.tint * p.uv.x
+
+// a stage that writes memory needs the feature, since only the pixels that pass the tests write
+@expect(error = "feature-not-declared")
+@early_depth_test
+@pixel fun mark_ps(p: varyings){pass} -> float4:
+    pass.visited[0].add(1u)
+    return pass.tint
+
+// a discard keeps the depth and stencil the tests wrote, which warns, and needs the feature as a write does
+@expect(warning = "early-depth-keeps-discarded")
+@expect(error = "feature-not-declared")
+@early_depth_test
+@pixel fun cut_ps(p: varyings){pass} -> float4:
+    if p.uv.x > 0.5 => discard
+    return pass.tint
+
+// the interpreter runs no depth test, so a stage with the attribute runs as one without
+fun shaded(tint: float4, u: float) -> float4 => tint * u
+
+test shaded(float4(2.0), 0.5) == float4(1.0)

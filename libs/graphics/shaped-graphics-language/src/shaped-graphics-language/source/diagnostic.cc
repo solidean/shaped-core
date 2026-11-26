@@ -266,6 +266,8 @@ cc::string_view sgl::to_string(diagnostic_kind kind)
         return "nan-test-at-fast";
     case diagnostic_kind::non_finite_at_fast:
         return "non-finite-at-fast";
+    case diagnostic_kind::early_depth_keeps_discarded:
+        return "early-depth-keeps-discarded";
     case diagnostic_kind::workgroup_wastes_lanes:
         return "workgroup-wastes-lanes";
     case diagnostic_kind::missing_sampler:
@@ -561,6 +563,8 @@ cc::string_view sgl::summary_of(diagnostic_kind kind)
         return "a body in a target's own text that stands where none may, or names what it may not";
     case diagnostic_kind::nan_test_at_fast:
         return "a float compared with itself, a NaN test that code compiled at @float(.fast) may fold";
+    case diagnostic_kind::early_depth_keeps_discarded:
+        return "a discard after early depth tests, which keeps the depth and stencil the tests wrote";
     case diagnostic_kind::non_finite_at_fast:
         return "a NaN or an infinity named where the float guarantee is @float(.fast), which may assume neither arises";
     case diagnostic_kind::workgroup_wastes_lanes:
@@ -725,6 +729,7 @@ sgl::severity sgl::default_severity_of(diagnostic_kind kind)
     case diagnostic_kind::unroll_too_long:
     case diagnostic_kind::nan_test_at_fast:
     case diagnostic_kind::workgroup_wastes_lanes:
+    case diagnostic_kind::early_depth_keeps_discarded:
         return severity::warning;
     }
     CC_UNREACHABLE("unknown diagnostic_kind");

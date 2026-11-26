@@ -1056,6 +1056,15 @@ fun f() -> float:
   A member without one reads the format its type has at full width: `float3` is `vec3f`, `uint` is `u32`.
 * **CHK-277** An entry point whose inlined body reaches a `discard` is a `@pixel fun`, or it is `stage-not-allowed` at the `discard` ([why](why/checking.md#chk-277)).
   A path that ends in a `discard` needs no value, as one that ends in `return` does.
+* **CHK-564** `@early_depth_test` stands on a `@pixel fun` and takes no argument; anywhere else, or with one, it is `invalid-attribute-arguments` ([why](why/checking.md#chk-564)).
+  The depth test, the stencil test and their writes run before the stage, and a pixel that fails either runs none of the stage, its writes through a binding included.
+* **CHK-565** A pixel stage with it whose result has a `@depth` or a `@sample_mask` member (CHK-276) is `invalid-entry-point`, since the tests and their writes are decided before the stage runs.
+* **CHK-566** A `discard` in such a stage keeps the pixel's depth and stencil, which the tests have written already.
+  A pixel stage whose inlined body reaches one warns `early-depth-keeps-discarded` at the `discard`.
+  Where that is meant, the entry point says so with `@expect(warning = "early-depth-keeps-discarded")` (CHK-403).
+* **CHK-567** It needs `early_depth_test` where it changes a result: where the inlined body writes through a binding (CHK-404's writes) or reaches a `discard`.
+  Elsewhere it needs no feature, and a target without the attribute may leave it out, since a stage that writes no memory, no depth and never discards is tested early or late with one result.
+  sg grants `early_depth_test` on dx12, vulkan and metal on every device, and webgpu on none, so a `wgsl` compile of a stage that needs it is `target-lacks-feature` (EMIT-109).
 * **CHK-276** A member of a `@pixel struct` marked `@depth` is the pixel's depth, a `float`, and one marked `@sample_mask` the samples it writes, a `uint` ([why](why/checking.md#chk-276)).
   Neither is a color target, so neither takes a location or a `color_targets` entry, and a struct holds one of each at most.
   `@depth(.greater_equal)` and `@depth(.less_equal)` promise that the written depth only moves that way from the rasterized one.
@@ -1153,6 +1162,7 @@ A feature is what a device may lack, so using one makes a shader non-portable on
   The stages and stage inputs a device may lack add `primitive_index`, `sample_rate_shading`, `geometry_shader` and `tessellation_shader`.
   A write through a binding in a vertex, geometry or tessellation stage adds `vertex_pipeline_stores` (CHK-531).
   A `mut` image of a 16-bit normalized format adds `readwrite_norm16_image_formats` (CHK-201).
+  `@early_depth_test` on a pixel stage that writes memory or discards adds `early_depth_test` (CHK-567).
   Any other name is the normal error `unknown-feature`, and its detail lists the names.
 * **CHK-259** A `require` at file scope grants its features to everything in the file ([why](why/checking.md#chk-259)).
 * **CHK-260** A `require` in a binding grants its features to that binding's members.
@@ -2177,7 +2187,7 @@ fun make_mvp(model: mat4){frame} => frame.proj * frame.view * model
 
 Every kind below is a normal error by [DIAG-4](../syntax/diagnostics.md#rules), except some warnings.
 They are `unreachable-code`, `no-effect`, `unused-require`, `pixel-stage-ignores-view`, `needless-nonuniform` and `unroll-too-long`.
-`generic-not-instantiated`, `nan-test-at-fast` and `workgroup-wastes-lanes` are warnings too.
+`generic-not-instantiated`, `nan-test-at-fast`, `workgroup-wastes-lanes` and `early-depth-keeps-discarded` are warnings too.
 A diagnostic of this pass has a kind, a file, a byte span in that file, and a detail.
 
 | kind | reported by |
@@ -2198,7 +2208,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `unknown-builtin` | CHK-31 |
 | `expected-body` | CHK-32, CHK-236 |
 | `opaque-struct-needs-builtin` | CHK-34 |
-| `invalid-attribute-arguments` | CHK-546, CHK-547, CHK-548, CHK-36, CHK-39, CHK-204, CHK-208, CHK-211, CHK-212, CHK-220, CHK-231, CHK-267, CHK-403, CHK-292, CHK-293, CHK-301, CHK-304, CHK-384, CHK-369, CHK-370, CHK-371, CHK-431, CHK-435, CHK-480, CHK-522, CHK-526, CHK-538 |
+| `invalid-attribute-arguments` | CHK-546, CHK-547, CHK-548, CHK-36, CHK-39, CHK-204, CHK-208, CHK-211, CHK-212, CHK-220, CHK-231, CHK-267, CHK-403, CHK-292, CHK-293, CHK-301, CHK-304, CHK-384, CHK-369, CHK-370, CHK-371, CHK-431, CHK-435, CHK-480, CHK-522, CHK-526, CHK-538, CHK-564 |
 | `binding-not-listed` | CHK-45, CHK-131, CHK-228 |
 | `as-precedence` | CHK-411 |
 | `type-mismatch` | CHK-552, CHK-541, CHK-542, CHK-52, CHK-56, CHK-77, CHK-112 to CHK-118, CHK-121, CHK-167, CHK-210, CHK-214, CHK-219, CHK-236, CHK-243, CHK-275, CHK-276, CHK-279, CHK-281, CHK-287, CHK-329, CHK-344, CHK-362, CHK-375, CHK-392, CHK-429, CHK-433, CHK-434, CHK-558 |
@@ -2209,6 +2219,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `no-effect` | CHK-225 |
 | `nan-test-at-fast` | CHK-436 |
 | `non-finite-at-fast` | CHK-563 |
+| `early-depth-keeps-discarded` | CHK-566 |
 | `workgroup-wastes-lanes` | CHK-521 |
 | `recursive-call` | CHK-130 |
 | `recursive-trace` | CHK-332 |
@@ -2230,7 +2241,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `stage-not-allowed` | CHK-193, CHK-277, CHK-329, CHK-344, CHK-512, CHK-556 |
 | `ambiguous-overload` | CHK-72 |
 | `missing-field`, `unknown-field`, `duplicate-field` | CHK-178 |
-| `invalid-entry-point` | CHK-87, CHK-88, CHK-89, CHK-93, CHK-271, CHK-273, CHK-276, CHK-294, CHK-301 to CHK-306, CHK-326 to CHK-328, CHK-342, CHK-380, CHK-481, CHK-484, CHK-485, CHK-520 |
+| `invalid-entry-point` | CHK-87, CHK-88, CHK-89, CHK-93, CHK-271, CHK-273, CHK-276, CHK-294, CHK-301 to CHK-306, CHK-326 to CHK-328, CHK-342, CHK-380, CHK-481, CHK-484, CHK-485, CHK-520, CHK-565 |
 | `nesting-too-deep` | CHK-268 |
 | `invalid-pipeline` | CHK-175 to CHK-185, CHK-187, CHK-276, CHK-307, CHK-308, CHK-328, CHK-330, CHK-331, CHK-332, CHK-343, CHK-403 |
 | `shadows-unshadowable` | CHK-220, CHK-266 |

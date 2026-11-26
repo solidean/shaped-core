@@ -256,6 +256,31 @@ sgl::i32 checker::preferred_subgroup_size_of(i32 file, ast::attribute const* a, 
     return 0;
 }
 
+/// CHK-564, CHK-565: `@early_depth_test` on a pixel entry point, with no argument, whose result has no `@depth` or
+/// `@sample_mask` member.
+bool checker::early_depth_test_of(i32 file, ast::attribute const* a, bool is_pixel, type_id result)
+{
+    if (a == nullptr)
+        return false;
+    if (!is_pixel || !ast_of(file).at(a->arguments).empty() || sgl::is_valid(a->list))
+    {
+        report(diagnostic_kind::invalid_attribute_arguments, file, a->name,
+               "@early_depth_test takes no argument, and stands on a @pixel entry point alone");
+        return false;
+    }
+    if (is_valid(result) && result != checked_module::error_type && out.at(result).kind == type_kind::structure)
+        for (auto const& m : out.at(out.at(result).members))
+            if (m.output != pixel_output::color)
+            {
+                report(diagnostic_kind::invalid_entry_point, file, a->name,
+                       cc::format("@early_depth_test decides the depth and stencil tests before the stage runs, so "
+                                  "its result has no {} member, which it would decide after them; {} is one",
+                                  m.output == pixel_output::sample_mask ? "@sample_mask" : "@depth", m.name));
+                return false;
+            }
+    return true;
+}
+
 /// CHK-369: `@padding(.none)`, where GPU memory leaves no room but what C++ leaves.
 sgl::check::padding_kind checker::padding_of(i32 file, ast::attribute const* a)
 {
@@ -2192,6 +2217,7 @@ void checker::compile_function(symbol_id id)
                                      "pixel",
                                      "compute",
                                      "preferred_subgroup_size",
+                                     "early_depth_test",
                                      "float",
                                      "geometry",
                                      "tessellation_control",
@@ -2451,6 +2477,8 @@ void checker::compile_function(symbol_id id)
                                              : workgroup_of(file, compute);
     auto const preferred_subgroup_size = preferred_subgroup_size_of(
         file, find_attribute(file, d.attributes, "preferred_subgroup_size"), compute != nullptr);
+    auto const is_early_depth_test = early_depth_test_of(file, find_attribute(file, d.attributes, "early_depth_test"),
+                                                         is_pixel && ray_stage == stage::none, result);
     auto const max_vertices = geometry != nullptr ? max_vertices_of(file, *geometry) : mesh_limits.vertices;
     auto const tessellation = control != nullptr ? tessellation_of(file, *control) : tessellation_mode();
 
@@ -2468,6 +2496,7 @@ void checker::compile_function(symbol_id id)
         .workgroup = {workgroup[0], workgroup[1], workgroup[2]},
         .is_auto_workgroup = is_auto_workgroup,
         .preferred_subgroup_size = preferred_subgroup_size,
+        .is_early_depth_test = is_early_depth_test,
         .is_pure = find_attribute(file, d.attributes, "pure") != nullptr,
         .is_barrier = find_attribute(file, d.attributes, "barrier") != nullptr,
         .is_subgroup_operation = find_attribute(file, d.attributes, "subgroup") != nullptr,

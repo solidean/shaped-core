@@ -45,6 +45,7 @@ Back to the [semantics](_index.md); the reasons are in [why/emitting.md](why/emi
   And it is `wgsl` against `shader_int64`, `shader_f64` and `shader_int64_atomics`, which no WebGPU has.
   It is `wgsl` against `vertex_pipeline_stores` too, which only a native vertex stage needs there, since WebGPU draws the others as compute (CHK-531).
   It is `wgsl` and `msl` against `readwrite_norm16_image_formats`, a `mut` image of a 16-bit normalized format, whose read-write tiers 2 both leave the six out.
+  It is `wgsl` against `early_depth_test`, a pixel stage whose early tests change a result, since WGSL has no such attribute (CHK-567).
   `ray_query` is none of them: WGSL writes a trace's emulated form (EMIT-135).
   The shader chose it by `require`, so a portable shader still meets EMIT-13's promise.
 * **EMIT-66** A tree that is not core is the error `not-core`, and its detail names the first node that offends.
@@ -444,6 +445,8 @@ binding affine:
   On dx12 a pixel stage writing `.greater_equal` or `.less_equal` takes its `@position` as `noperspective centroid`, which DXIL requires of one.
 * **EMIT-117** A `discard` is `discard;` in HLSL and WGSL, and `discard_fragment();` in MSL.
   HLSL's goes on as a helper rather than ending the function, so an entry point with a value whose path may end in one ends in `return (T)0;`, which only such a path reaches, past all its work.
+* **EMIT-289** `@early_depth_test` (CHK-564) is `[earlydepthstencil]` in HLSL and `[[early_fragment_tests]]` on MSL's fragment function, and WGSL writes nothing (CHK-567).
+  A native route states it as DXC compiles the attribute: the `ForceEarlyDepthStencil` shader flag on DXIL, and `OpExecutionMode EarlyFragmentTests` on SPIR-V.
 * **EMIT-124** A float `%` is `fmod(a, b)` in MSL, which has no `%` of floats; HLSL's and WGSL's `%` of floats already mean EVAL-83's remainder.
 * **EMIT-263** A signed integer `%` is `a - (a / b) * b` wherever it becomes SPIR-V, since Vulkan leaves `OpSRem` undefined for a negative operand and defines `OpSDiv`.
   The native route writes those three operations, and HLSL for vulkan calls the helper `sgl_srem<T>`; every other target's `%` already means EVAL-83's remainder.

@@ -5377,6 +5377,7 @@ enum feature:
     nonuniform_length_workaround
     float_round_trip_workaround
     readwrite_norm16_image_formats
+    early_depth_test
 
 /// The API this compile writes for, known once a body is inlined; no const holds it.
 const target_api: graphics_api = .none

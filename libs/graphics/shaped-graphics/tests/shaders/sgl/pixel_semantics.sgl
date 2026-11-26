@@ -361,3 +361,36 @@ pipeline lod_query:
     pixel = lod_ps
     cull = .none
     format = .rgba32_float
+
+// The depth test before a stage that writes memory: with `@early_depth_test` a pixel that fails it runs none of the
+// stage, and without it the stage runs, writes, and the test then drops its color (CHK-564, CHK-567).
+binding early_counts:
+    counted: mut buffer[atomic[uint]]
+
+@early_depth_test
+@pixel fun counted_early_ps(p: tagged){early_counts} -> tag_target:
+    require early_depth_test
+    early_counts.counted[0].add(1u)
+    return {value = float4(p.tag as float, 0.0, 0.0, 1.0)}
+
+@pixel fun counted_late_ps(p: tagged){early_counts} -> tag_target:
+    early_counts.counted[1].add(1u)
+    return {value = float4(p.tag as float, 0.0, 0.0, 1.0)}
+
+pipeline counted_early:
+    vertex = tagged_vs
+    pixel = counted_early_ps
+    cull = .none
+    format = .rgba32_float
+    depth_test = true
+    depth_compare = .less
+    depth_stencil_format = .depth32_float
+
+pipeline counted_late:
+    vertex = tagged_vs
+    pixel = counted_late_ps
+    cull = .none
+    format = .rgba32_float
+    depth_test = true
+    depth_compare = .less
+    depth_stencil_format = .depth32_float

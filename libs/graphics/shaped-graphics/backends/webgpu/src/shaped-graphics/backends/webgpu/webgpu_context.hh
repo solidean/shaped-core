@@ -214,6 +214,9 @@ public:
         case sg::feature::vertex_pipeline_stores:
             // a vertex stage binds no writable storage on any WebGPU device
             return false;
+        case sg::feature::early_depth_test:
+            // WGSL has no attribute that forces the tests before a fragment stage
+            return false;
         case sg::feature::unaligned_block_compression:
             // Lifted by `texture-compression-unaligned`, which the emdawnwebgpu this builds against does not offer.
             return false;

@@ -661,6 +661,9 @@ while t < far: ...                       //   (CHK-528); a bound kept, not a pro
 @float(.specials) fun inactive() => float.nan   // T.nan, T.infinity of half, float, double: constants (CHK-563),
                                          //   written through their bits; at .fast ERROR non-finite-at-fast
 log10(x)                                 // log2(x) times the float nearest log10(2), as DXC compiles HLSL's (CHK-405)
+@early_depth_test @pixel fun ...         // depth and stencil tests before the stage (CHK-564); no @depth/@sample_mask beside it;
+                                         //   needs early_depth_test only where it writes memory or discards (never wgsl);
+                                         //   a discard keeps the depth: WARNING early-depth-keeps-discarded
 
 fun bump(c: mut counter, by: float):     // a mut parameter: the caller's place (CHK-315)
     c.total += by

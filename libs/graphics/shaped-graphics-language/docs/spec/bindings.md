@@ -362,6 +362,7 @@ An entry point must declare each of those itself: by its file, by a binding it l
 | `@view_index` in a vertex or pixel stage ([CHK-437](semantics/checking.md#entry-points)) | `sg::feature::view_instancing`, which WebGPU lacks |
 | `quad_any` or `quad_all` ([CHK-533](semantics/checking.md#subgroups)) | `sg::feature::quad_control`, which WebGPU lacks |
 | a `@viewport_index` field of a vertex stage's result ([CHK-534](semantics/checking.md#entry-points)) | `sg::feature::multi_viewport`, which WebGPU lacks |
+| `@early_depth_test` on a stage that writes memory or discards ([CHK-567](semantics/checking.md#entry-points)) | `sg::feature::early_depth_test`, which WebGPU lacks |
 
 `ray_query` and `raytracing_pipeline` are the two halves of ray tracing, and [raytracing.md](raytracing.md) says what each grants.
 A device may have either without the other, which is why they are two features.

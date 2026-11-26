@@ -786,8 +786,10 @@ public:
             out.appendf("[[{}]] void {}({})\n{{\n", p.e.entry_stage == stage::mesh ? "mesh" : "object", p.entry_name,
                         list);
         else
-            out.appendf("{} {} {}({})\n{{\n", p.e.entry_stage == stage::vertex ? "vertex" : "fragment",
-                        type_text(p, *this, p.e.result), p.entry_name, list);
+            out.appendf("{}{} {} {}({})\n{{\n",
+                        p.e.entry_stage == stage::pixel && p.e.is_early_depth_test ? "[[early_fragment_tests]] " : "",
+                        p.e.entry_stage == stage::vertex ? "vertex" : "fragment", type_text(p, *this, p.e.result),
+                        p.entry_name, list);
         write_bound_resources(out, p);
         if (per_primitive >= 0)
         {

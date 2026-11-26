@@ -302,6 +302,7 @@ void lowering::run()
     _out.reorders_through_nvapi = _plan.reorders_through_nvapi;
     _out.draw_start_in_root_constants = _plan.draw_start_in_root_constants;
     _out.maximally_reconverges = _e.maximally_reconverges;
+    _out.early_depth_test = _e.entry_stage == check::stage::pixel && _e.is_early_depth_test;
 
     open_block(new_block());
     if (is_raster)

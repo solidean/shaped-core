@@ -106,6 +106,7 @@ constexpr u32 k_incoming_ray_payload = 5342;
 constexpr u32 k_model_task = 5364;
 constexpr u32 k_model_mesh = 5365;
 constexpr u32 k_mode_origin_upper_left = 7;
+constexpr u32 k_mode_early_fragment_tests = 9;
 constexpr u32 k_mode_depth_replacing = 12;
 constexpr u32 k_mode_quad_derivatives = 5088;
 constexpr u32 k_mode_maximally_reconverges = 6023;
@@ -710,6 +711,9 @@ void writer::write_entry()
     if (_p.stage == check::stage::pixel)
     {
         emit(_modes, spv::ExecutionMode, {_function, k_mode_origin_upper_left});
+        // EMIT-289: as DXC states `[earlydepthstencil]`
+        if (_p.early_depth_test)
+            emit(_modes, spv::ExecutionMode, {_function, k_mode_early_fragment_tests});
         // CHK-533: as DXC states it for HLSL's QuadAny and QuadAll
         if (_uses_quad_control)
         {

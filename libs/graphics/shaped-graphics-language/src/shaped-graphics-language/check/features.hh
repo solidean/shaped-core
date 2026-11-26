@@ -98,6 +98,8 @@ enum class sgl::check::feature : sgl::u8
     float_round_trip_workaround,
     /// A `mut` image of a 16-bit normalized format, which WebGPU and Metal have on no device.
     readwrite_norm16_image_formats,
+    /// `@early_depth_test` on a pixel stage that writes memory or discards (CHK-567), which WebGPU has on no device.
+    early_depth_test,
 };
 
 CC_FLAG_ENUM_INDEXED(sgl::check, feature, u64);
@@ -147,6 +149,7 @@ inline constexpr cc::string_view k_feature_names[] = {
     "nonuniform_length_workaround",   //
     "float_round_trip_workaround",    //
     "readwrite_norm16_image_formats", //
+    "early_depth_test",               //
 };
 inline constexpr isize k_feature_count = isize(sizeof(k_feature_names) / sizeof(k_feature_names[0]));
 

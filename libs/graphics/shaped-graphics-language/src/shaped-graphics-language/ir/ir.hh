@@ -920,6 +920,8 @@ struct sgl::ir::program
     bool draw_start_in_root_constants = false;
     /// CHK-561: SPIR-V states `MaximallyReconvergesKHR`, `flat_entry_point::maximally_reconverges`; DXIL has no such mode.
     bool maximally_reconverges = false;
+    /// EMIT-289: a pixel stage's depth and stencil tests run before it, `flat_entry_point::is_early_depth_test`.
+    bool early_depth_test = false;
     /// The entry point's guarantee: what no single operation can say, its denormals above all.
     check::float_level guarantee = check::float_level::fast;
     /// The `.sgl` lines each writer states beside its operations, where the compile asked for them.
