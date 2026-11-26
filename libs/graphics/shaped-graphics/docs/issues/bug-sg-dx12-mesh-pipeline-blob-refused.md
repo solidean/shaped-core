@@ -4,6 +4,8 @@ refs:
   - symbol: sg::backend::dx12::dx12_raster_pipeline::skips_cached_blob
   - file: libs/graphics/shaped-graphics/backends/dx12/src/shaped-graphics/backends/dx12/dx12_raster_pipeline.cc
   - test: "sg - an SGL mesh stage of lines draws lines, which its pipeline rasterizes as lines"
+claimed-by: Claude (for Philip Trettner)
+claimed-at: 2026-11-26T11:53Z
 ---
 
 # A dx12 mesh-shaded pipeline's cached blob is refused on every restore
