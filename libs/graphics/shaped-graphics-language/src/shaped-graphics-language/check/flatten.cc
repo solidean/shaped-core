@@ -1220,6 +1220,40 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
                                            "is_nan tests the bits and holds at every level, or the function needs "
                                            "@float(.specials)");
                     });
+    // CHK-563: a named NaN or infinity stands where its scope keeps the special values, the strictest `@float` of
+    // the entry point and of each function its expression was inlined through (CHK-435)
+    auto const stated_level = [&](symbol_id function)
+    {
+        if (!is_valid(function) || index_of(function) >= out.symbols.size())
+            return float_level::fast;
+        auto const& fs = out.at(function);
+        if (fs.kind != symbol_kind::function || fs.info < 0 || fs.info >= out.functions.size())
+            return float_level::fast;
+        return out.functions[fs.info].float_guarantee;
+    };
+    for (auto const& x : f.entry.exprs)
+    {
+        auto const* const literal = x.node.try_as<flat_literal>();
+        if (literal == nullptr || literal->value - literal->value == 0)
+            continue;
+        auto level = stated_level(f.entry.function);
+        for (auto i = isize(0); i < isize(x.inlined_through.count); ++i)
+            if (auto const callee = stated_level(f.entry.call_sites[isize(x.inlined_through.first) + i].callee);
+                u8(callee) > u8(level))
+                level = callee;
+        if (level != float_level::fast)
+            continue;
+        of_entry(
+            [&]() -> located_diagnostic&
+            {
+                return report_once(
+                    diagnostic_kind::non_finite_at_fast, x.from.file,
+                    ast::is_valid(x.from.expr) ? span_of(x.from.file, x.from.expr) : span_of(x.from.file, x.from.stmt),
+                    "a NaN or an infinity, which code at @float(.fast) may assume never arises; state "
+                    "@float(.specials) on the function that uses it, which keeps the special values "
+                    "in that function alone");
+            });
+    }
     // CHK-227: once, however many trees inline the function the assert stands in
     for (auto const& a : f.effectful_asserts)
         of_entry(

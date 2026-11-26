@@ -658,6 +658,9 @@ while t < far: ...                       //   (CHK-528); a bound kept, not a pro
     return if v != v => 0.0 else v       //   .specials, .precise, .ieee; an entry point keeps the strictest it reaches
                                          // dx12 and vulkan keep all, msl up to .precise, wgsl refuses above .fast (EMIT-185)
                                          // `v != v` at .fast: WARNING nan-test-at-fast; is_nan tests the bits, fine anywhere
+@float(.specials) fun inactive() => float.nan   // T.nan, T.infinity of half, float, double: constants (CHK-563),
+                                         //   written through their bits; at .fast ERROR non-finite-at-fast
+log10(x)                                 // log2(x) times the float nearest log10(2), as DXC compiles HLSL's (CHK-405)
 
 fun bump(c: mut counter, by: float):     // a mut parameter: the caller's place (CHK-315)
     c.total += by

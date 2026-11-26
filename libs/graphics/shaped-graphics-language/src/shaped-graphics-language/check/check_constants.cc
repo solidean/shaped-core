@@ -198,6 +198,17 @@ struct constant_pass
                 return judged::reported;
             }
         }
+        // CHK-563: a named NaN or infinity among the operands says the non-finite result is meant
+        auto const is_non_finite = [](scalar const& widened)
+        {
+            if (widened.kind == value_kind::scalar_double)
+                return ((u64(widened.high) << 32) | widened.bits) << 1 >= u64(0xffe0'0000'0000'0000);
+            return widened.kind == value_kind::scalar_float && !(widened.as_float() - widened.as_float() == 0.0f);
+        };
+        for (auto const argument : arguments)
+            for (auto const& leaf : value_of(argument).result.leaves)
+                if (is_non_finite(leaf.widened()))
+                    return judged::sound;
         // a half past its range is infinite as well, which WGSL refuses alike
         for (auto const& folded_leaf : folded.result.leaves)
             if (auto const leaf = folded_leaf.widened();

@@ -872,8 +872,18 @@ fun shade(k: float) -> float:
   One that stands in a prelude body is reported at the program's call that reached it, since a program cannot fix the prelude.
 * **CHK-312** A call of constants whose value its type cannot hold is the normal error `constant-not-representable`, which WGSL folds exactly and refuses.
   That is an `int` sum, difference, product, negation, absolute value or left shift outside the `int`s, and a `uint` shifted left past its top bit.
-  It is also a negative `int` converted to `uint`, and a `float` result that is infinite or NaN.
+  It is also a negative `int` converted to `uint`, and a `float` result that is infinite or NaN that arithmetic or a conversion makes from finite operands: an overflow, `0.0 / 0.0`.
+  A call of constants with `T.nan`, `T.infinity` or one made of them among its operands stands (CHK-563), such as `T.infinity * 2.0` and `min(c, T.infinity)`, and EMIT-287 writes it.
+  `T.from_bits` of a constant whose result is non-finite stays refused, so a NaN or an infinity is written by its name.
   A `uint` sum, difference and product wrap, as WGSL folds them.
+* **CHK-563** `T.nan` and `T.infinity` are constants of `T` for `half`, `float` and `double` ([why](why/checking.md#chk-563)).
+  `T.nan` is a NaN, whose bits are `0x7E00`, `0x7FC00000` and `0x7FF8000000000000`; a program that needs other bits, a payload, writes `from_bits` of a `let`.
+  `T.infinity` is positive infinity, and `-T.infinity` negative.
+  One that stands where the float guarantee is `.fast` (CHK-435) is `non-finite-at-fast`, whose detail says to state `@float(.specials)` on the function that uses it.
+  That guarantee is the strictest `@float` of the entry point and of each function the expression was inlined through, so a `.specials` function elsewhere in the entry point keeps none of it.
+  A const that holds one is judged where it is named.
+  A compile's floor counts for nothing here, since the check pass judges the source, and a test, which runs on the abstract machine alone, names them freely.
+  Where the guarantee is `.specials` or stricter, a copy, a store, a construction, `select` and `.bits` keep their bits, and arithmetic, a comparison or a conversion on them is IEEE's.
 * **CHK-313** A `/` or a `%` whose operands are all integer literals is the normal error `literal-needs-type`, although `int` has both ([why](why/checking.md#chk-313)).
   So `1 / 3` is an error, and `1.0 / 3`, `(1 as int) / 3` and a division of two `int` locals are not.
 * **CHK-394** A prelude operator whose operands are all number literals is a **folded literal**, a number literal of the value it gives ([why](why/checking.md#chk-394)).
@@ -1108,7 +1118,11 @@ fun f() -> float:
   `n` is a power of two from 4 to 128, written as an `int` literal or as an `int` `const`.
   Any other `n`, and the attribute on any other function, is `invalid-attribute-arguments`.
 * **CHK-435** `@float(.specials)` on a function states the least float guarantee its body needs: `.fast`, `.specials`, `.precise` or `.ieee`, each stricter than the one before.
-  An entry point keeps the strictest guarantee of every function it inlines, itself included, and a function that states none is at `.fast`.
+  It guarantees that level for every operation in its body, and in the functions it inlines that state none stricter, and a function that states none is at `.fast`.
+  An operation's guarantee is the strictest of the functions it stands in, the entry point and the compile's floor included.
+  How a target keeps a scope's guarantee is the target's own (EMIT-185): it may keep it per operation, or raise the whole entry point.
+  Every route raises it today, to the strictest guarantee of every function the entry point inlines.
+  Raising is a quality of implementation, never a change of meaning.
   A compile may ask for a floor, a level every entry point is raised to as if it stated it, which then names no function; one that reaches a stricter level keeps its own.
   What each level lets a target do to a float is EVAL-6's, and what a target keeps is EMIT-185's.
   Any other argument is `invalid-attribute-arguments`.
@@ -2189,6 +2203,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `unreachable-code` | CHK-126, CHK-162, CHK-430, CHK-551 |
 | `no-effect` | CHK-225 |
 | `nan-test-at-fast` | CHK-436 |
+| `non-finite-at-fast` | CHK-563 |
 | `workgroup-wastes-lanes` | CHK-521 |
 | `recursive-call` | CHK-130 |
 | `recursive-trace` | CHK-332 |

@@ -397,7 +397,11 @@ binding affine:
   Only where the read stands outside every loop, and the argument is stable: literals, immutable locals and pure operations over them, which nothing the body writes can change.
   So `max(v, 0.0)` of a generic reads as the vector call it inlines to, `max(a * b, float3(0.0))`, rather than binding `a * b` first.
 * **EMIT-49** A float literal is the shortest decimal text that reads back as its value, always with a decimal point, and without a suffix.
-* **EMIT-50** A literal that is infinite or not a number is `non-finite-literal`.
+* **EMIT-50** A literal is finite, since CHK-312 refuses a constant that arithmetic makes non-finite, and a non-finite value is a named constant, which EMIT-287 writes.
+* **EMIT-287** A non-finite constant (CHK-563) is written through its bits on every target, at each use, a module `const` holding one included ([why](why/emitting.md#emit-287)).
+  HLSL writes `asfloat(0x7fc00000u)`, `asfloat16(uint16_t(0x7e00u))` and `asdouble(0x00000000u, 0x7ff80000u)`, and MSL `as_type<float>(0x7fc00000u)` and `as_type<half>(ushort(0x7e00))`.
+  WGSL calls a helper EMIT-102 declares once per bit pattern, which holds the bits in a `let` and returns their `bitcast`, `bitcast<f32>(bits)` or a half's `bitcast<vec2<f16>>(bits).x`.
+  SGL's own DXIL and SPIR-V write a constant of the bits, which both take in any pattern.
 * **EMIT-51** An `@operator` builtin is its operator: `+`, `-`, `*`, `/`, `%`, the six comparisons, and the prefix `-`; the products of a matrix are EMIT-43.
   Parentheses follow the tree, and an operand of equal precedence on the right keeps them.
 * **EMIT-125** An operand of `&`, `|`, `^`, `<<` or `>>` is parenthesized unless it is a name, a call, a literal or a prefix expression, since WGSL takes nothing else there.
@@ -1173,7 +1177,7 @@ The C++ struct a package generates is that layout byte for byte, padding include
 | `layout-mismatch` | none: retired by EMIT-41 |
 | `layout-conflict` | EMIT-114 |
 | `padding-forbidden` | EMIT-115 |
-| `non-finite-literal` | EMIT-50 |
+| `non-finite-literal` | none: retired by EMIT-287 |
 | `malformed-tree` | a flat tree the check pass does not produce |
 | `not-core` | EMIT-66 |
 | `too-many-groups` | EMIT-105 |

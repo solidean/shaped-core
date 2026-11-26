@@ -8,6 +8,12 @@ Nothing here is normative.
 The emitters follow the [compilation model](../../incubator/compilation-model.md): SGL compiles to shader text, and the text's own compiler optimizes it.
 So an emitter is a printer with opinions about names and addresses, and it transforms nothing.
 
+## EMIT-287
+
+WGSL refuses a const-expression that is non-finite when it creates the shader, and a `bitcast` of a literal is one.
+A `let` is no const-expression, so a value read from one is a run-time value WGSL takes, whatever bits it holds.
+The other targets fold nothing they would refuse, so a cast of the bits stands where the constant does.
+
 ## EMIT-2
 
 One HLSL text could carry both APIs' addresses, `register` and `[[vk::binding]]` side by side, since each compiler reads only its own.

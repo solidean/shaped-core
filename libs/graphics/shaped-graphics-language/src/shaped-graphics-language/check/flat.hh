@@ -8,6 +8,7 @@
 #include <clean-core/container/variant.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/optional.hh>
+#include <clean-core/math/bit.hh>
 #include <clean-core/memory/shared_ptr.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
@@ -244,12 +245,16 @@ struct sgl::check::flat_invalid
     constexpr bool operator==(flat_invalid const&) const = default;
 };
 
-/// A float literal; the origin has its spelling.
+/// A float literal; the origin has its spelling, or it is a named NaN or infinity (CHK-563).
 struct sgl::check::flat_literal
 {
     f64 value = 0;
 
-    constexpr bool operator==(flat_literal const&) const = default;
+    /// By the bits, so a NaN equals itself and 0.0 differs from -0.0.
+    constexpr bool operator==(flat_literal const& rhs) const
+    {
+        return cc::bit_cast<u64>(value) == cc::bit_cast<u64>(rhs.value);
+    }
 };
 
 /// Of the prelude's type `int`, or of `uint` where an integer literal converted to it (CHK-253); a `uint` keeps its

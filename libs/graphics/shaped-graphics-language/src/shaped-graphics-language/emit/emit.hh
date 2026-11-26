@@ -59,7 +59,8 @@ enum class sgl::emit::error_kind : sgl::u8
     system_value_semantic,
     /// Unused since every target is made to follow SGL's own layout; kept so the ids of the kinds after it do not move.
     layout_mismatch,
-    /// A literal that is infinite or not a number, which no target can spell.
+    /// Unused since every target writes a non-finite value through its bits (EMIT-287); kept so the ids of the kinds
+    /// after it do not move.
     non_finite_literal,
     /// A flat tree the check pass does not produce: an unfilled node, or a call of something that is no builtin function.
     malformed_tree,

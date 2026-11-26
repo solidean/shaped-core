@@ -959,6 +959,8 @@ enum class sgl::check::target_kind : sgl::u8
     struct_cases,
     /// On a `member` or a call: member `index` of a query or a candidate, a `query_member` (CHK-557 to CHK-559).
     query_member,
+    /// On a `member`: `T.nan` (`index` 0) or `T.infinity` (`index` 1) of the float type `symbol` (CHK-563).
+    non_finite_constant,
 };
 
 /// What an expression refers to, for an editor: go to definition, hover, rename.

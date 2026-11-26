@@ -851,6 +851,20 @@ An inline trace runs the same two decisions inside a loop of its own stage, as o
 What it gives up is every write whose count the program tolerates: a traversal-cost heat map, and multi-hit collection appending each candidate through an atomic counter.
 Both would come back as a relaxation that breaks no program, the second better served by a decision that answers through its payload.
 
+## CHK-563
+
+CHK-312 exists for WGSL, which refuses a non-finite const-expression.
+Writing the named constants through their bits (EMIT-287) keeps EMIT-13's promise on every target, so the names can be constants.
+A non-finite value that arithmetic makes from finite constants is still refused, since such a result is almost always a bug; naming it says it is meant.
+There is no "quiet": GPUs raise no floating-point exceptions, so a signalling NaN behaves as any other, and the word would promise a distinction no target keeps.
+Its use is a value written to memory for hardware to read, such as a vertex position that disables a triangle: a copy and a store, never arithmetic.
+At `.fast` a target may assume no NaN or infinity arises: DXC's fast math, Vulkan without `SignedZeroInfNanPreserve` and WGSL may each fold or rewrite one.
+So SGL cannot promise them there, and refuses them instead.
+`.fast` is the common default, so the fix is local: the function that means a NaN states `.specials`, and the guarantee is that scope's.
+A target that can only keep it for the whole entry point, as DXC's `-Gis` does, raises the entry point, which costs speed, not meaning.
+The check judges the source, which knows no floor, as CHK-436 does; a floor only ever raises the level, so what passes stays sound.
+A check that no run-time NaN or infinity reaches `.fast` code, such as a `from_bits` of a run-time word, is left for later.
+
 ## CHK-405
 
 `log10` is the product DXC compiles HLSL's `log10` to, `log2(x)` times 0x3E9A209B, so a port stays bit for bit with its HLSL twin on dx12.

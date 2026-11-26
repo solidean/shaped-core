@@ -1,0 +1,58 @@
+// CHK-563 and the amended CHK-312: `T.nan` and `T.infinity` are constants of `half`, `float` and `double`, which stand
+// only where the float guarantee keeps the special values.
+// Every entry point here that is built compiles for every target, so none states `.specials`, which WGSL refuses
+// (EMIT-185); the driver's tests write those.
+
+// a NaN of the bits SGL states, and positive infinity, of each float type
+@float(.specials) fun nan() => float.nan
+@float(.specials) fun infinity() => float.infinity
+@float(.specials) fun half_nan() => half.nan
+@float(.specials) fun half_infinity() => half.infinity
+@float(.specials) fun double_nan() => double.nan
+@float(.specials) fun double_infinity() => double.infinity
+
+test nan().bits == 0x7fc0'0000u and is_nan(nan())
+test infinity().bits == 0x7f80'0000u and (-infinity()).bits == 0xff80'0000u
+test half_nan().bits == 0x7e00u and half_infinity().bits == 0x7c00u
+test double_nan().bits == uint2(0u, 0x7ff8'0000u) and double_infinity().bits == uint2(0u, 0x7ff0'0000u)
+
+// a call of constants with a named one among its operands stands, and arithmetic is IEEE's
+@float(.specials) fun twice_infinity() => float.infinity * 2.0
+@float(.specials) fun bounded() => min(3.0, float.infinity)
+@float(.specials) fun zero_times_infinity() => 0.0 * float.infinity
+
+test is_inf(twice_infinity()) and bounded() == 3.0 and is_nan(zero_times_infinity())
+
+// a const holds one, and stands for it where a function at `.specials` names it
+const far = float.infinity
+@float(.specials) fun far_away() => far
+
+test far_away() == infinity()
+
+// a NaN that arithmetic makes from finite constants stays refused, and so does a NaN's bits handed to from_bits
+@expect(error = "constant-not-representable")
+test 0.0 / 0.0 != 1.0
+
+@expect(error = "constant-not-representable")
+test is_nan(float.from_bits(0x7fc0'0000u))
+
+binding work:
+    values: mut buffer[float]
+
+// at `.fast` a target may assume neither arises, so naming one there is refused
+@expect(error = "non-finite-at-fast")
+@compute(64) fun loses(@thread_id id: int3){work}:
+    work.values[id.x] = float.nan
+
+// a const that holds one is refused where it is named at `.fast`
+@expect(error = "non-finite-at-fast")
+@compute(64) fun loses_far(@thread_id id: int3){work}:
+    work.values[id.x] = far
+
+// the guarantee is the scope's: a `.specials` function elsewhere in the entry point keeps none of it here
+@float(.specials) fun cleaned(v: float) -> float => if is_nan(v) => 0.0 else v
+fun plain_nan() => float.nan
+
+@expect(error = "non-finite-at-fast")
+@compute(64) fun scoped(@thread_id id: int3){work}:
+    work.values[id.x] = cleaned(work.values[id.x]) + plain_nan()

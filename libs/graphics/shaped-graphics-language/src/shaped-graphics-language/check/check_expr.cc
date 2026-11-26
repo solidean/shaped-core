@@ -1064,6 +1064,21 @@ type_id checker::check_member(function_scope& scope, ast::expr_id id, ast::membe
             set_target(file, id, {.kind = target_kind::enum_case, .symbol = enumeration, .index = i32(index)});
             return type;
         }
+
+        // CHK-563: `float.nan` and `float.infinity`, of `half` and `double` too, are constants of their type
+        if (out.at(found->front()).kind == symbol_kind::structure && (name == "nan" || name == "infinity"))
+            if (auto const* const builtin = out.builtin_type_of(out.at(found->front()).type);
+                builtin != nullptr && builtin->leaf_count == 1
+                && (builtin->leaf_kind == value_kind::scalar_float || builtin->leaf_kind == value_kind::scalar_half
+                    || builtin->leaf_kind == value_kind::scalar_double))
+            {
+                auto const type = out.at(found->front()).type;
+                set_target(file, member.object, {.kind = target_kind::symbol, .symbol = found->front()});
+                set_target(
+                    file, id,
+                    {.kind = target_kind::non_finite_constant, .symbol = found->front(), .index = name == "nan" ? 0 : 1});
+                return type;
+            }
     }
 
     // CHK-460: `values.length` names a buffer without reading an element of it, as a subscript does

@@ -196,13 +196,6 @@ struct validator
                     report(error_kind::malformed_tree, e.function,
                            cc::format("a member of '{}', which the entry point does not list", m.at(b->binding).name));
             }
-            else if (auto const* l = x.node.try_as<flat_literal>())
-            {
-                // Only a finite value minus itself is zero.
-                if (!(l->value - l->value == 0))
-                    report(error_kind::non_finite_literal, e.function,
-                           cc::format("a literal of type '{}'", m.name_of(x.type)));
-            }
             else if (auto const* c = x.node.try_as<flat_call>(); c != nullptr && c->text >= 0)
             {
                 // CHK-427: a body in a target's own text takes its function's parameters, each in order

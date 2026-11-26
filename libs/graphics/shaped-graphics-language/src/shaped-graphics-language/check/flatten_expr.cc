@@ -1,3 +1,4 @@
+#include <clean-core/math/bit.hh>
 #include <shaped-graphics-language/check/impl/flattener.hh>
 
 using namespace sgl;
@@ -87,6 +88,11 @@ auto sgl::check::impl::flattener::flatten_expr(ast::expr_id id) -> flat_expr_id
         // CHK-557, CHK-559: a member of a candidate or a query
         if (where.kind == target_kind::query_member)
             return flatten_query_member(id, where);
+        // CHK-563: a NaN of the bits SGL states, and positive infinity; the targets write either through its bits
+        if (where.kind == target_kind::non_finite_constant)
+            return add_expr(type, id,
+                            flat_literal{.value = where.index == 0 ? cc::bit_cast<f64>(u64(0x7ff8'0000'0000'0000))
+                                                                   : cc::bit_cast<f64>(u64(0x7ff0'0000'0000'0000))});
         // `a.foo` that is no field is a call of `foo` with `a` (CHK-249)
         if (tables().call_at(id) >= 0)
             return flatten_bound_call(id, type, c.out.call_records[tables().call_at(id)]);
