@@ -4,6 +4,8 @@ tags: [half, dx12, vulkan, amd, nvidia]
 refs:
   - file: libs/graphics/shaped-graphics/tests/compute/compute-pack-routes-test.cc
   - file: libs/graphics/shaped-graphics-language/src/shaped-graphics-language/builtins/register_math.cc
+claimed-by: Claude (for Philip Trettner)
+claimed-at: 2026-11-26T06:57Z
 ---
 
 # pack_half2x16 rounds toward zero on dx12 and on AMD's vulkan, where SGL rounds to nearest
