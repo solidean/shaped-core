@@ -3,6 +3,8 @@ created: 2026-11-07
 refs:
   - file: libs/graphics/shaped-graphics/tests/raster/mixed-route-test.cc
   - test: "sg - mesh and task stages of SGL's binary link against DXC's in every pairing and draw alike"
+claimed-by: Claude (for Philip Trettner)
+claimed-at: 2026-11-26T09:19Z
 ---
 
 # On AMD's dx12 driver, the mesh fixture's per-primitive faces draw nothing, through DXC too
