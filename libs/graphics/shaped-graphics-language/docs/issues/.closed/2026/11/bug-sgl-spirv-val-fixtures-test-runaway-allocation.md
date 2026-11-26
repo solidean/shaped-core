@@ -5,8 +5,8 @@ refs:
   - test: shaped-graphics-language-test
   - file: libs/graphics/shaped-graphics-language/tests/emit/spirv-emit-test.cc:278
   - file: libs/graphics/shaped-graphics-language/src/shaped-graphics-language/ir/lower_expr.cc:331
-claimed-by: Claude (for Philip Trettner)
-claimed-at: 2026-11-26T06:57Z
+closed: 2026-11-26
+resolution: obsolete
 ---
 
 # The spirv-val fixtures test grows to 26 GB on debug-clang and fails a 23 GB allocation
@@ -35,3 +35,8 @@ Run under an 8 GB cgroup cap with no swap, on a Steam Deck (16 GB):
 Whether it was fixed in the 949 commits since `a7ba8ff45`, or happens on Windows alone, is open.
 None of those commits names this growth.
 Next is a run of `debug-clang` on Windows at HEAD; if it still grows there, the request's stack names the fixture and the entry point.
+
+**2026-11-26: it does not reproduce on Windows either, at `3dd4c682d`.**
+`uv run dev.py test "every entry point of the fixtures that lowers is what spirv-val calls valid" --preset debug-clang --timeout 600`:
+it passes in 15.5 s, 4794 checks, peak 367 MiB.
+So it was fixed somewhere in the commits since `a7ba8ff45`, by a change that named no growth; closed as obsolete.
