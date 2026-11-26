@@ -2,6 +2,8 @@
 created: 2026-11-14
 refs:
   - file: libs/graphics/shaped-rendering/tests/backends/dx12-entry.cc:103-104
+claimed-by: Claude (for Philip Trettner)
+claimed-at: 2026-11-26T09:19Z
 ---
 
 # Running one sr test by name never reaches the dx12 native-DXIL context
