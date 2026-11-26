@@ -2,6 +2,8 @@
 created: 2026-11-26
 refs:
   - file: examples/graphics/web-viewer/web_viewer.cc
+claimed-by: Claude (for Philip Trettner)
+claimed-at: 2026-11-26T14:06Z
 ---
 
 # The web viewer's capture under node fails on a render routine pending for 600 ticks
