@@ -137,6 +137,11 @@ test radians(float2(90.0, 180.0)).y == pi
 test mod(-1.0, 3.0) == 2.0 and (-1.0 % 3.0) == -1.0
 test mod(float3(-1.0, 4.0, 5.0), 3.0) == float3(2.0, 1.0, 2.0)
 
+// log10 is log2 times the float nearest log10(2), as DXC compiles HLSL's, and the half nearest it for a half (CHK-405)
+test log10(2.0).bits == 0x3e9a'209bu and log10(half(2.0)).bits == 0x34d1u
+test abs(log10(1000.0) - 3.0) < 0.000001 and log10(float3(1.0, 10.0, 0.5)).x == 0.0
+test log10(7.0) == log2(7.0) * 0.30102999566398
+
 // a bool converts to a number as 1 and 0, componentwise (CHK-197)
 test (true as float) == 1.0 and (false as int) == 0 and (bool2(true, false) as uint2) == uint2(1u, 0u)
 

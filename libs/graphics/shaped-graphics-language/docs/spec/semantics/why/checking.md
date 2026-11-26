@@ -851,6 +851,12 @@ An inline trace runs the same two decisions inside a loop of its own stage, as o
 What it gives up is every write whose count the program tolerates: a traversal-cost heat map, and multi-hit collection appending each candidate through an atomic counter.
 Both would come back as a relaxation that breaks no program, the second better served by a decision that answers through its payload.
 
+## CHK-405
+
+`log10` is the product DXC compiles HLSL's `log10` to, `log2(x)` times 0x3E9A209B, so a port stays bit for bit with its HLSL twin on dx12.
+MSL's own `log10`, and a SPIR-V that wrote one through its own extended set, would each round otherwise, so SGL writes the product on every target rather than the target's function.
+A `double` overload waits for a `log2` of a `double`.
+
 ## CHK-531
 
 The stages left out of the atomics and the image stores were left out for WebGPU, whose vertex stage writes no storage, and what WebGPU lacks there is the feature sg already had for `print`.

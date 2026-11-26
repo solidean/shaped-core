@@ -289,6 +289,7 @@ fun f(x: float) -> float:
 * **CHK-222** `true` and `false` are `@shadowable(false)` consts of `core.sgl`, whose values are the cases of `bool` (CHK-218).
 * **CHK-405** `pi` is a `float` const of `core.sgl`, and a program's own `pi` hides it, as any shadowable name of the prelude is (CHK-220).
   `radians(d)` and `degrees(r)` of a `float` or a plain float vector convert an angle by it.
+  `log10(x)` of a `float`, a `half` or a vector of either is `log2(x)` times the value of its type nearest log10(2), on every target ([why](why/checking.md#chk-405)).
   `mod(a, b)` is the remainder that floors, `a - b * floor(a / b)`, as GLSL's does, with `b` a scalar or of `a`'s type.
   The float `%` truncates instead, as HLSL's and MSL's `fmod` do (CHK-313).
 * **CHK-353** `@option` on a file-scope `const` makes it an **option**: a value the host sets for each compile, whose written value is its default ([why](why/checking.md#chk-353)).

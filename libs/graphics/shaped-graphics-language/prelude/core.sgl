@@ -38,6 +38,17 @@ fun degrees(radians: float2) => radians * (180.0 / pi)
 fun degrees(radians: float3) => radians * (180.0 / pi)
 fun degrees(radians: float4) => radians * (180.0 / pi)
 
+/// The base-10 logarithm, as DXC compiles HLSL's: `log2` times the float nearest log10(2), 0x3E9A209B, or for a half
+/// the half nearest it, 0x34D1.
+fun log10(x: float) -> float => log2(x) * 0.30102999566398
+fun log10(x: float2) -> float2 => log2(x) * 0.30102999566398
+fun log10(x: float3) -> float3 => log2(x) * 0.30102999566398
+fun log10(x: float4) -> float4 => log2(x) * 0.30102999566398
+fun log10(x: half) -> half => log2(x) * 0.30102999566398
+fun log10(x: half2) -> half2 => log2(x) * 0.30102999566398
+fun log10(x: half3) -> half3 => log2(x) * 0.30102999566398
+fun log10(x: half4) -> half4 => log2(x) * 0.30102999566398
+
 // ---- a floored remainder ---------------------------------------------------------------------------------------------
 //
 // `%` of floats truncates, as HLSL's `fmod` and MSL's `fmod` do; `mod` floors, as GLSL's does, so it never turns negative
