@@ -23,7 +23,8 @@ Not yet known: which rewrite on our side changes the shape, and whether the resu
 ## Log
 
 **2026-11-26: fixed in `core.sgl`, by leaving `.fast` no order to choose.**
-`double_inverse_root_of_mantissa`'s Newton step was `y * (1.5 - 0.5 * m * y * y)`, a chain of products and a sum that `.fast` lets DXC's LLVM regroup, and AMD's driver rounds the regrouped shape an ULP apart.
+`double_inverse_root_of_mantissa`'s Newton step was `y * (1.5 - 0.5 * m * y * y)`, a chain of products and a sum that `.fast` lets DXC's LLVM regroup.
+AMD's driver rounds the regrouped shape an ULP apart.
 Each step is now `fma(0.5 * y, fma(-(m * y), y, 1), y)`: one product into each `fma`, so no target has a choice to make, and the residual is computed with one rounding fewer.
 The fixture's route check runs on AMD's dx12 again and agrees to the bit, and Intel's still does.
 Raising the helper to `.precise` was the other way, but CHK-435 would then raise every entry point that takes a double's root.

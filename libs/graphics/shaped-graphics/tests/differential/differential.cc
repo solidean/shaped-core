@@ -111,8 +111,13 @@ constexpr isize k_named_elements = 4;
 
 /// Whether two GPU results `a` and `b` of one element both lie within `t` of the range `ranges` allows it.
 /// An element `ranges` bounds by nothing, or does not bound, holds them to each other alone.
-[[nodiscard]] bool both_in_range(
-    sg_diff::run_result const* ranges, isize output, cc::string_view name, isize e, u32 a, u32 b, sg_diff::tolerance t)
+[[nodiscard]] bool both_in_range(sg_diff::run_result const* ranges,
+                                 isize output,
+                                 cc::string_view name,
+                                 isize e,
+                                 u32 a,
+                                 u32 b,
+                                 sg_diff::tolerance t)
 {
     if (ranges == nullptr || output >= ranges->outputs.size() || ranges->outputs[output].name != name)
         return false;
