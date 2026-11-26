@@ -416,3 +416,22 @@ pipeline clipped_draw:
     pixel = clipped_ps
     cull = .none
     format = .rgba32_float
+
+// A member after the clip distances, which the pixel stage reads although its link leaves the distances out.
+struct clipped_tagged:
+    @position position: hpos4
+    @clip_distances planes: float[2]
+    @interpolate(.flat) tag: int
+
+@vertex fun clipped_tagged_vs(v: tagged_corner) -> clipped_tagged:
+    require clip_distances
+    return {position = hpos4(v.position.x, v.position.y, v.depth, 1.0), planes = float[2].filled(1.0), tag = v.tag}
+
+@pixel fun clipped_tagged_ps(p: clipped_tagged) -> tag_target:
+    return {value = float4(p.tag as float, 0.0, 0.0, 1.0)}
+
+pipeline clipped_tagged_draw:
+    vertex = clipped_tagged_vs
+    pixel = clipped_tagged_ps
+    cull = .none
+    format = .rgba32_float

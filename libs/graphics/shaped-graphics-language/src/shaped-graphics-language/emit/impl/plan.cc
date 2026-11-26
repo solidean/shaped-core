@@ -484,9 +484,11 @@ struct planner
         for (auto const& member : p.m.at(info.members))
         {
             need(member.type, struct_role::plain);
-            // CHK-574: a pixel stage takes no clip distance, which no target hands it alike, so its link leaves them out
+            // CHK-574: a pixel stage reads no clip distance, so a link matched by location leaves them out
+            // dx12 matches its stages by register, so there the pixel stage declares them, unread, as the vertex stage does
             auto const is_left_out = member.type == check::checked_module::void_type
-                                  || (member.is_clip_distances && p.e.entry_stage == check::stage::pixel);
+                                  || (member.is_clip_distances && p.e.entry_stage == check::stage::pixel
+                                      && p.which != emit::target::hlsl_dx12);
             member_of.push_back(is_left_out ? -1 : i32(written.size()));
             if (!is_left_out)
                 written.push_back(member);

@@ -458,6 +458,7 @@ The geometry, tessellation and mesh stages, and their polyfills, which would car
 
 D3D, Vulkan and Metal let a pixel stage read the interpolated distances, which no shader asks for yet, and WebGPU does not.
 So the pixel stage's link leaves the field out, which keeps WGSL's fragment input valid and asks the device nothing for the pixel stage.
+On dx12 a link member after the clip distances would then sit on another register in each stage, so there the pixel stage keeps them.
 
 ## CHK-575
 

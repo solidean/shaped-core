@@ -176,14 +176,88 @@ TEST("sgl emit - clip distances are each target's own: a lane at a time in HLSL,
     CHECK(wgsl.value().text.contains("    @builtin(clip_distances) planes: array<f32, 3>,\n"))
         .dump("text", wgsl.value().text);
 
-    // CHK-574: the pixel stage's link leaves them out on every target, so WGSL's fragment input stays valid
-    for (auto const t : {target::hlsl_dx12, target::hlsl_vulkan, target::msl, target::wgsl})
+    // CHK-574: a link matched by location leaves them out of the pixel stage, so WGSL's fragment input stays valid
+    for (auto const t : {target::hlsl_vulkan, target::msl, target::wgsl})
     {
         auto const e = compiled("shade_ps", t);
         REQUIRE(e.has_value()).dump("error", e.has_error() ? e.error() : cc::string());
         CHECK(!e.value().text.contains("planes")).dump("text", e.value().text);
         CHECK(!e.value().features.has(feature::clip_distances));
     }
+    // dx12 matches its stages by register, so its pixel stage declares the lanes the vertex stage writes, unread
+    auto const dx12 = compiled("shade_ps", target::hlsl_dx12);
+    REQUIRE(dx12.has_value()).dump("error", dx12.has_error() ? dx12.error() : cc::string());
+    CHECK(dx12.value().text.contains("    float planes_2 : SV_ClipDistance2;\n")).dump("text", dx12.value().text);
+}
+
+TEST("sgl emit - a pixel stage that copies its whole link compiles on every target and route")
+{
+    // CHK-574: a link matched by location leaves the clip distances out, so a copy of the whole struct names none
+    constexpr auto source
+        = cc::string_view("require clip_distances\n"
+                          "struct varyings:\n"
+                          "    @position position: hpos4\n"
+                          "    @clip_distances planes: float[2]\n"
+                          "    uv: float2\n"
+                          "fun pick(a: varyings, b: varyings, c: bool) -> varyings => if c => a else b\n"
+                          "@pixel fun ps(p: varyings) -> float4:\n"
+                          "    let mut q = p\n"
+                          "    q.uv = q.uv * 2.0\n"
+                          "    let r = pick(p, q, p.uv.x > 0.5)\n"
+                          "    return float4(r.uv.x, q.uv.y, 0.0, 1.0)\n");
+    for (auto const t : {target::hlsl_dx12, target::hlsl_vulkan, target::msl, target::wgsl})
+    {
+        auto const e = sgl::compile_to_text({.source = source, .entry_point = "ps", .target = t});
+        REQUIRE(e.has_value()).dump("target", sgl::emit::to_string(t)).dump("error", e.has_error() ? e.error() : "");
+        // dx12 declares them, unread, since it links by register
+        if (t != target::hlsl_dx12)
+            CHECK(!e.value().text.contains("planes")).dump("text", e.value().text);
+    }
+    for (auto const t : {target::hlsl_dx12, target::hlsl_vulkan})
+    {
+        auto const e
+            = sgl::compile_to_text({.source = source, .entry_point = "ps", .target = t, .native = native_route::require});
+        REQUIRE(e.has_value()).dump("target", sgl::emit::to_string(t)).dump("error", e.has_error() ? e.error() : "");
+    }
+}
+
+TEST("sgl check - a mesh stage that writes clip distances is unsupported yet")
+{
+    // CHK-571: a geometry, tessellation or mesh stage that hands one on is unsupported-yet
+    auto const mesh = reports_for("require clip_distances, mesh_shader\n"
+                                  "struct corner:\n"
+                                  "    @position position: hpos4\n"
+                                  "    @clip_distances planes: float[2]\n"
+                                  "@mesh(1, vertices = 3, triangles = 1)\n"
+                                  "fun ms(output: mut mesh_output[corner]):\n"
+                                  "    output.set_counts(3u, 1u)\n"
+                                  "    output.vertex(0u, {position = hpos4(0.0, 0.0, 0.0, 1.0), planes = "
+                                  "float[2].filled(1.0)})\n"
+                                  "    output.triangle(0u, uint3(0u, 1u, 2u))\n");
+    CHECK(mesh.contains("unsupported-yet")).dump("report", mesh);
+    CHECK(mesh.contains("clip distances in a mesh stage")).dump("report", mesh);
+}
+
+TEST("sgl emit - a link's member after the clip distances sits on the same DXIL row on both sides of the link")
+{
+    // D3D12 links a vertex and a pixel stage by register, so every input of the pixel stage must sit where the
+    // vertex stage wrote it, which is why the pixel stage declares the clip distances there, unread (CHK-574).
+    auto const vs = compiled("three_vs", target::hlsl_dx12, native_route::prefer);
+    auto const ps = compiled("shade_ps", target::hlsl_dx12, native_route::prefer);
+    REQUIRE(vs.has_value()).dump("error", vs.has_error() ? vs.error() : cc::string());
+    REQUIRE(ps.has_value()).dump("error", ps.has_error() ? ps.error() : cc::string());
+    auto matched = 0;
+    for (auto const& out : vs.value().signature)
+        for (auto const& in : ps.value().signature)
+            if (out.table == sgl::ir::dxil::signature_table::output && in.table == sgl::ir::dxil::signature_table::input
+                && out.name == in.name && out.semantic_index == in.semantic_index)
+            {
+                ++matched;
+                CHECK(out.row == in.row).dump("name", out.name).dump("vertex row", out.row).dump("pixel row", in.row);
+                CHECK(out.first_column == in.first_column).dump("name", out.name);
+            }
+    // the position, the three lanes and the uv
+    CHECK(matched == 5);
 }
 
 TEST("sgl emit - SGL's own SPIR-V writes one ClipDistance array of the lanes, and its own DXIL a lane per element")

@@ -1095,7 +1095,8 @@ fun f() -> float:
   A lane that is a NaN or an infinity clips as the target clips it, which SGL does not specify.
 * **CHK-573** Only the struct that reaches the rasterizer clips, and a pipeline whose vertex stage hands one to a geometry or a tessellation stage is `invalid-pipeline` (CHK-307).
 * **CHK-574** A pixel stage that takes the struct reads no `@clip_distances` field: a read of it is `unsupported-yet` there, since WGSL has no such input ([why](why/checking.md#chk-574)).
-  Its link leaves the field out on every target, so the pixel stage needs nothing of it.
+  A link matched by location leaves the field out of the pixel stage, so the pixel stage needs nothing of it.
+  dx12 matches its stages by register, so there the pixel stage declares the lanes, unread, where the vertex stage writes them.
 * **CHK-575** A vertex stage whose result holds one needs `clip_distances` ([why](why/checking.md#chk-575)).
   sg's dx12 and metal backends grant it on every device, vulkan with `shaderClipDistance`, and webgpu with the feature `clip-distances`, so WGSL writes it where the device has the feature.
 * **CHK-437** `@view_index` is which view of a draw of several the invocation renders, from 0, and the pipeline's `view_count` says how many.
