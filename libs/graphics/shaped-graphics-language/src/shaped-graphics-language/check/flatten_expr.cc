@@ -880,10 +880,12 @@ auto sgl::check::impl::flattener::flatten_callable_call(ast::expr_id id, ast::ca
     -> flat_expr_id
 {
     auto const where = origin{.file = file(), .expr = id};
-    auto base = 0;
-    for (auto const& p : c.out.pipelines)
-        if (p.kind == pipeline_kind::callables && index_of(p.symbol) < index_of(t.table))
-            base += i32(p.records.count);
+    // CHK-NEW: the table's place in the program's callable section, which holds the tables of reached modules alone
+    auto const base = c.out.callable_offset_of(t.table);
+    // a program's call reaches its table, so only a module's test in a link of the library's chain, which reaches no
+    // module, finds none; the link is refused, and the check beside the library reports that test (CHK-344)
+    if (base < 0)
+        return fail();
     auto const* const found = c.prelude_names.get_ptr("call_callable");
     if (found == nullptr || found->empty())
         return fail();

@@ -1,3 +1,4 @@
+#include <clean-core/algorithm/sort.hh>
 #include <clean-core/sequence/sequence.hh>
 #include <clean-core/string/format.hh>
 #include <shaped-graphics-language/check/impl/checker.hh>
@@ -868,7 +869,8 @@ void checker::compile_raytracing_pipeline(symbol_id id)
             entries.push_back_range(out.at(out.pipelines[out.at(group).info].records));
             entries.push_back(out.pipelines[out.at(group).info].intersection);
         }
-        // CHK-343: every callables table of the module joins every ray-tracing pipeline
+        // CHK-343: every callables table of the reached modules joins every ray-tracing pipeline; the section's order
+        // (CHK-NEW) is made after every symbol compiled, and only which tables join matters here
         for (auto i = isize(0); i < out.symbols.size(); ++i)
         {
             auto const table = symbol_id(i);
@@ -1182,20 +1184,100 @@ type_id checker::check_callable_call(function_scope& scope,
     return checked_module::void_type;
 }
 
+void checker::order_callables()
+{
+    out.callable_tables = {};
+    // Modules by name, the program's own first: a library file of the program's module is one of its files (CHK-346).
+    // The names, and nothing of the order a check placed the modules in, decide the section.
+    auto const program = i32(out.file_modules.size()) - 1;
+    if (program < prelude_count)
+        return;
+    auto names = cc::vector<cc::string_view>();
+    auto const module_of = [&](cc::string_view name) -> i32
+    {
+        for (auto i = i32(0); i < i32(names.size()); ++i)
+            if (names[i] == name)
+                return i;
+        return -1;
+    };
+    names.push_back(out.file_modules[program]);
+    for (auto f = prelude_count; f < program; ++f)
+        if (module_of(out.file_modules[f]) < 0)
+            names.push_back(out.file_modules[f]);
+    // what each module's files `use`
+    auto used = cc::vector<cc::vector<i32>>();
+    for (auto i = isize(0); i < names.size(); ++i)
+        used.push_back({});
+    for (auto f = prelude_count; f <= program && f < i32(uses.size()); ++f)
+    {
+        auto const from = module_of(out.file_modules[f]);
+        for (auto const& u : uses[f])
+        {
+            auto const to = u.module >= 0 && u.module < i32(modules.size()) ? module_of(modules[u.module]) : -1;
+            if (to >= 0 && to != from && !used[from].values().any([&](i32 m) { return m == to; }))
+                used[from].push_back(to);
+        }
+    }
+    // the modules the program reaches; behind a layer of the whole library the others are checked too
+    auto is_reached = cc::vector<u8>::create_filled(names.size(), 0);
+    auto pending = cc::vector<i32>{0};
+    while (!pending.empty())
+    {
+        auto const m = pending.back();
+        pending.remove_back();
+        if (is_reached[m] != 0)
+            continue;
+        is_reached[m] = 1;
+        pending.push_back_range(cc::span<i32 const>(used[m]));
+    }
+    // Each module after those it uses; of those that may come next, the first by name.
+    // The program's own module uses every other one it reaches, so it comes last.
+    auto is_placed = cc::vector<u8>::create_filled(names.size(), 0);
+    for (auto step = isize(0); step < names.size(); ++step)
+    {
+        auto best = -1;
+        auto best_is_ready = false;
+        for (auto m = i32(0); m < i32(names.size()); ++m)
+        {
+            if (is_reached[m] == 0 || is_placed[m] != 0)
+                continue;
+            auto const is_ready = used[m].values().all([&](i32 u) { return is_placed[u] != 0; });
+            // a loop of `use`s was reported (CHK-349), and its modules still come in an order
+            if (best < 0 || (is_ready && !best_is_ready) || (is_ready == best_is_ready && names[m] < names[best]))
+            {
+                best = m;
+                best_is_ready = is_ready;
+            }
+        }
+        if (best < 0)
+            break;
+        is_placed[best] = 1;
+        // its tables in declaration order: its files as the check placed them, which is the library's order and the
+        // program's file last, and each file's declarations in source order, which is the order of their symbols
+        auto const first = out.callable_tables.size();
+        for (auto const& p : out.pipelines)
+            if (p.kind == pipeline_kind::callables && out.at(p.symbol).file >= prelude_count
+                && out.file_modules[out.at(p.symbol).file] == names[best])
+                out.callable_tables.push_back(p.symbol);
+        cc::sort(cc::span<symbol_id>(out.callable_tables).subspan({.offset = first}),
+                 [&](symbol_id a, symbol_id b)
+                 {
+                     auto const fa = out.at(a).file;
+                     auto const fb = out.at(b).file;
+                     return fa != fb ? fa < fb : index_of(a) < index_of(b);
+                 });
+    }
+}
+
 void checker::judge_callables()
 {
-    // tables pack in declaration order, so a table the host appends to is the last one
-    auto last = symbol_id::none;
-    for (auto const& p : out.pipelines)
-        if (p.kind == pipeline_kind::callables && out.is_reached_file(out.at(p.symbol).file)
-            && (!is_valid(last) || index_of(p.symbol) > index_of(last)))
-            last = p.symbol;
-    for (auto const& p : out.pipelines)
-        if (p.kind == pipeline_kind::callables && p.has_host_callables && p.symbol != last
-            && out.is_reached_file(out.at(p.symbol).file))
-            report(diagnostic_kind::invalid_pipeline, out.at(p.symbol).file,
-                   span_of(out.at(p.symbol).file, out.at(p.symbol).declaration),
-                   cc::format("{} takes the host's callables, so it is the module's last callables table: the host's "
-                              "follow every listed one",
-                              out.at(p.symbol).name));
+    // the host's callables follow the section's last table, so that is the one table that may take them
+    auto const last = out.callable_tables.empty() ? symbol_id::none : out.callable_tables.back();
+    for (auto const table : out.callable_tables)
+        if (table != last && out.pipelines[out.at(table).info].has_host_callables)
+            report(diagnostic_kind::invalid_pipeline, out.at(table).file,
+                   span_of(out.at(table).file, out.at(table).declaration),
+                   cc::format("{} takes the host's callables, so it is the last table of the program's callable "
+                              "section: the host's follow every listed one",
+                              out.at(table).name));
 }

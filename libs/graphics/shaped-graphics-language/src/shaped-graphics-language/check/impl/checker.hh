@@ -1417,7 +1417,10 @@ struct checker
                                 ast::call const& call,
                                 ast::index const& index,
                                 symbol_id table);
-    /// CHK-343: at most one table of a module takes the host's callables, and it is declared last.
+    /// CHK-NEW: `out.callable_tables`, the tables of the modules the program reaches in the order of its callable
+    /// section, made from the files' `module` and `use` lines alone, so every way of checking the program agrees.
+    void order_callables();
+    /// CHK-343: at most one table of the callable section takes the host's callables, and it is the section's last.
     void judge_callables();
     /// CHK-331: a `@raytracing pipeline`.
     void compile_raytracing_pipeline(symbol_id id);

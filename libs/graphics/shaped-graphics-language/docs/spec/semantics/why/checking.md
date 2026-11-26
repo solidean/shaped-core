@@ -577,9 +577,18 @@ The attributes are a struct of the program because every target passes them as a
 
 ## CHK-343
 
-A table belongs to the module rather than to a pipeline so that its place in the callable section is a constant of the module.
+A table belongs to the program's callable section rather than to a pipeline so that its place there is a constant of the program (CHK-NEW).
 Were a table the pipeline's, a stage calling it would compile once per pipeline, with another offset each time, and a stage shared by two pipelines would be two shaders.
-The cost is that every pipeline of the module holds every callable, which costs table space and nothing else.
+The cost is that every pipeline of the program holds every callable of the section, which costs table space and nothing else.
+
+## CHK-NEW
+
+A table's place is compiled into every call of it, and the host builds its shader table to the same places, so a place depends on what the program reaches and on nothing else.
+Counting the tables of every module of the library would move a pipeline's indices whenever a module nothing of the pipeline uses gains a table, or a file joins the library.
+The order is one the host can state from the program's `use` lines and the modules' names, and `describe` lists each table with its place, so generated host code computes none.
+Names decide between modules that may come in either order, rather than the order of `use` lines or the order a check placed the modules in.
+That order differs between the whole library's chain, a chain re-made for a module's option and the reached modules alone.
+A used module comes before its user so that a library's shared modules keep their tables at the front.
 
 ## CHK-381
 

@@ -15,6 +15,8 @@
 /// This is the seam between the compiler and a build that writes C++, and it knows nothing about that C++.
 /// A type is named as SGL spells it, `float3` or `mat4`, and mapping it to a host type is the reader's job.
 /// It holds only what the file itself declares: a module it `use`s describes its own declarations.
+/// The callable section is the exception: it lists the tables of every module the program reaches, since their places
+/// are the program's (CHK-NEW).
 /// A name of such a module the file writes is spelled as the program names it, `view.frame`, whatever name the file's
 /// `use` gave the module, so the host refers to that module's declaration rather than generating a second one.
 ///
@@ -389,18 +391,21 @@ struct sgl::described_hit_group
     cc::vector<cc::string> traversals;
 };
 
-/// A `callables` table: callable shaders of one parameter type, packed in the module's declaration order.
+/// A `callables` table of the program's callable section: callable shaders of one parameter type (CHK-343, CHK-NEW).
 struct sgl::described_callables
 {
+    /// Bare for the program's own module's, `m.name` for a module's it uses (CHK-348).
     cc::string name;
     /// The parameter's type, a struct by its host name.
     cc::string parameter;
     /// The parameter's structural hash, as 32 hex digits.
     cc::string parameter_shape;
+    /// Named as `name` is.
     cc::vector<cc::string> entries;
-    /// Whether the host appends callables of its own after every listed one of the module.
+    /// Whether the host appends callables of its own after every listed one of the section.
     bool has_host = false;
-    /// Where the table starts in the callable section of every ray-tracing pipeline of the module.
+    /// Where the table starts in the callable section of every ray-tracing pipeline of the program: how many callables
+    /// the tables before it hold, so `table[i]` is the section's callable `offset + i`.
     i32 offset = 0;
 };
 
@@ -423,7 +428,8 @@ struct sgl::described_raytracing_pipeline
     cc::vector<cc::string> layout;
     cc::string inline_constants;
     cc::vector<cc::string> features;
-    /// Every callable of the module's tables, in their order, which the pipeline's callable section holds first.
+    /// Every callable of the program's callable section, in its order (CHK-NEW), which the pipeline's callable section
+    /// holds first; a module's named `m.name`, as `described_callables::entries` names it (CHK-348).
     cc::vector<cc::string> callables;
     bool has_host_callables = false;
     /// The parameter a host's callable takes, a struct by its host name, and its structural hash; both empty without
@@ -470,6 +476,8 @@ struct sgl::module_description
     cc::vector<described_ray_set> ray_sets;
     cc::vector<described_hit_group> hit_groups;
     cc::vector<described_raytracing_pipeline> raytracing_pipelines;
+    /// The program's callable section, its own tables and those of the modules it reaches, in the section's order;
+    /// empty where a module itself is described.
     cc::vector<described_callables> callables;
     /// The file-scope samplers, in index order.
     cc::vector<described_file_sampler> samplers;

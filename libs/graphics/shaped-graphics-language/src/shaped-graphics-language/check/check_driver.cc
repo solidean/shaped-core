@@ -105,6 +105,8 @@ void checker::run(resume_point from)
     index_builtin_symbols(from.symbols);
     instantiate_generics(from.call_records, from.types);
     prepare_target_layouts();
+    // CHK-NEW: a call of a callable is flattened at its table's place in the section
+    order_callables();
     // CHK-350: the entry points are the program's; a module the program uses is a library, whose own are not built
     for (auto i = from.symbols; i < out.symbols.size(); ++i)
         if (out.symbols[i].kind == symbol_kind::function && out.symbols[i].state == symbol_state::checked

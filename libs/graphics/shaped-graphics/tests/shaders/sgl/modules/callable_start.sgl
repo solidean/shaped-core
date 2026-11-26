@@ -1,0 +1,6 @@
+// What `raytracing_callables_used.sgl`'s raygen starts each operand from.
+// Its `use` of this module checks the raygen behind the library's whole chain, where `aside_callables` and its table
+// are checked too, and take no place in the raygen's callable section (CHK-NEW).
+module callable_start
+
+fun start_of(i: int) -> float => (i as float) + 1.0

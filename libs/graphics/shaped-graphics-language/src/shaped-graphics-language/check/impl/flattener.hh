@@ -533,8 +533,8 @@ struct flattener
     /// CHK-345: a report beyond the ray's range is none, and one in it is what the any hit decides of it.
     flat_expr_id decide_report(origin from, flat_expr_id reported);
 
-    /// CHK-344: `table[i](mut p)` is a call of callable `base + i` of the pipeline's section, where `base` is where the
-    /// module's tables before this one end: they pack in declaration order.
+    /// CHK-344: `table[i](mut p)` is a call of callable `base + i` of the program's callable section, where `base` is
+    /// the table's place in it (CHK-NEW).
     flat_expr_id flatten_callable_call(ast::expr_id id, ast::call const& call, callable_call const& t);
 
     /// The element `place` names, over a local holding its index where evaluating the index twice could differ.

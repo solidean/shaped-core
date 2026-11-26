@@ -1,0 +1,38 @@
+// Callables of a raygen that uses a module of the library, so it is checked behind the library's whole chain.
+// That chain holds `aside_callables`'s table too, which the raygen never reaches: its own table still starts its
+// callable section, and thread i calls callable `i % 2` of `steps` (CHK-NEW).
+require raytracing_pipeline
+use callable_start
+
+binding stepped:
+    values: mut buffer[float4]
+
+struct step_operand:
+    x: float
+
+struct step_probe:
+    is_missed: bool
+
+rays step_rays:
+    probe: step_probe
+
+@callable fun tripled(v: mut step_operand):
+    v.x = v.x * 3.0
+
+@callable fun shifted(v: mut step_operand):
+    v.x = v.x + 10.0
+
+callables steps = (tripled, shifted)
+
+@raygen fun apply_steps(@launch_id id: int3){stepped}:
+    let mut v = step_operand(callable_start.start_of(id.x))
+    steps[id.x % 2](mut v)
+    stepped.values[id.x] = float4(v.x, 0.0, 0.0, 0.0)
+
+@miss fun step_miss(p: mut step_probe):
+    p.is_missed = true
+
+@raytracing pipeline stepping:
+    rays = step_rays
+    raygen = apply_steps
+    miss.probe = step_miss

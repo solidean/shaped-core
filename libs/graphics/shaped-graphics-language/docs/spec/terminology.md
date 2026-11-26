@@ -39,6 +39,7 @@ Back to the [specification](_index.md).
 * "hit group" - one row of a ray-tracing pipeline's table: a record per ray type ([raytracing](raytracing.md#hit-groups))
 * "record" - one ray type's closest hit and any hit in a hit group; `()` is an empty one
 * "callables table" - `callables name = (…)`: callable shaders of one parameter type, called by index
+* "callable section" - the callables tables of the modules a program reaches, in one order, which every ray-tracing pipeline of the program holds first among its callables
 * "trace graph" - the ray types of a pipeline, with an edge where a ray type's miss or closest hit traces another; its longest chain is the depth
 * "subgroup" - the invocations the hardware runs in lockstep: a wave, a warp, a SIMD-group; not "wave" ([checking](semantics/checking.md#subgroups))
 * "quad" - four invocations of a subgroup: a pixel's 2x2 neighbourhood, or four consecutive invocations of a compute subgroup
