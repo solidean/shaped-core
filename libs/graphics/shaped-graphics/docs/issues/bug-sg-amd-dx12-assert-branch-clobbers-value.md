@@ -25,3 +25,15 @@ Not yet confirmed: no standalone reproduction, and no variant (no print, no retu
 
 `TEMPORARY(bug-sg-amd-dx12-assert-branch-clobbers-value)` skips the test on an AMD dx12 context.
 Close it once a reduction says whose bug it is: a `docs/bugs-external/` entry if AMD's, a fix if the debug window's binding is ours.
+
+## Log
+
+**2026-11-26: AMD's compiler, triggered by SGL's DXIL alone; worked around in SGL's DXIL writer (EMIT-285).**
+The body's "both dx12 routes" was the native-DXIL context, where the text route is SGL's DXIL too: DXC's own DXIL stores `{2, 4, 3, 8}` on AMD.
+Run in a standalone host, SGL's container stores `{6, 6, 3, 6}` on AMD and right on the Arc and WARP.
+Reduced through SGL variants: no print, no message and no debug buffer are needed, only `if not (v != 3): return`.
+SGL wrote that as a branch on `xor (icmp ne v, 3), true`, and AMD's compiler then takes `v` as 3 on the path where it is not.
+`v * 2 + id.x * 100` stores `{6, 106, 3, 306}`, so it is the constant, not another lane's value.
+A negated `v < 3` comes out right, and DXC folds the `not` away at every level, so HLSL never reaches it.
+The writer now branches on what a `logical_not` negates, with the ways swapped, and the test runs on AMD again.
+[amd-d3d12-negated-equality-branch-substitutes-constant](../../../../../docs/bugs-external/amd-d3d12-negated-equality-branch-substitutes-constant/readme.md) reproduces it.

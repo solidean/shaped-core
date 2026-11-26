@@ -1,0 +1,12 @@
+// What negated.dxil and swapped.dxil were written from, by `sgl emit --target dxil` before and after EMIT-285.
+// Four threads read {1, 2, 3, 4}; the one holding 3 leaves early, and every other stores v * 2 + 100 * its index.
+// So values must read {2, 104, 3, 308} afterwards.
+
+binding checked:
+    values: mut buffer[int]
+
+@compute fun negated(@thread_id id: int3){checked}:
+    let v = checked.values[id.x]
+    if not (v != 3):
+        return
+    checked.values[id.x] = v * 2 + id.x * 100

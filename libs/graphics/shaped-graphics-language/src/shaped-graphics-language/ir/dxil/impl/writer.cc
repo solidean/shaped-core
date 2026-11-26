@@ -445,16 +445,26 @@ void writer::terminator(instruction const& i)
         return _m.branch(_blocks[operands[0]]);
     case op::branch_conditional:
     {
-        auto const* const yes = loop_break_of(_lowering, operands[1]);
-        auto const* const no = loop_break_of(_lowering, operands[2]);
+        // EMIT-285: a branch on a negation branches on what it negates, its ways swapped
+        auto condition = value_ref(operands[0]);
+        auto if_true = operands[1];
+        auto if_false = operands[2];
+        if (is_operation(condition) && _p.instructions[index_of(condition)].code == op::logical_not)
+        {
+            condition = value_ref(_p.operands_of(_p.instructions[index_of(condition)])[0]);
+            if_true = operands[2];
+            if_false = operands[1];
+        }
+        auto const* const yes = loop_break_of(_lowering, if_true);
+        auto const* const no = loop_break_of(_lowering, if_false);
         if (yes == nullptr && no == nullptr)
-            return _m.branch_if(leaf_at(value_ref(operands[0])), _blocks[operands[1]], _blocks[operands[2]]);
+            return _m.branch_if(leaf_at(condition), _blocks[if_true], _blocks[if_false]);
         // both ways out to one merge: the break's block alone, so the merge has the one edge its phis name
         if (yes == no)
             _m.branch(yes->split);
         else
-            _m.branch_if(leaf_at(value_ref(operands[0])), yes != nullptr ? yes->split : _blocks[operands[1]],
-                         no != nullptr ? no->split : _blocks[operands[2]]);
+            _m.branch_if(leaf_at(condition), yes != nullptr ? yes->split : _blocks[if_true],
+                         no != nullptr ? no->split : _blocks[if_false]);
         for (auto const* const l : {yes, no})
             if (l != nullptr && (l == yes || yes != no))
             {
