@@ -178,6 +178,10 @@ const light_kind_sun: i32 = 2;
   An element takes the first row, and the lowest free columns, that hold it, in declared order: a struct's members, then the stage inputs.
   A row holds one interpolation mode, and an ordinary element never follows a system one in it.
   A vertex input takes a row of its own, a render target the row of its index, and `SV_TessFactor` and `SV_InsideTessFactor` their fixed places.
+* **EMIT-286** A pixel stage's inputs a mesh stage writes per primitive start on the row after every other input's, as the mesh spec says, where DXC's packer may share one.
+  A mesh pipeline links its stages by semantic, so this departs from EMIT-235 without parting a link.
+  AMD's D3D12 driver draws a shared row wrong.
+  [dxc-pixel-signature-packs-primitive-into-vertex-row](../../../../../../docs/bugs-external/dxc-pixel-signature-packs-primitive-into-vertex-row/readme.md) reproduces it.
 * **EMIT-31** A semantic is made from the name as the program writes it, whatever EMIT-18 made of the member.
 * **EMIT-32** A vertex input member whose semantic would start with `SV_` is `system-value-semantic`.
 * **EMIT-33** A member of an edge struct is of a builtin type whose record says it crosses an edge, which `mat4`, `int` and `bool` do not, or it is `unsupported`.
@@ -605,6 +609,9 @@ fn main_ps(p: pixel_input) -> target_ {
   A shuffle by an offset reads `waveReadLaneAt` at the lane it computes from `waveGetLaneIndex`, as EMIT-146's text does.
   An inclusive sum or product is `wavePrefixOp` and then this invocation's own value folded in, since DXIL's prefix is exclusive alone.
   A ballot is `waveActiveBallot`'s four words, a quad swap `quadOp` of its axis, and a quad broadcast `quadReadLaneAt`.
+* **EMIT-285** DXIL branches on what a `not` negates, with the branch's two ways swapped, as DXC writes it.
+  AMD's D3D12 driver takes the compared value on the wrong side of a branch on a negated equality.
+  [amd-d3d12-negated-equality-branch-substitutes-constant](../../../../../../docs/bugs-external/amd-d3d12-negated-equality-branch-substitutes-constant/readme.md) reproduces it.
 * **EMIT-250** A native route's `atomic[float]` held as a `uint`'s bits is that `uint`'s atomic, bitcast either side, in shared lowering.
   Its add is the text's loop: a compare-exchange of the bits of the sum, retried with what it read until no other update came between.
   The first guess is an atomic load where the text reads plainly, since either is only a guess the exchange checks.

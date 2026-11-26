@@ -524,8 +524,9 @@ cc::shared_async<sg_test::offscreen_pixels> drawn_mesh(sg::context& ctx, mesh_pi
         });
 }
 
-/// Every pairing of the pipeline's routes against all of it through DXC.
-cc::shared_async<sg_test::offscreen_pixels> compared_mesh(sg::context& ctx, mesh_pipeline const& p)
+/// Every pairing of the pipeline's routes against all of it through DXC, but for the stages `native` names, which every
+/// pairing and the reference take from SGL; its bits are `drawn_mesh`'s.
+cc::shared_async<sg_test::offscreen_pixels> compared_mesh(sg::context& ctx, mesh_pipeline const& p, u32 native = 0)
 {
     auto const has_route = [](route_pair const& pair) { return pair.text.has_value() && pair.native.has_value(); };
     REQUIRE(has_route(p.mesh));
@@ -538,7 +539,7 @@ cc::shared_async<sg_test::offscreen_pixels> compared_mesh(sg::context& ctx, mesh
         CHECK(p.task.native.value().compiler.name == "sgl");
     }
     auto const stages = p.task.text.has_value() ? 3 : 2;
-    auto const reference = co_await drawn_mesh(ctx, p, 0);
+    auto const reference = co_await drawn_mesh(ctx, p, native);
     auto covered = 0;
     for (auto y = 0; y < k_size; ++y)
         for (auto x = 0; x < k_size; ++x)
@@ -546,7 +547,8 @@ cc::shared_async<sg_test::offscreen_pixels> compared_mesh(sg::context& ctx, mesh
     // two blank images would agree, so the reference has to have drawn
     CHECK(covered > 0).context(p.name);
     for (auto mask = u32(1); mask < (1u << stages); ++mask)
-        check_same(co_await drawn_mesh(ctx, p, mask), reference, cc::format("{}: native stages {}", p.name, mask));
+        if ((mask & native) == native && mask != native)
+            check_same(co_await drawn_mesh(ctx, p, mask), reference, cc::format("{}: native stages {}", p.name, mask));
     co_return reference;
 }
 } // namespace
@@ -575,13 +577,6 @@ ASYNC_INVOCABLE_TEST("sg - mesh and task stages of SGL's binary link against DXC
 
     auto const quad_mesh = co_await SG_ROUTES(quad_ms);
     (void)co_await compared_mesh(*ctx, {.name = "quad", .mesh = quad_mesh, .pixel = plain});
-    auto const faces_mesh = co_await SG_ROUTES(faces_ms);
-    auto const faces_pixel = co_await SG_ROUTES(faced_ps);
-    auto const faced = co_await compared_mesh(*ctx, {.name = "faces", .mesh = faces_mesh, .pixel = faces_pixel});
-    // each triangle read what the mesh stage wrote for it: the first in the target's lower right, the second opposite
-    CHECK(faced[1].rgba_float(k_size - 2, k_size - 2)[2] == 40.0f);
-    CHECK(faced[1].rgba_float(1, 1)[2] == 41.0f);
-    CHECK(faced[1].rgba_float(1, 1)[0] == 1.5f);
     auto const lines_mesh = co_await SG_ROUTES(lines_ms);
     (void)co_await compared_mesh(*ctx, {.name = "lines", .mesh = lines_mesh, .pixel = plain});
     auto const split_task = co_await SG_ROUTES(split_ts);
@@ -597,4 +592,38 @@ ASYNC_INVOCABLE_TEST("sg - mesh and task stages of SGL's binary link against DXC
     (void)co_await compared_mesh(*ctx,
                                  {.name = "many invocations", .task = many_task, .mesh = many_mesh, .pixel = plain});
 #undef SG_ROUTES
+}
+
+ASYNC_INVOCABLE_TEST("sg - a mesh stage's per-primitive values reach a pixel stage of SGL's binary and of DXC's alike",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    (void)sg_test::shader_fixtures();
+    if (ctx->prefers_native_dxil() || ctx->prefers_native_spirv())
+        SKIP("this context takes SGL's binary for every package, so there is no DXC route to mix with");
+    auto const takes_dxil = ctx->accepts_shader_format(sg::shader_format::dxil);
+    if (!takes_dxil && !ctx->accepts_shader_format(sg::shader_format::spirv))
+        SKIP("this context takes neither DXIL nor SPIR-V");
+    if (!ctx->supports(sg::feature::mesh_shader))
+        SKIP("this device has no mesh stage");
+    namespace text = sg::test::mixed_text::mesh_stages;
+    namespace dxil = sg::test::mixed_dxil::mesh_stages;
+    namespace spirv = sg::test::mixed_spirv::mesh_stages;
+
+#define SG_ROUTES(entry) route_pair_of(*ctx, takes_dxil, text::entry, dxil::entry, spirv::entry)
+    auto const faces_mesh = co_await SG_ROUTES(faces_ms);
+    auto const faces_pixel = co_await SG_ROUTES(faced_ps);
+#undef SG_ROUTES
+    if (!faces_pixel.text.has_value())
+        SKIP("this build has no DXC");
+    // DXC packs a per-primitive input into a row of the link's, which the mesh spec forbids, and EMIT-286 does not
+    auto const* const issue = sg::known_issue_affecting(*ctx, "dxc-pixel-signature-packs-primitive-into-vertex-row");
+    auto const native = issue != nullptr ? 2u : 0u;
+    auto const faced = co_await compared_mesh(*ctx, {.name = "faces", .mesh = faces_mesh, .pixel = faces_pixel}, native);
+    // each triangle read what the mesh stage wrote for it: the first in the target's lower right, the second opposite
+    CHECK(faced[1].rgba_float(k_size - 2, k_size - 2)[2] == 40.0f);
+    CHECK(faced[1].rgba_float(1, 1)[2] == 41.0f);
+    CHECK(faced[1].rgba_float(1, 1)[0] == 1.5f);
+    if (issue != nullptr)
+        nx::skip_known_issue(issue->id, issue->symptom);
 }

@@ -1,5 +1,6 @@
 #include <clean-core/algorithm/sort.hh>
 #include <clean-core/common/macros.hh> // CC_OS_WINDOWS
+#include <clean-core/math/bit.hh>
 #include <clean-core/record/log.hh>
 #include <clean-core/streams/file_stream.hh>
 #include <clean-core/string/format.hh>
@@ -238,7 +239,15 @@ void read_modes(cc::string_view text, cc::vector<dxc_element>& elements)
             result.push_back(cc::format("{}: DXC alone, row {} mask {}", where, i32(d.row), d.mask));
             continue;
         }
-        if (found->row != i32(d.row))
+        if (found->per_primitive)
+        {
+            // EMIT-286: past every row of a vertex's input, where DXC's packer may share one, and linked by name alone
+            for (auto const& o : ours)
+                if (o.table == found->table && !o.per_primitive && o.row >= found->row)
+                    result.push_back(cc::format("{}: row {} shares or precedes {}{}'s {}", where, found->row, o.name,
+                                                o.semantic_index, o.row));
+        }
+        else if (found->row != i32(d.row))
             result.push_back(cc::format("{}: row {} against DXC's {}", where, found->row, i32(d.row)));
         else if (found->row >= 0 && found->mask() != d.mask)
             result.push_back(cc::format("{}: mask {} against DXC's {}", where, found->mask(), d.mask));
@@ -323,7 +332,11 @@ void compare_entry(ssc::dxc::compiler& compiler, sgl::text_request request, swee
         {
             if (o.table != d.table || o.name != d.name || o.semantic_index != d.semantic_index)
                 continue;
-            auto const agrees = o.table == signature_table::input ? (d.usage & ~o.usage) == 0 : d.usage == o.usage;
+            // lanes counted from the element's first column, which a per-primitive input need not share with DXC's
+            auto const theirs_used = d.mask == 0 ? d.usage : d.usage >> cc::count_trailing_zeroes(d.mask);
+            auto const ours_used = o.mask == 0 ? o.usage : o.usage >> cc::count_trailing_zeroes(o.mask);
+            auto const agrees
+                = o.table == signature_table::input ? (theirs_used & ~ours_used) == 0 : theirs_used == ours_used;
             if (!agrees)
                 counts.mismatches.push_back(cc::format("{} {}: {}{} used {} against DXC's {}", label,
                                                        request.entry_point, o.name, o.semantic_index, o.usage, d.usage));

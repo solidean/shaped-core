@@ -17,3 +17,14 @@ AMD's vulkan context passes the test, and so does Intel's dx12.
 So it is not the native route: the all-DXC reference fails.
 Not yet known: whether AMD drops a mesh shader's per-primitive attributes, or whether sg's dx12 mesh pipeline describes them in a way AMD reads differently.
 A capture with the debug layer's GPU validation, or a standalone mesh shader writing one primitive attribute, would tell.
+
+## Log
+
+**2026-11-26: DXC's packing breaks the mesh spec, which AMD's driver draws wrong; SGL's own DXIL now follows the spec (EMIT-286).**
+In `faced_ps`'s input signature, DXC packs a per-primitive input into the free columns of a `nointerpolation` vertex input's row.
+The mesh spec says vertex and primitive attributes never share a row; the Arc and WARP draw it anyway, and AMD draws nothing.
+One constant vertex attribute and one per-primitive attribute are enough, standalone, with no sg involved.
+SGL's packer starts the primitive inputs on a fresh row, and its pixel stage draws right on AMD beside either route's mesh stage.
+HLSL cannot place a pixel input, so DXC's pixel stage keeps the shared row: `known_issues.cc`'s `dxc-pixel-signature-packs-primitive-into-vertex-row` skips its pairings on AMD's dx12.
+The faces case is a test of its own now, so that skip leaves the other mesh pipelines running.
+[dxc-pixel-signature-packs-primitive-into-vertex-row](../../../../../docs/bugs-external/dxc-pixel-signature-packs-primitive-into-vertex-row/readme.md) reproduces it.

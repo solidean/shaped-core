@@ -8,6 +8,7 @@
 ///
 /// D3D12 links two stages by name, then register, then mask, so a stage of ours links against a stage DXC compiled only
 /// if this places every element as DXC's default `-pack-prefix-stable` does (EMIT-235).
+/// A mesh pipeline links by name alone, so a pixel stage's per-primitive inputs follow the mesh spec instead (EMIT-286).
 
 /// Which table of a container an element stands in.
 enum class sgl::ir::dxil::signature_table : sgl::u8
@@ -40,6 +41,9 @@ struct sgl::ir::dxil::signature_element
     /// A later factor of one tessellation factor array, which `ISG1` and its like state row by row and `dx.sig` and
     /// `PSV0` state as one element of as many rows.
     bool continues = false;
+    /// A pixel stage's input a mesh stage writes per primitive, which starts on the row after every input of a vertex's
+    /// (EMIT-286), where DXC's packer may share one.
+    bool per_primitive = false;
 
     [[nodiscard]] u32 mask() const { return ((1u << lanes) - 1u) << first_column; }
     [[nodiscard]] bool operator==(signature_element const& rhs) const = default;

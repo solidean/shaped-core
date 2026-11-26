@@ -139,6 +139,13 @@ public:
         take(e, _rows.size() - 1, is_system);
     }
 
+    /// Takes no element into a row held so far, so what follows starts on the row after them.
+    void close_rows()
+    {
+        for (auto& held : _rows)
+            held.next_column = held.limit;
+    }
+
     /// A factor's own place: column `w` of a row, or `x` of a triangle's inside factor, and the row goes on holding links.
     void place_factor(signature_element& e, isize at, u32 column)
     {
@@ -187,12 +194,20 @@ void pack_list(program const& p, cc::span<u32 const> elements, signature_table t
     auto const is_vertex_input = p.stage == stage::vertex && table == signature_table::input;
     auto const is_target = p.stage == stage::pixel && table == signature_table::output;
     auto next_vertex_row = 0;
+    auto is_after_primitive = false;
     for (auto const index : elements)
     {
         auto const rule = rule_of(p, p.stage_elements[index]);
         if (rule.system != built_in::none && rule.how == reach::operation)
             continue;
+        // EMIT-286: a pixel stage's per-primitive inputs start on the row after its link's, where DXC's packer may share one
+        if (p.stage_elements[index].part == stage_part::primitive && !is_after_primitive)
+        {
+            rows.close_rows();
+            is_after_primitive = true;
+        }
         auto e = element_of(p, index, table);
+        e.per_primitive = is_after_primitive;
         if (rule.system != built_in::none && rule.how == reach::no_row)
             e.row = -1;
         else if (is_vertex_input)

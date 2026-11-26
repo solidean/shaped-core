@@ -58,6 +58,12 @@ constexpr sg::known_issue registry[] = {
     {.id = "intel-d3d12-cached-pso-draws-nothing",
      .symptom = "Intel's dx12 shader cache restores a raster pipeline as one that draws nothing, up to 32.0.101.9150",
      .affects = [](sg::context const& ctx) { return is_intel_dx12(ctx) && dx12_driver_at_most(ctx, {32, 0, 101, 9150}); }},
+    {.id = "dxc-pixel-signature-packs-primitive-into-vertex-row",
+     .symptom = "AMD's dx12 driver draws nothing from a mesh pipeline whose pixel stage DXC packed a per-primitive "
+                "input "
+                "into a row of a vertex's, as the mesh spec forbids",
+     .affects
+     = [](sg::context const& ctx) { return ctx.backend() == sg::backend_kind::dx12 && is_hardware(ctx, vendor_amd); }},
     {.id = "nvidia-mesh-groupshared-atomics-lost",
      .symptom = "NVIDIA's driver loses workgroup atomics of some mesh-shader invocations",
      .affects = [](sg::context const& ctx) { return is_hardware(ctx, vendor_nvidia); }},

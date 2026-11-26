@@ -146,3 +146,23 @@ TEST("sgl signature - what DXIL states with no row, or as an operation, takes no
     compute.add(stage_part::input, 3, interpolation::none, built_in::thread_id);
     CHECK(pack_signature(compute.p).empty());
 }
+
+TEST("sgl signature - a pixel stage's per-primitive inputs start on the row after every input of a vertex's (EMIT-286)")
+{
+    // a flat vertex input leaves room a flat primitive input would fit, which DXC's packer takes and the mesh spec forbids
+    auto s = stage_program(stage::pixel);
+    s.add(stage_part::input, 1, interpolation::flat);
+    s.add(stage_part::input, 3, interpolation::perspective);
+    s.add(stage_part::primitive, 2, interpolation::flat);
+    s.add(stage_part::primitive, 1, interpolation::flat);
+    auto const packed = pack_signature(s.p);
+    REQUIRE(packed.size() == 4);
+    CHECK(!packed[0].per_primitive);
+    CHECK(!packed[1].per_primitive);
+    CHECK(packed[2].per_primitive);
+    CHECK(packed[2].row == 2);
+    CHECK(packed[2].first_column == 0);
+    // primitives share rows among themselves as any two inputs do
+    CHECK(packed[3].row == 2);
+    CHECK(packed[3].first_column == 2);
+}
