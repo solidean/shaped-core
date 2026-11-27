@@ -68,7 +68,9 @@ elif mode == "quick":
 
 def child(env: dict[str, str], *args: str) -> subprocess.CompletedProcess[str]:
     code = CHILD.format(root=str(ROOT))
-    return subprocess.run([sys.executable, "-c", code, *args], env={**os.environ, **env}, capture_output=True, text=True,
+    # The guard's own settings in the caller's environment, a wait above all, must not leak into what a check sets.
+    inherited = {k: v for k, v in os.environ.items() if not k.startswith("SC_DEV_MEMORY_")}
+    return subprocess.run([sys.executable, "-c", code, *args], env={**inherited, **env}, capture_output=True, text=True,
                           timeout=60)
 
 
