@@ -2,6 +2,7 @@
 #include "module_dirs.hh"
 
 #include <babel-data/data/json.hh>
+#include <clean-core/error/optional.hh>
 #include <clean-core/streams/file_stream.hh>
 #include <clean-core/string/print.hh>
 #include <nexus/args/ambient.hh>
@@ -37,6 +38,22 @@ sgl::check::stage stage_named(cc::string_view name)
         if (sgl::check::stage_name(sgl::check::stage(i)) == name)
             return sgl::check::stage(i);
     return sgl::check::stage::none;
+}
+
+/// An option's value as `text_request::options` spells it: a JSON string as it is, a number or a bool as SGL writes it.
+cc::optional<cc::string> option_text(babel::json::ref value)
+{
+    if (value.is_string())
+        return cc::string(value.as_string());
+    if (value.is_bool())
+        return cc::string(value.as_bool() ? "true" : "false");
+    if (!value.is_number())
+        return {};
+    auto const number = value.as_double();
+    // an integer is written without a fraction, so an `int` option takes it
+    if (number >= -9.0e18 && number <= 9.0e18 && number == double(i64(number)))
+        return cc::format("{}", i64(number));
+    return cc::format("{}", number);
 }
 
 /// The file's extension for what `target` writes.
@@ -141,7 +158,16 @@ COMMAND("link")
         }
         auto const options = row["options"];
         for (auto k = isize(0); k < options.size(); ++k)
-            made.options.push_back({.name = cc::string(options[k].key()), .value = cc::string(options[k].as_string())});
+        {
+            auto value = option_text(options[k]);
+            if (!value.has_value())
+            {
+                cc::eprintln("sgl link: entry {} of {}: option '{}' is no string, number or bool", i, path,
+                             options[k].key());
+                return exit_usage;
+            }
+            made.options.push_back({.name = cc::string(options[k].key()), .value = cc::move(value.value())});
+        }
         rows.push_back(cc::move(made));
     }
 

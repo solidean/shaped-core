@@ -1,6 +1,7 @@
 #include "../check/check-test-support.hh"
 
 #include <clean-core/algorithm/sort.hh>
+#include <clean-core/error/optional.hh>
 #include <clean-core/thread/async_parallel_for.hh>
 #include <nexus/async-test.hh>
 #include <shaped-graphics-language/check/dump.hh>
@@ -506,6 +507,8 @@ TEST("sgl link - a vertex and a pixel stage of two files: the vertex stage's fil
     CHECK(sampler_bindings(spirv) == "3");
     // WebGPU and Metal number the same slots
     CHECK(emitted(r, 0, sgl::emit::target::wgsl).text.contains("@binding(3)"));
+    CHECK(numbers_after(emitted(r, 0, sgl::emit::target::msl).text, "[[sampler(") == "2");
+    CHECK(numbers_after(emitted(r, 1, sgl::emit::target::msl).text, "[[sampler(") == "0");
 }
 
 TEST("sgl link - every refusal names the group and what broke")
@@ -660,6 +663,31 @@ ASYNC_TEST("sgl link - entries emit from several threads at once as they do one 
                                     });
     for (auto i = isize(0); i < serial.size(); ++i)
         CHECK(serial[i] == parallel[i]);
+
+    // and so do SGL's own binaries, SPIR-V and DXIL
+    constexpr sgl::emit::target natives[] = {sgl::emit::target::hlsl_vulkan, sgl::emit::target::hlsl_dx12};
+    auto const binary_of = [&](isize entry, sgl::emit::target t) -> cc::vector<byte>
+    {
+        auto const e = r.emit(entry, t, {.native = sgl::emit::native_route::require});
+        if (e.has_error())
+            return {};
+        auto const& source = e.value();
+        return t == sgl::emit::target::hlsl_vulkan
+                 ? cc::vector<byte>::create_copy_of(cc::as_bytes(cc::span<u32 const>(source.spirv)))
+                 : cc::vector<byte>::create_copy_of(cc::span<byte const>(source.dxil));
+    };
+    auto serial_binaries = cc::vector<cc::vector<byte>>();
+    for (auto i = isize(0); i < r.entry_count(); ++i)
+        for (auto const t : natives)
+            serial_binaries.push_back(binary_of(i, t));
+    auto parallel_binaries = cc::vector<cc::vector<byte>>::create_defaulted(serial_binaries.size());
+    co_await cc::async_parallel_for(serial_binaries.size(),
+                                    [&](isize job) { parallel_binaries[job] = binary_of(job / 2, natives[job % 2]); });
+    for (auto i = isize(0); i < serial_binaries.size(); ++i)
+    {
+        CHECK(!serial_binaries[i].empty());
+        CHECK(same_bytes(serial_binaries[i], parallel_binaries[i]));
+    }
 }
 
 TEST("sgl link - describe names the tables and the ray set each entry reaches")
@@ -688,6 +716,181 @@ TEST("sgl link - describe names the tables and the ray set each entry reaches")
     CHECK(traced.value().entry_points[0].ray_set == "raysets.R");
 }
 
+TEST("sgl link - one file under two sets of options is two files of the group, its symbols one")
+{
+    // LINK-1: each set of options checks the file once; LINK-2: its own samplers are named by its path either way
+    constexpr cc::string_view lit = "require raytracing_pipeline\nuse bindings\nuse raysets\n"
+                                    "@option const fancy = false\n"
+                                    "sampler gPlain:\n    filter = .linear\n"
+                                    "sampler gFancy:\n    filter = .nearest\n    address = .mirror_repeat\n"
+                                    "@miss fun sky(p: mut raysets.Payload){bindings.gTex}:\n"
+                                    "    const if fancy:\n"
+                                    "        p.color = bindings.gTex.map.sample(float2(0.5), gFancy, level = 0.0)\n"
+                                    "    else:\n"
+                                    "        p.color = bindings.gTex.map.sample(float2(0.5), gPlain, level = 0.0)\n";
+    constexpr cc::string_view bare = "require raytracing_pipeline\nuse bindings\n"
+                                     "@raygen fun r(@launch_id id: int3){bindings.gTex}:\n"
+                                     "    bindings.gTex.written[id.x] = float4(1.0)\n";
+    sgl::library_file const library[] = {{.name = "bindings.sgl", .source = k_bindings},
+                                         {.name = "raysets.sgl", .source = k_raysets},
+                                         {.name = "lit.sgl", .source = lit},
+                                         {.name = "bare.sgl", .source = bare}};
+    sgl::check::option_value const fancy[] = {{.name = "fancy", .value = "true"}};
+    sgl::check::option_value const plain[] = {{.name = "fancy", .value = "false"}};
+    sgl::link_entry const entries[] = {
+        {.source_name = "bare.sgl", .entry_point = "r"},
+        {.source_name = "lit.sgl", .entry_point = "sky", .options = fancy},
+        {.source_name = "lit.sgl", .entry_point = "sky", .options = plain},
+        {.source_name = "lit.sgl", .entry_point = "sky", .options = fancy},
+    };
+    auto const r = linked(entries, library);
+    // the fancy miss is numbered first, so each takes the other slot than its file gives it
+    CHECK(samplers_of(r.map()) == "lit.sgl:gFancy@0, lit.sgl:gPlain@1");
+    CHECK(r.entry_name(1) == "lit.sgl:sky:fancy=true");
+    CHECK(r.entry_name(2) == "lit.sgl:sky:fancy=false");
+    // an entry listed twice is one entry of the map, as it is one build
+    CHECK(joined(r.map().renumbered) == "lit.sgl:sky:fancy=true, lit.sgl:sky:fancy=false");
+    CHECK(r.numbering_hash(1) == r.numbering_hash(3));
+    CHECK(r.numbering_hash(1) != r.numbering_hash(2));
+    auto const dx12 = sgl::emit::target::hlsl_dx12;
+    CHECK(numbers_after(emitted(r, 1, dx12).text, ": register(s") == "0");
+    CHECK(numbers_after(emitted(r, 2, dx12).text, ": register(s") == "1");
+    CHECK(emitted(r, 1, dx12).text == emitted(r, 3, dx12).text);
+    CHECK(r.map().ray_set == "raysets.R");
+}
+
+TEST("sgl link - a ray-tracing group without a raygen appends what each entry reaches, from slot 0")
+{
+    sgl::link_entry const hit_only[] = {{.source_name = "hits.sgl", .entry_point = "water"}};
+    auto const r = linked(hit_only);
+    // hits.sgl numbers samplers.linear 0, samplers.clamp 1 and gWater 2; the hit reaches the first and the last
+    CHECK(samplers_of(r.map()) == "samplers.linear@0, hits.gWater@1");
+    CHECK(joined(r.map().renumbered) == "hits.sgl:water");
+    CHECK(numbers_after(emitted(r, 0, sgl::emit::target::hlsl_dx12).text, ": register(s") == "0, 1");
+    // the payload the hit takes is a ray of one set alone, which is the group's
+    CHECK(r.map().ray_set == "raysets.R");
+}
+
+TEST("sgl link - of several ray sets every entry agrees with, the group's is the first by name, in any listing order")
+{
+    constexpr cc::string_view alt = "module alt\nrequire raytracing_pipeline\nuse raysets\n"
+                                    "rays A:\n    surface: raysets.Payload\n";
+    constexpr cc::string_view misses = "require raytracing_pipeline\nuse raysets\nuse alt\n"
+                                       "@miss fun surface(p: mut raysets.Payload):\n    p.color = float4(1.0)\n"
+                                       "@miss fun shadow(p: mut raysets.ShadowPayload):\n    p.lit = 1.0\n";
+    sgl::library_file const library[] = {{.name = "raysets.sgl", .source = k_raysets},
+                                         {.name = "alt.sgl", .source = alt},
+                                         {.name = "misses.sgl", .source = misses}};
+    // the surface miss alone agrees with both sets, and `alt.A` sorts first
+    sgl::link_entry const surface[] = {{.source_name = "misses.sgl", .entry_point = "surface"}};
+    auto const alone_surface = linked(surface, library);
+    CHECK(alone_surface.map().ray_set == "alt.A");
+    CHECK(alone_surface.map().multiplier == 1);
+    // the shadow miss's payload is a ray of `raysets.R` alone, whichever miss is listed first
+    sgl::link_entry const both[] = {{.source_name = "misses.sgl", .entry_point = "surface"},
+                                    {.source_name = "misses.sgl", .entry_point = "shadow"}};
+    sgl::link_entry const swapped[] = {both[1], both[0]};
+    auto const forward = linked(both, library);
+    auto const backward = linked(swapped, library);
+    CHECK(forward.map().ray_set == "raysets.R");
+    CHECK(forward.map().multiplier == 2);
+    CHECK(sgl::to_json(forward.map()) == sgl::to_json(backward.map()));
+}
+
+TEST("sgl link - an emit the link cannot write is an error naming the group, the entry or what it reaches")
+{
+    sgl::emit::target const vulkan_only[] = {sgl::emit::target::hlsl_vulkan};
+    auto const r = linked(k_deck, k_deck_library, vulkan_only);
+    auto const dx12 = r.emit(0, sgl::emit::target::hlsl_dx12);
+    REQUIRE(dx12.has_error());
+    CHECK(dx12.error() == "deck: error: the group was linked for no target hlsl-dx12\n");
+    auto const past = r.emit(r.entry_count(), sgl::emit::target::hlsl_vulkan);
+    REQUIRE(past.has_error());
+    CHECK(past.error() == "deck: error: no entry 9 (the group lists 9)\n");
+    auto const before = r.emit(-1, sgl::emit::target::hlsl_vulkan);
+    REQUIRE(before.has_error());
+
+    // a map-only link emits nothing
+    auto const mapped = sgl::link({.name = "deck", .entries = k_deck, .library = k_deck_library});
+    REQUIRE(mapped.has_value());
+    CHECK(mapped.value().emit(0, sgl::emit::target::hlsl_vulkan).has_error());
+
+    // LINK-6: the group numbers from the check for no target, so a sampler only a target's branch reaches, which no
+    // other entry numbers, is unnumbered when that target is written
+    constexpr cc::string_view m = "module m\nsampler x:\n    filter = .linear\nsampler y:\n    filter = .nearest\n";
+    constexpr cc::string_view bare = "require raytracing_pipeline\nuse bindings\n"
+                                     "@raygen fun r(@launch_id id: int3){bindings.gTex}:\n"
+                                     "    bindings.gTex.written[id.x] = float4(1.0)\n";
+    constexpr cc::string_view by_target = "require raytracing_pipeline\nuse bindings\nuse raysets\nuse m\n"
+                                          "@miss fun sky(p: mut raysets.Payload){bindings.gTex}:\n"
+                                          "    const if target_api == .dx12:\n"
+                                          "        p.color = bindings.gTex.map.sample(float2(0.5), m.y, level = 0.0)\n"
+                                          "    else:\n"
+                                          "        p.color = bindings.gTex.map.sample(float2(0.5), m.x, level = 0.0)\n";
+    sgl::library_file const library[] = {{.name = "bindings.sgl", .source = k_bindings},
+                                         {.name = "raysets.sgl", .source = k_raysets},
+                                         {.name = "m.sgl", .source = m},
+                                         {.name = "bare.sgl", .source = bare},
+                                         {.name = "by_target.sgl", .source = by_target}};
+    sgl::link_entry const entries[]
+        = {{.source_name = "bare.sgl", .entry_point = "r"}, {.source_name = "by_target.sgl", .entry_point = "sky"}};
+    sgl::emit::target const both[] = {sgl::emit::target::hlsl_dx12, sgl::emit::target::hlsl_vulkan};
+    auto const split = linked(entries, library, both);
+    CHECK(samplers_of(split.map()) == "m.x@0");
+    CHECK(static_bindings(emitted(split, 1, sgl::emit::target::hlsl_vulkan).text) == "1");
+    auto const unnumbered = split.emit(1, sgl::emit::target::hlsl_dx12);
+    REQUIRE(unnumbered.has_error());
+    CHECK(unnumbered.error().contains("error: unnumbered: 'sky' reaches sampler 'm.y', which the link numbers no "
+                                      "slot"));
+}
+
+TEST("sgl link - a link outlives its request: every name and source it read is its own")
+{
+    // the request's strings are built here and freed before anything is emitted
+    auto names = cc::vector<cc::string>();
+    auto sources = cc::vector<cc::string>();
+    for (auto const& f : k_deck_library)
+    {
+        names.push_back(cc::string(f.name));
+        sources.push_back(cc::string(f.source));
+    }
+    auto result = cc::optional<sgl::link_result>();
+    {
+        auto library = cc::vector<sgl::library_file>();
+        for (auto i = isize(0); i < names.size(); ++i)
+            library.push_back({.name = names[i], .source = sources[i]});
+        auto entry_files = cc::vector<cc::string>();
+        auto entry_names = cc::vector<cc::string>();
+        for (auto const& e : k_deck)
+        {
+            entry_files.push_back(cc::string(e.source_name));
+            entry_names.push_back(cc::string(e.entry_point));
+        }
+        auto entries = cc::vector<sgl::link_entry>();
+        for (auto i = isize(0); i < entry_files.size(); ++i)
+            entries.push_back({.source_name = entry_files[i], .entry_point = entry_names[i]});
+        auto const group = cc::string("deck");
+        auto r = sgl::link({.name = group, .entries = entries, .library = library, .targets = k_all});
+        REQUIRE(r.has_value());
+        result = cc::move(r.value());
+    }
+    for (auto* const strings : {&names, &sources})
+        for (auto& s : *strings)
+            for (auto i = isize(0); i < s.size(); ++i)
+                s.data()[i] = '#';
+    // moved once more, as a host keeps it
+    auto const kept = cc::move(result.value());
+    auto const reference = linked(k_deck);
+    CHECK(sgl::to_json(kept.map()) == sgl::to_json(reference.map()));
+    for (auto i = isize(0); i < kept.entry_count(); ++i)
+    {
+        CHECK(kept.entry_name(i) == reference.entry_name(i));
+        auto const text = emitted(kept, i, sgl::emit::target::hlsl_dx12);
+        CHECK(text.text == emitted(reference, i, sgl::emit::target::hlsl_dx12).text);
+        CHECK(joined(text.library_files) == joined(emitted(reference, i, sgl::emit::target::hlsl_dx12).library_files));
+    }
+}
+
 TEST("sgl link - the map as JSON")
 {
     auto const json = sgl::to_json(linked(k_deck).map());
@@ -699,4 +902,57 @@ TEST("sgl link - the map as JSON")
                         "\"contribution\": 0, \"miss\": 0}, {\"name\": \"shadow\", \"contribution\": 1, \"miss\": "
                         "1}],"));
     CHECK(json.ends_with("\"renumbered\": [\"hits.sgl:water\", \"light.sgl:pickCall\"]\n}\n"));
+}
+
+
+// LINK-7: a miss that reads m.y on dx12 and m.x elsewhere; the target-free check sees m.x alone
+TEST("sgl link - the numbering hash covers what a target's branch reaches, not only what the check that numbers does")
+{
+    constexpr cc::string_view m = "module m\nsampler x:\n    filter = .linear\nsampler y:\n    filter = .nearest\n";
+    constexpr cc::string_view n = "module n\nsampler z:\n    filter = .linear\n    address = .mirror_repeat\n";
+    constexpr cc::string_view a
+        = "require raytracing_pipeline\nuse bindings\nuse m\n"
+          "@raygen fun ra(@launch_id id: int3){bindings.gTex}:\n"
+          "    bindings.gTex.written[id.x] = bindings.gTex.map.sample(float2(0.5), m.x, level = 0.0)\n";
+    constexpr cc::string_view bare = "require raytracing_pipeline\nuse bindings\n"
+                                     "@raygen fun r(@launch_id id: int3){bindings.gTex}:\n"
+                                     "    bindings.gTex.written[id.x] = float4(1.0)\n";
+    constexpr cc::string_view others = "require raytracing_pipeline\nuse bindings\nuse raysets\nuse m\nuse n\n"
+                                       "@miss fun mx(p: mut raysets.Payload){bindings.gTex}:\n"
+                                       "    p.color = bindings.gTex.map.sample(float2(0.5), m.x, level = 0.0)\n"
+                                       "@miss fun mz(p: mut raysets.Payload){bindings.gTex}:\n"
+                                       "    p.color = bindings.gTex.map.sample(float2(0.5), n.z, level = 0.0)\n"
+                                       "@miss fun my(p: mut raysets.Payload){bindings.gTex}:\n"
+                                       "    p.color = bindings.gTex.map.sample(float2(0.5), m.y, level = 0.0)\n";
+    constexpr cc::string_view by_target = "require raytracing_pipeline\nuse bindings\nuse raysets\nuse m\n"
+                                          "@miss fun sky(p: mut raysets.Payload){bindings.gTex}:\n"
+                                          "    const if target_api == .dx12:\n"
+                                          "        p.color = bindings.gTex.map.sample(float2(0.5), m.y, level = 0.0)\n"
+                                          "    else:\n"
+                                          "        p.color = bindings.gTex.map.sample(float2(0.5), m.x, level = 0.0)\n";
+    sgl::library_file const library[] = {{.name = "bindings.sgl", .source = k_bindings},
+                                         {.name = "raysets.sgl", .source = k_raysets},
+                                         {.name = "m.sgl", .source = m},
+                                         {.name = "n.sgl", .source = n},
+                                         {.name = "a.sgl", .source = a},
+                                         {.name = "bare.sgl", .source = bare},
+                                         {.name = "others.sgl", .source = others},
+                                         {.name = "by_target.sgl", .source = by_target}};
+    sgl::link_entry const ga[]
+        = {{.source_name = "a.sgl", .entry_point = "ra"}, {.source_name = "by_target.sgl", .entry_point = "sky"}};
+    sgl::link_entry const gb[] = {{.source_name = "bare.sgl", .entry_point = "r"},
+                                  {.source_name = "others.sgl", .entry_point = "mx"},
+                                  {.source_name = "others.sgl", .entry_point = "mz"},
+                                  {.source_name = "others.sgl", .entry_point = "my"},
+                                  {.source_name = "by_target.sgl", .entry_point = "sky"}};
+    sgl::emit::target const dx[] = {sgl::emit::target::hlsl_dx12};
+    auto const A = linked(ga, library, dx);
+    auto const B = linked(gb, library, dx);
+    CHECK(samplers_of(A.map()) == "m.x@0, m.y@1");
+    CHECK(samplers_of(B.map()) == "m.x@0, n.z@1, m.y@2");
+    // dx12 reads m.y at s1 in one group and s2 in the other: two binaries, so two hashes, and B moved it
+    CHECK(numbers_after(emitted(A, 1, dx[0]).text, ": register(s") == "1");
+    CHECK(numbers_after(emitted(B, 4, dx[0]).text, ": register(s") == "2");
+    CHECK(A.numbering_hash(1) != B.numbering_hash(4));
+    CHECK(joined(B.map().renumbered).contains("by_target.sgl:sky"));
 }

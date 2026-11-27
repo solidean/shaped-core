@@ -352,6 +352,9 @@ namespace sgl::emit
 /// A structured tree is resolved before it is legalized, so an unlinked compile writes what it wrote before callable
 /// bases were symbolic (LINK-5).
 /// A table neither numbers stays symbolic, and the writer refuses it.
+/// `with_callable_bases` in place, for a caller that holds a copy already.
+void resolve_callable_bases(check::checked_module const& m, check::flat_entry_point& e, numbering const* n);
+
 [[nodiscard]] check::flat_entry_point with_callable_bases(check::checked_module const& m,
                                                           check::flat_entry_point const& e,
                                                           numbering const* n);

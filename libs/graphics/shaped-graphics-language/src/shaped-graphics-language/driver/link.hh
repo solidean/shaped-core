@@ -115,6 +115,7 @@ public:
     /// The `file:entry` the map names entry `entry` by.
     [[nodiscard]] cc::string_view entry_name(isize entry) const;
     /// The numbers entry `entry` reaches, its samplers' slots and its tables' first records, hashed (LINK-7).
+    /// What it reaches is the union over the check that numbers and every linked target's, branches on the target included.
     /// Two links of one entry that give it equal hashes emit it alike, so a cache keys its binary on the hash.
     /// Stable across processes and platforms.
     [[nodiscard]] u64 numbering_hash(isize entry) const;

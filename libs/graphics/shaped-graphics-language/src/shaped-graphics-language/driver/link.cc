@@ -353,7 +353,9 @@ cc::result<sgl::link_result, cc::string> sgl::link(link_request const& request)
     {
         auto file = i32(-1);
         for (auto i = isize(0); i < s->files.size(); ++i)
-            if (s->files[i]->source_name == asked.source_name && same_options(s->files[i]->options, asked.options))
+            // as the library finds it, so two spellings of one path are one file and name its own symbols alike
+            if (is_same_path(s->files[i]->source_name, asked.source_name)
+                && same_options(s->files[i]->options, asked.options))
                 file = i32(i);
         if (file < 0)
         {
@@ -609,24 +611,45 @@ cc::result<sgl::link_result, cc::string> sgl::link(link_request const& request)
         auto& e = s->entries[i];
         auto const& file = *s->files[e.file];
         auto const& m = file.numbered.module;
+        // LINK-7: what the entry reaches in the tree that numbered, and in each target's own, which may take a branch
+        // of `target_api` or `has` the first does not (CHK-426); each once, in that order
         auto hash = stable_hash();
         auto is_renumbered = false;
-        for (auto const id : driver::impl::file_samplers_of(found[i].legal))
+        auto hashed = cc::vector<cc::string>();
+        auto const reach = [&](check::checked_module const& tree, check::flat_entry_point const& legal)
         {
-            auto const key = key_of(m, file.source_name, id);
-            auto const slot = s->map.samplers[n.slot_of(key)].slot;
-            hash.add(cc::format("s{}={};", key, slot));
-            is_renumbered = is_renumbered || slot != emit::impl::file_sampler_index(m, id);
-        }
-        for (auto const t : tables_called(m, found[i].legal))
-        {
-            auto const key = key_of(m, file.source_name, t);
-            auto const record = n.record_of(key);
-            hash.add(cc::format("t{}={};", key, record));
-            is_renumbered = is_renumbered || record != m.callable_offset_of(t);
-        }
+            for (auto const id : driver::impl::file_samplers_of(legal))
+            {
+                auto key = key_of(tree, file.source_name, id);
+                auto const slot = n.slot_of(key);
+                auto item = cc::format("s{}={};", key, slot);
+                if (hashed.values().contains(item))
+                    continue;
+                hash.add(item);
+                hashed.push_back(cc::move(item));
+                is_renumbered = is_renumbered || slot != emit::impl::file_sampler_index(tree, id);
+            }
+            for (auto const t : tables_called(tree, legal))
+            {
+                auto key = key_of(tree, file.source_name, t);
+                auto const record = n.record_of(key);
+                auto item = cc::format("t{}={};", key, record);
+                if (hashed.values().contains(item))
+                    continue;
+                hash.add(item);
+                hashed.push_back(cc::move(item));
+                is_renumbered = is_renumbered || record != tree.callable_offset_of(t);
+            }
+        };
+        reach(m, found[i].legal);
+        for (auto const& front : file.written)
+            for (auto const& candidate : front.module.entry_points)
+                if (candidate.name == e.entry_point && candidate.entry_stage == e.stage)
+                    reach(front.module, candidate.legalized != nullptr ? *candidate.legalized
+                                                                       : check::legalize(front.module, candidate));
         e.hash = hash.value;
-        if (is_renumbered)
+        // an entry listed twice, as one closest hit in two hit groups, is one build
+        if (is_renumbered && !s->map.renumbered.values().contains(e.name))
             s->map.renumbered.push_back(e.name);
     }
     for (auto& file : s->files)

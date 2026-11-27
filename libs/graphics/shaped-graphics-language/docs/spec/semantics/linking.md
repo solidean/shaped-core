@@ -40,6 +40,8 @@ Back to the [semantics](_index.md); the reasons are in [why/linking.md](why/link
   The group numbers from a check for no target, as `describe` checks, and each entry is emitted from its file's check for the target it is written for (CHK-426).
   A sampler or a table an emitted entry reaches and the group does not number is `unnumbered`.
 * **LINK-7** An entry's **numbering hash** is a hash of the slots and records it reaches, the same in every process ([why](why/linking.md#link-7)).
+  What it reaches is what the check that numbers reaches and what each target the link checks for reaches, a branch on `target_api` or `has` included.
+  So is what makes it renumbered (LINK-4).
   Two links that give one entry equal hashes emit it alike for one target and one set of options, so a cache of outputs keys on the hash beside the source.
 
 ## The map
@@ -75,5 +77,6 @@ Back to the [semantics](_index.md); the reasons are in [why/linking.md](why/link
 ## Open
 
 * `@raytracing pipeline` declarations as a second way to name a group, whose stages slib links the same way.
+* Numbering what only a target's branch reaches, which today is `unnumbered` when no other entry numbers it; the map would then depend on the targets linked for.
 * A check shared across links, which a bake of many groups over one library would read rather than check each file again.
 * The polyfill forms of a graphics group's stages, which `link_result::emit` writes natively alone.

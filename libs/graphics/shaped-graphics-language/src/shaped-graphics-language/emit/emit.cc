@@ -170,9 +170,7 @@ sgl::i32 sgl::emit::callable_record(check::checked_module const& m, numbering co
     return -1;
 }
 
-sgl::check::flat_entry_point sgl::emit::with_callable_bases(check::checked_module const& m,
-                                                            check::flat_entry_point const& e,
-                                                            numbering const* n)
+void sgl::emit::resolve_callable_bases(check::checked_module const& m, check::flat_entry_point& e, numbering const* n)
 {
     auto const record_of = [&](check::flat_expr_id id) -> i32
     {
@@ -185,8 +183,7 @@ sgl::check::flat_entry_point sgl::emit::with_callable_bases(check::checked_modul
     for (auto const& x : e.exprs)
         is_symbolic = is_symbolic || x.node.is<check::flat_callable_base>();
     if (!is_symbolic)
-        return e;
-    auto result = e;
+        return;
     // A callable's index is `i + base` (CHK-344); where the base is 0, the call takes `i` itself, as it did before the
     // base was symbolic, and the sum is left unreachable for legalization to drop.
     for (auto const& x : e.exprs)
@@ -204,13 +201,21 @@ sgl::check::flat_entry_point sgl::emit::with_callable_bases(check::checked_modul
                 continue;
             auto const operands = e.at(sum->arguments);
             if (record_of(operands[1]) == 0)
-                result.expr_lists[call->arguments.first + k] = operands[0];
+                e.expr_lists[call->arguments.first + k] = operands[0];
         }
     }
-    for (auto& x : result.exprs)
+    for (auto& x : e.exprs)
         if (auto const* const base = x.node.try_as<check::flat_callable_base>())
             if (auto const record = callable_record(m, n, base->table); record >= 0)
                 x.node = check::flat_int_literal{.value = record};
+}
+
+sgl::check::flat_entry_point sgl::emit::with_callable_bases(check::checked_module const& m,
+                                                            check::flat_entry_point const& e,
+                                                            numbering const* n)
+{
+    auto result = e;
+    resolve_callable_bases(m, result, n);
     return result;
 }
 

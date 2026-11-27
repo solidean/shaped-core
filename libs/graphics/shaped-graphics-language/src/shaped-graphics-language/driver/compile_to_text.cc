@@ -384,7 +384,8 @@ cc::result<sgl::emitted_source, cc::string> sgl::driver::impl::emit_text(front_e
                              && check::reaches_reserved(*check::reserved_binding_named("sg_debug"), target,
                                                         entry.entry_stage, device_features);
     // LINK-5: each callable base resolved to the section written for, before anything folds the index
-    auto const legal = check::legalize(m, emit::with_callable_bases(m, entry, numbering),
+    emit::resolve_callable_bases(m, entry, numbering);
+    auto const legal = check::legalize(m, entry,
                                        {.is_emulated = target == emit::target::wgsl || software_trace,
                                         .erases_prints = !writes_records,
                                         .lowers_asserts = diagnostics,
