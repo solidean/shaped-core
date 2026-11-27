@@ -792,6 +792,28 @@ ASYNC_INVOCABLE_TEST("sg - a pipeline whose shader needs a feature the device la
     }
 }
 
+ASYNC_INVOCABLE_TEST("sg - an async compute build owns its shader, so the caller's may change or go at once",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+
+    auto const& shader = co_await shaders::double_values::main->acquire(*ctx);
+    auto const layout = shaders::double_values::main.acquire_layout(*ctx);
+
+    // The build runs later on a worker, so one still reading the caller's shader would meet it emptied.
+    auto built = cc::shared_async<sg::compute_pipeline_handle>();
+    {
+        auto given = shader;
+        built = ctx->uncached.create_compute_pipeline_async({.shader = given, .layout = layout});
+        given = sg::compiled_shader{};
+    }
+    co_await cc::async_settled(built);
+    REQUIRE(built->try_value() != nullptr);
+    CHECK(*built->try_value() != nullptr);
+}
+
 ASYNC_INVOCABLE_TEST("sg - an array of mat3 strides by 48 in a block and a buffer's element, on every backend",
                      (sg::context_handle const& ctx))
 {

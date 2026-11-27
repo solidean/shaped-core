@@ -962,11 +962,8 @@ void vulkan_upload_async_system::upload_texture(sg::raw_texture_handle const& te
 
     dst->_pending_async_upload_value.store(job.completion.value, cc::memory_order_release);
     job.wait_token = sg::submission_token(dst->_last_used_submission_token.load(cc::memory_order_acquire));
-    // Every readback enqueued before this, async or streaming: one maximum, since both stamps share one timeline.
-    if (auto const pending = cc::max(dst->_pending_async_download_value.load(cc::memory_order_acquire),
-                                     dst->_pending_stream_download_value.load(cc::memory_order_acquire));
-        pending != 0)
-        job.download_wait = {.group = dst->_download_group, .value = pending};
+    // No wait on a readback of the texture: one here hung the GPU under the full suite on an Arc B580, see
+    // bug-sg-vulkan-texture-upload-ignores-readback.
 
     job.drain = _drain.start(); // before the hand-over, so a job still in the inbox is counted too
     job.ambient = {job.completion.group, job.completion.value};
@@ -1026,11 +1023,8 @@ sg::stream_upload_handle vulkan_upload_async_system::stream_source_texture(sg::r
 
     dst->_pending_stream_copy_value.store(job.completion.value, cc::memory_order_release);
     job.wait_token = sg::submission_token(dst->_last_used_submission_token.load(cc::memory_order_acquire));
-    // Every readback enqueued before this, async or streaming: one maximum, since both stamps share one timeline.
-    if (auto const pending = cc::max(dst->_pending_async_download_value.load(cc::memory_order_acquire),
-                                     dst->_pending_stream_download_value.load(cc::memory_order_acquire));
-        pending != 0)
-        job.download_wait = {.group = dst->_download_group, .value = pending};
+    // No wait on a readback of the texture: one here hung the GPU under the full suite on an Arc B580, see
+    // bug-sg-vulkan-texture-upload-ignores-readback.
 
     // Since a streaming transfer is waited on either way now, what promotion adds is the *statement of intent*: the
     // wait off the async stamp carries no warning, because a caller who asked for it does not need telling it stalls.
