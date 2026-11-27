@@ -6,8 +6,6 @@ refs:
   - file: libs/graphics/shaped-graphics/tests/transfer/texture-async-interleave-test.cc
   - file: libs/graphics/shaped-graphics/backends/vulkan/src/shaped-graphics/backends/vulkan/vulkan_command_list.cc
   - symbol: sg::access_barrier
-claimed-by: Claude (for Philip Trettner)
-claimed-at: 2026-11-27T14:16Z
 ---
 
 # A pure layout transition is modelled as touching nothing, so nothing orders against it
