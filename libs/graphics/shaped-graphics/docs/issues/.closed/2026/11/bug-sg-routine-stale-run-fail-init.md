@@ -3,8 +3,8 @@ created: 2026-11-09
 tags: [routine]
 refs:
   - file: libs/graphics/shaped-graphics/src/shaped-graphics/routine/render_routine.cc
-claimed-by: Claude (for Philip Trettner)
-claimed-at: 2026-11-27T14:41Z
+closed: 2026-11-27
+resolution: fixed
 ---
 
 # A phase abandoned by a reload can still mark the next run failed
