@@ -22,7 +22,7 @@ cc::shared_async<cc::unit> taa_routine::init(sg::routine_init_scope scope)
     auto const* const compiled_ps = ps->try_value();
     if (compiled_vs == nullptr || compiled_ps == nullptr)
     {
-        fail_init();
+        fail_init(scope);
         co_return;
     }
 

@@ -27,7 +27,7 @@ cc::shared_async<cc::unit> raster_box_filter_mipmap_routine::init(sg::routine_in
     _pipeline = {};
     if (compiled_vs == nullptr || compiled_ps == nullptr)
     {
-        fail_init(); // not pending: this will not come good until a reload, and a caller should be able to tell
+        fail_init(scope); // not pending: this will not come good until a reload, and a caller should be able to tell
         co_return;
     }
 

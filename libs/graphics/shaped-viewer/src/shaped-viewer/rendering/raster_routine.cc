@@ -230,7 +230,7 @@ cc::shared_async<cc::unit> raster_routine::init(sg::routine_init_scope scope)
     if (compiled_surface_vs == nullptr || compiled_quadric_vs == nullptr || compiled_environment_vs == nullptr
         || compiled_environment_ps == nullptr || compiled_environment_thin_ps == nullptr)
     {
-        fail_init();
+        fail_init(scope);
         co_return;
     }
     _surface_vs = *compiled_surface_vs;
@@ -258,7 +258,7 @@ cc::shared_async<cc::unit> raster_routine::init(sg::routine_init_scope scope)
     auto const* const built_thin = environment_thin->try_value();
     if (built == nullptr || built_thin == nullptr)
     {
-        fail_init();
+        fail_init(scope);
         co_return;
     }
     _environment = *built;

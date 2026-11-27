@@ -87,7 +87,7 @@ cc::shared_async<cc::unit> atrous_denoise_routine::init(sg::routine_init_scope s
         if (p->pipeline->try_value() == nullptr)
         {
             impl::log_build_failure(p->pipeline, "atrous", p == &scratch ? k_scratch_format : params());
-            fail_init(); // not pending: this will not come good until a reload, and a caller should be able to tell
+            fail_init(scope); // not pending: this will not come good until a reload, and a caller should be able to tell
             co_return;
         }
     }

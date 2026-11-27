@@ -148,7 +148,7 @@ cc::shared_async<cc::unit> cube_routine::init(sg::routine_init_scope scope)
         if (compiled_ps == nullptr)
             message += cc::format("\n  fragment main_ps: {}", acquire_failure(ps));
         CC_LOG_ERROR("{}", message);
-        fail_init(); // not pending: this will not come good until a reload, and a caller should be able to tell
+        fail_init(scope); // not pending: this will not come good until a reload, and a caller should be able to tell
         co_return;
     }
 
@@ -164,7 +164,7 @@ cc::shared_async<cc::unit> cube_routine::init(sg::routine_init_scope scope)
     if (constants == nullptr)
     {
         CC_LOG_ERROR("cube.hlsl must declare the cube_constants push_constants block");
-        fail_init();
+        fail_init(scope);
         co_return;
     }
 

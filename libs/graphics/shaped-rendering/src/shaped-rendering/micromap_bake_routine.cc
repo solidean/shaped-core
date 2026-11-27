@@ -51,7 +51,7 @@ cc::shared_async<cc::unit> micromap_bake_routine::init(sg::routine_init_scope sc
     co_await cc::async_settled(classify);
     if (!has_built(seed, "seed_cs") || !has_built(reduce, "reduce_cs") || !has_built(classify, "classify_cs"))
     {
-        fail_init();
+        fail_init(scope);
         co_return;
     }
 

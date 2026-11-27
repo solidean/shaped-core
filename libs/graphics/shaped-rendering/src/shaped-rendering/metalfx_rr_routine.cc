@@ -54,12 +54,12 @@ cc::shared_async<cc::unit> metalfx_rr_routine::init(sg::routine_init_scope scope
     auto& ctx = scope.context();
     if (!impl::metalfx_denoised_available(ctx))
     {
-        fail_init();
+        fail_init(scope);
         co_return;
     }
     _passes = {};
     if (!co_await impl::metalfx_build_passes(ctx, _passes))
-        fail_init();
+        fail_init(scope);
     co_return;
 }
 

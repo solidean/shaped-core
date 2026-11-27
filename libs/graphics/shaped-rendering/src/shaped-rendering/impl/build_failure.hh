@@ -8,7 +8,7 @@
 namespace sr::impl
 {
 /// Logs why the pipeline `routine` compiled to write `format` did not build; `built` must have settled without a value.
-/// What a routine says before `fail_init()`, which otherwise reads exactly like a member still compiling.
+/// What a routine says before `fail_init(scope)`, which otherwise reads exactly like a member still compiling.
 template <class T>
 void log_build_failure(cc::shared_async<T> const& built, cc::string_view routine, sg::pixel_format format)
 {

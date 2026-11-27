@@ -22,7 +22,7 @@ cc::shared_async<cc::unit> depth_fill_routine::init(sg::routine_init_scope scope
     _pipeline = nullptr;
     if (compiled_vs == nullptr || compiled_ps == nullptr)
     {
-        fail_init();
+        fail_init(scope);
         co_return;
     }
 
@@ -40,7 +40,7 @@ cc::shared_async<cc::unit> depth_fill_routine::init(sg::routine_init_scope scope
     auto const* const built = pipeline->try_value();
     if (built == nullptr)
     {
-        fail_init();
+        fail_init(scope);
         co_return;
     }
     _pipeline = *built;

@@ -107,7 +107,7 @@ cc::shared_async<cc::unit> box_filter_mipmap_routine::init(sg::routine_init_scop
     if (built == nullptr)
     {
         impl::log_build_failure(program.pipeline, "box_filter_mipmap", params().format);
-        fail_init(); // the shader did not build, which a format SGL has no image of never does
+        fail_init(scope); // the shader did not build, which a format SGL has no image of never does
         co_return;
     }
 

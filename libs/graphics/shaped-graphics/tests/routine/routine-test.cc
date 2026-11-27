@@ -729,9 +729,9 @@ namespace
 class broken_routine : public sg::render_routine<broken_routine>
 {
 protected:
-    cc::shared_async<cc::unit> init(sg::routine_init_scope) override
+    cc::shared_async<cc::unit> init(sg::routine_init_scope scope) override
     {
-        fail_init();
+        fail_init(scope);
         co_return;
     }
 };
@@ -789,10 +789,10 @@ public:
     static inline cc::atomic<int> init_runs = 0;
 
 protected:
-    cc::shared_async<cc::unit> init_once(sg::routine_init_scope) override
+    cc::shared_async<cc::unit> init_once(sg::routine_init_scope scope) override
     {
         once_runs.fetch_add(1);
-        fail_init();
+        fail_init(scope);
         co_return;
     }
 
@@ -811,11 +811,34 @@ public:
     static inline cc::shared_async<cc::unit> gate;
 
 protected:
-    cc::shared_async<cc::unit> init_once(sg::routine_init_scope) override
+    cc::shared_async<cc::unit> init_once(sg::routine_init_scope scope) override
     {
         once_runs.fetch_add(1);
         co_await gate;
-        fail_init();
+        fail_init(scope);
+    }
+};
+
+/// Keeps its first run's scope, so a test can fail that run once a reload has replaced it.
+class stale_failing_routine : public sg::render_routine<stale_failing_routine>
+{
+public:
+    static inline cc::atomic<int> runs = 0;
+    static inline stale_failing_routine* first_instance = nullptr;
+    static inline cc::optional<sg::routine_init_scope> first_scope;
+
+    /// What a phase of the first run does when it fails late, after the run that replaced it began.
+    static void fail_first_run() { first_instance->fail_init(first_scope.value()); }
+
+protected:
+    cc::shared_async<cc::unit> init(sg::routine_init_scope scope) override
+    {
+        if (runs.fetch_add(1) == 0)
+        {
+            first_instance = this;
+            first_scope = scope;
+        }
+        co_return;
     }
 };
 
@@ -941,6 +964,32 @@ ASYNC_INVOCABLE_TEST("sg - an init_once failing after a reload is the old genera
     gated_once_failing_routine::evict(*ctx);
 }
 
+// A phase of a run a reload replaced can still be running, and its failure is its own: the run that replaced it stays ready.
+ASYNC_INVOCABLE_TEST("sg - an init a reload replaced fails only itself, not the run that replaced it",
+                     (sg::context_handle const& ctx),
+                     exclusive("sg-reload-generation"))
+{
+    REQUIRE(ctx != nullptr);
+    stale_failing_routine::evict(*ctx);
+    stale_failing_routine::runs.store(0);
+
+    stale_failing_routine::prewarm(*ctx);
+    (void)co_await ctx->routines.idle_completion();
+    REQUIRE(stale_failing_routine::try_acquire(*ctx).is_ready());
+
+    sg::signal_reload();
+    (void)co_await ctx->routines.idle_completion();
+    CHECK(stale_failing_routine::runs.load() == 2);
+    REQUIRE(stale_failing_routine::try_acquire(*ctx).is_ready());
+
+    stale_failing_routine::fail_first_run();
+    CHECK(stale_failing_routine::try_acquire(*ctx).is_ready());
+
+    stale_failing_routine::first_scope = {};
+    stale_failing_routine::first_instance = nullptr;
+    stale_failing_routine::evict(*ctx);
+}
+
 // Cancelled with no reload behind it, nothing would ever end the restarts, so it is a failure at this generation.
 ASYNC_INVOCABLE_TEST("sg - a routine cancelled at its own generation is not restarted",
                      (sg::context_handle const& ctx),
@@ -951,15 +1000,10 @@ ASYNC_INVOCABLE_TEST("sg - a routine cancelled at its own generation is not rest
     cancelled_routine::runs.store(0);
 
     CHECK(cancelled_routine::try_acquire(*ctx).is_pending());
-    // Ticked inside a node of its own, as idle_completion ticks: the phase it starts ends cancelled, and that must not reach the test's own frame.
-    auto const ticked = co_await cc::make_async_scheduled<bool>(
-        [&](cc::async_context<bool>& actx)
-        {
-            auto const failed = tick_until(*ctx, [&] { return cancelled_routine::try_acquire(*ctx).is_failed(); });
-            for (auto i = 0; i < 4; ++i)
-                (void)bounded_tick(*ctx);
-            return actx.success(failed);
-        });
+    // Ticked from the test's own frame, as sv::viewer::begin_frame ticks: the phase ends cancelled, and that must not reach this frame.
+    auto const ticked = tick_until(*ctx, [&] { return cancelled_routine::try_acquire(*ctx).is_failed(); });
+    for (auto i = 0; i < 4; ++i)
+        (void)bounded_tick(*ctx);
     REQUIRE(ticked);
     CHECK(cancelled_routine::try_acquire(*ctx).is_failed());
     CHECK(cancelled_routine::runs.load() == 1);

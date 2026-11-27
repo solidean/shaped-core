@@ -59,7 +59,7 @@ cc::shared_async<cc::unit> slug_routine::init(sg::routine_init_scope scope)
     _job_pipeline = {};
     if (compiled_vs == nullptr || compiled_job_vs == nullptr || compiled_ps == nullptr)
     {
-        fail_init();
+        fail_init(scope);
         co_return;
     }
 

@@ -64,6 +64,7 @@ bool render_routine_base::advance_init(routine_registry& registry, context& ctx,
                 auto const settled_once = s.in_flight_is_once;
                 auto const* const value = s.in_flight->try_value();
                 auto const run_generation = s.run->generation;
+                auto const run_failed = s.run->failed.load(cc::memory_order_acquire);
                 s.in_flight = {};
                 s.run = {};
 
@@ -79,12 +80,18 @@ bool render_routine_base::advance_init(routine_registry& registry, context& ctx,
                 if (settled_once)
                 {
                     // fail_init leaves the phase with a value, and a reload then tries init_once again.
-                    if (_failed)
+                    if (run_failed)
+                    {
+                        _failed = true;
                         s.ready_generation = run_generation;
+                    }
                     else
                         s.once_done = true;
                     return false; // init is next, and the tick comes back for it
                 }
+
+                if (run_failed)
+                    _failed = true;
 
                 // Published here: everything the phase wrote becomes visible to a reader through the readiness this
                 // sets, which is what replaces holding the routine's lock across an init that can no longer hold one.
@@ -98,8 +105,8 @@ bool render_routine_base::advance_init(routine_registry& registry, context& ctx,
             // A fresh generation is a fresh verdict, including for a routine that failed at the last one.
             _failed = false;
 
-            s.run = std::make_shared<impl::routine_run>(
-                impl::routine_run{.ctx = &ctx, .registry = &registry, .generation = generation});
+            // Parenthesized rather than designated: the run's atomic flag cannot be copied out of a temporary.
+            s.run = std::make_shared<impl::routine_run>(&ctx, &registry, generation);
 
             s.in_flight_is_once = !s.once_done;
             auto scope = routine_init_scope(s.run);
@@ -142,9 +149,9 @@ void render_routine_base::clear_pending_mark()
     _warned_pending.store(false, cc::memory_order_relaxed);
 }
 
-void render_routine_base::fail_init()
+void render_routine_base::fail_init(routine_init_scope const& scope)
 {
-    _failed = true;
+    scope._run->failed.store(true, cc::memory_order_release);
 }
 
 u64 render_routine_base::current_generation()

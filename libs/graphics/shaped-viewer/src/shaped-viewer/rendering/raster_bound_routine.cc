@@ -171,7 +171,7 @@ cc::shared_async<cc::unit> raster_bound_routine::init(sg::routine_init_scope sco
         CC_LOG_ERROR("the bound raster mode's fixed stages did not compile, so no bound frame draws: vertex {}; "
                      "environment vertex {}; environment pixel {}",
                      reason(surface_vs), reason(environment_vs), reason(environment_ps));
-        fail_init();
+        fail_init(scope);
         co_return;
     }
     _surface_vs = *compiled_surface_vs;
@@ -193,7 +193,7 @@ cc::shared_async<cc::unit> raster_bound_routine::init(sg::routine_init_scope sco
     {
         CC_LOG_ERROR("the bound raster mode's environment pipeline did not build, so no bound frame draws: {}",
                      environment->try_error()->underlying().to_string());
-        fail_init();
+        fail_init(scope);
         co_return;
     }
     _environment = *built;
@@ -206,7 +206,7 @@ cc::shared_async<cc::unit> raster_bound_routine::init(sg::routine_init_scope sco
     {
         CC_LOG_ERROR("the bound raster mode's prepass pixel stage did not compile, so no bound frame draws: {}",
                      prepass_ps->try_error()->underlying().to_string());
-        fail_init();
+        fail_init(scope);
         co_return;
     }
     auto const depth_only = ctx.cached.acquire_raster_pipeline({

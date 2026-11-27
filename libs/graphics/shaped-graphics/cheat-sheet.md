@@ -1149,7 +1149,7 @@ co_await scope.with_cmd([&](sg::command_list& cmd) { ... })  // record GPU init 
 //   `f` is not a coroutine, which is what keeps a list from being held across an await.
 co_await scope.yield()                     // a budget boundary inside one phase, and a cancellation check
 co_await cc::async_settled(node)           // await WITHOUT short-circuiting — a bad shader is the routine's verdict
-fail_init()                                // void — "will not come good until a reload"; readiness reports `failed`
+fail_init(scope)                           // void — "will not come good until a reload"; this run reports `failed`
 // static entry points the CRTP adds (all reach the per-context instance by type — no handle, no registration):
 my_routine::try_acquire_exclusive(cmd[, params])  // -> sg::routine_guard<my_routine>  HOLDS the routine's lock; self-> is mutable
 my_routine::try_acquire(cmd[, params])           // -> sg::routine_scope<my_routine>  NO lock held; read-only

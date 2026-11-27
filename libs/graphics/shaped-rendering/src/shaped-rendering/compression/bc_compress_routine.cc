@@ -142,7 +142,7 @@ cc::shared_async<cc::unit> bc_compress_routine::init(sg::routine_init_scope scop
     auto const* const compiled = shader->try_value();
     if (compiled == nullptr)
     {
-        fail_init(); // not pending: this will not come good until a reload, and a caller should be able to tell
+        fail_init(scope); // not pending: this will not come good until a reload, and a caller should be able to tell
         co_return;
     }
 
@@ -152,7 +152,7 @@ cc::shared_async<cc::unit> bc_compress_routine::init(sg::routine_init_scope scop
     co_await cc::async_settled(_pipeline);
     auto const* const built = _pipeline->try_value();
     if (built == nullptr || *built == nullptr)
-        fail_init(); // a failed build would otherwise leave the routine ready, and execute declining forever
+        fail_init(scope); // a failed build would otherwise leave the routine ready, and execute declining forever
     co_return;
 }
 
