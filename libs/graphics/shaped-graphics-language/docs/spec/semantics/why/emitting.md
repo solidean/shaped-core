@@ -8,6 +8,16 @@ Nothing here is normative.
 The emitters follow the [compilation model](../../incubator/compilation-model.md): SGL compiles to shader text, and the text's own compiler optimizes it.
 So an emitter is a printer with opinions about names and addresses, and it transforms nothing.
 
+## EMIT-292
+
+A driver that inlines a trace or a callable call saves every value live across it and restores it after, and its compile time follows that state.
+DXC reads a constant buffer again after each `TraceRay`, since the call may write memory, and what it computes from it is computed again from that read.
+SGL's sharing read each field once and kept it, and what it fed, across every later trace.
+On Quest3D's hybrid trace that state made the cold creation of SGL's pipeline 1.4 to 1.5 times DXC's, and the same recomputation done by hand on SGL's DXIL took it to 0.95 to 1.0.
+A constant block cannot change during a dispatch, and neither can the launch, so a copy computes what the original did; what a call can write is never copied.
+DXC keeps a read of the launch's index across a call, since it takes it as a pure value; SGL copies it too, as the measured transform did.
+A copy is a few operations a lane where keeping the value costs a register the driver saves around every call, so no chain is too long to copy.
+
 ## EMIT-290
 
 DXC refuses an array under `SV_ClipDistance` in a DXIL signature, since each element would take a row, and takes a float per lane, which it packs as it would a `float4` and the rest.

@@ -1010,6 +1010,11 @@ namespace sgl::ir
 /// Whether `code` may run on a path that did not ask for it: it gives only a value, and no operand makes it trap.
 [[nodiscard]] bool may_speculate(op code);
 
+/// Whether `code` hands the invocation to other shaders or other lanes and goes on after: a trace, a callable call, a
+/// reported hit, a hit object's trace or invocation, and a regrouping.
+/// A driver keeps what is live across one, which EMIT-292 has the native routes recompute rather than keep.
+[[nodiscard]] bool is_call_point(op code);
+
 /// The blocks a terminator reaches, which `scratch` holds; one block may stand twice.
 [[nodiscard]] cc::span<u32 const> successors_of(program const& p, instruction const& terminator, cc::vector<u32>& scratch);
 

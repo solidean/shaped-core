@@ -28,3 +28,26 @@ private:
     /// -1 for a node no walk reaches.
     cc::vector<i32> _idom;
 };
+
+/// Which nodes a walk reaches only through a marked node, for a pass that keeps no value across what a mark stands for.
+///
+/// `succs` holds each node's successors as a run from `first[node]` to `first[node + 1]`, in any numbering.
+/// A walk from a node starts at its end and never enters it again, since entering it again computes anew what it computed.
+/// What a node holds before or after its own mark is the caller's to ask; a walk counts a marked node it passes whole.
+class sgl::ir::marked_walks
+{
+public:
+    marked_walks(cc::span<u32 const> first, cc::span<u32 const> succs, cc::span<bool const> is_marked);
+
+    /// Whether a walk from the end of `from` reaches the start of `to` having passed a marked node.
+    /// Each `from` asked walks the graph once, and its answers for every `to` are kept.
+    [[nodiscard]] bool passes_mark(u32 from, u32 to);
+
+private:
+    cc::vector<u32> _first;
+    cc::vector<u32> _succs;
+    cc::vector<bool> _is_marked;
+    /// By node: whether it was walked from yet, and then for every node whether a walk reached it past a mark.
+    cc::vector<bool> _is_walked;
+    cc::vector<cc::vector<bool>> _past_mark;
+};

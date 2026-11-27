@@ -190,11 +190,17 @@ void module_builder::merge_buffer_loads(u32 opcode)
         result_of[_results[r]] = u32(r);
     auto open = cc::vector<open_load>();
     auto merged_any = false;
+    auto ends_call = cc::vector<bool>::create_filled(_instructions.size(), false);
+    for (auto const c : _call_points)
+        ends_call[c] = true;
     for (auto const& block : _blocks)
     {
         open.clear();
         for (auto i = block.first; i < block.first + block.count; ++i)
         {
+            // EMIT-292: no load joins one a call point stands before
+            if (ends_call[i])
+                open.clear();
             auto const& inst = _instructions[i];
             if (inst.code != inst_code::call || inst.flags == 0 || inst.count != 7 || result_of[i] == k_none)
                 continue;
@@ -300,6 +306,60 @@ void module_builder::share_common_values()
         each_successor(_blocks[i], [&](u32 to) { preds[cursor[to]++] = u32(i); });
     auto const tree = ir::dominance(edges_to, preds);
 
+    // EMIT-292: what a call point can run between, the call reading it runs again after
+    auto block_of = cc::vector<u32>();
+    auto calls_first = cc::vector<u32>::create_filled(_blocks.size() + 1, 0u);
+    auto succ_first = cc::vector<u32>::create_filled(_blocks.size() + 1, 0u);
+    auto succs = cc::vector<u32>();
+    auto is_marked = cc::vector<bool>::create_filled(_blocks.size(), false);
+    if (!_call_points.empty())
+    {
+        block_of.resize_to_filled(_instructions.size(), 0u);
+        for (auto b = isize(0); b < _blocks.size(); ++b)
+            for (auto i = _blocks[b].first; i < _blocks[b].first + _blocks[b].count; ++i)
+                block_of[i] = u32(b);
+        for (auto const c : _call_points)
+        {
+            ++calls_first[block_of[c] + 1];
+            is_marked[block_of[c]] = true;
+        }
+        for (auto b = isize(0); b < _blocks.size(); ++b)
+        {
+            calls_first[b + 1] += calls_first[b];
+            each_successor(_blocks[b], [&](u32 to) { succs.push_back(to); });
+            succ_first[b + 1] = u32(succs.size());
+        }
+    }
+    // a run of call points per block, in position order, since they were added in it
+    auto calls = cc::vector<u32>::create_filled(isize(calls_first[_blocks.size()]), 0u);
+    {
+        auto cursor = cc::vector<u32>::create_copy_of(cc::span<u32 const>(calls_first));
+        for (auto const c : _call_points)
+            calls[cursor[block_of[c]]++] = c;
+    }
+    auto walks = ir::marked_walks(succ_first, succs, is_marked);
+    auto const calls_between = [&](u32 b, u32 after, u32 before)
+    {
+        for (auto k = calls_first[b]; k < calls_first[b + 1]; ++k)
+            if (calls[k] > after && calls[k] < before)
+                return true;
+        return false;
+    };
+    auto const apart = [&](inst_entry const& inst, u32 first, u32 second)
+    {
+        if (_call_points.empty() || inst.code != inst_code::call)
+            return false;
+        // a handle stays one, which DXC keeps across its calls too
+        if (is_structure(inst.type) && name_of(inst.type) == "dx.types.Handle")
+            return false;
+        auto const from = block_of[first];
+        auto const to = block_of[second];
+        if (from == to)
+            return calls_between(from, first, second);
+        return calls_between(from, first, 0xffffffffu)
+            || (calls_first[to] < calls_first[to + 1] && calls[calls_first[to]] < second) || walks.passes_mark(from, to);
+    };
+
     struct entry
     {
         u32 hash = 0;
@@ -348,7 +408,7 @@ void module_builder::share_common_values()
                                 && other.type == inst.type && other.count == inst.count;
                     for (auto k = u32(0); k < inst.count && is_same; ++k)
                         is_same = _args[other.first + k] == _args[inst.first + k];
-                    if (is_same)
+                    if (is_same && !apart(inst, _results[table[at].result], u32(i)))
                     {
                         replaced[own] = table[at].result;
                         found = true;
@@ -440,4 +500,5 @@ void module_builder::remove_unused()
     }
     _instructions = cc::move(kept);
     _results = cc::move(kept_results);
+    _call_points.clear();
 }

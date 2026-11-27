@@ -1140,12 +1140,32 @@ namespace
 {
 /// The protocol's calls in a disassembled module as `protocol_of` finds them, but with each SSA name renamed by where
 /// it first appears among them, so two writers' modules compare by which value each call takes as well as its shape.
+/// A read of the launch's index is named by its lane, since SGL reads it again after a call point where DXC keeps it
+/// (EMIT-292).
 [[nodiscard]] cc::vector<cc::string> protocol_flow_of(cc::string_view disassembly)
 {
     auto const is_name = [](char c)
     { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '.'; };
     auto seen = cc::vector<cc::string>();
     auto result = cc::vector<cc::string>();
+    // each read of the launch's index, by its SSA name, and the lane it reads
+    auto launch_reads = cc::vector<cc::string>();
+    auto launch_lanes = cc::vector<cc::string>();
+    for (auto from = isize(0); from < disassembly.size();)
+    {
+        auto end = disassembly.find('\n', from);
+        if (end < 0)
+            end = disassembly.size();
+        auto const line = disassembly.subview({.offset = from, .size = end - from});
+        from = end + 1;
+        auto const call = line.find(" = call i32 @dx.op.dispatchRaysIndex.i32(i32 145, i8 ");
+        auto const name = line.find('%');
+        if (call < 0 || name < 0 || name > call)
+            continue;
+        launch_reads.push_back(cc::string(line.subview({.offset = name + 1, .size = call - name - 1})));
+        auto const lane = call + cc::string_view(" = call i32 @dx.op.dispatchRaysIndex.i32(i32 145, i8 ").size();
+        launch_lanes.push_back(cc::string(line.subview({.offset = lane, .size = 1})));
+    }
     auto at = isize(0);
     while (at < disassembly.size())
     {
@@ -1175,8 +1195,14 @@ namespace
             auto const name = cc::string(line.subview({.offset = i + 1, .size = j - i - 1}));
             // a type's name, `%dx.types.Handle`, stays what it is, and a handle is any one of the resource's: DXC makes
             // one per access, and SGL's writer one per resource; so is a trace's payload, which DXC copies per trace
+            auto launch_lane = isize(-1);
+            for (auto k = isize(0); k < launch_reads.size(); ++k)
+                if (launch_reads[k] == name)
+                    launch_lane = k;
             if (name.starts_with("dx.") || name.starts_with("struct."))
                 plain.appendf("%{}", name);
+            else if (launch_lane >= 0)
+                plain.appendf("%launch{}", launch_lanes[launch_lane]);
             else if (plain.ends_with("%dx.types.Handle "))
                 plain += "%handle";
             else if (plain.ends_with("* ") || plain.ends_with("* nonnull "))

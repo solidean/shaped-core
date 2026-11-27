@@ -63,6 +63,7 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/ir/pipeline.cc
     src/shaped-graphics-language/ir/cleanup.cc
     src/shaped-graphics-language/ir/chain_sums.cc
+    src/shaped-graphics-language/ir/recompute.cc
     src/shaped-graphics-language/ir/regroup.cc
     src/shaped-graphics-language/ir/flatten.cc
     src/shaped-graphics-language/ir/lower.cc
@@ -569,6 +570,7 @@ if(SC_BUILD_TESTS)
         tests/emit/case-emit-test.cc
         tests/emit/enum-emit-test.cc
         tests/emit/raytracing-emit-test.cc
+        tests/emit/recompute-emit-test.cc
         tests/emit/msl-raytracing-emit-test.cc
         tests/emit/layout-emit-test.cc
         tests/emit/swizzle-emit-test.cc
@@ -584,6 +586,7 @@ if(SC_BUILD_TESTS)
         tests/ir/ir-test-support.hh
         tests/ir/optimize-ir-test.cc
         tests/ir/passes-ir-test.cc
+        tests/ir/recompute-ir-test.cc
         tests/ir/signature-ir-test.cc
         tests/ir/sweep-ir-test.cc
         tests/ir/tables-ir-test.cc

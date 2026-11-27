@@ -332,6 +332,24 @@ bool sgl::ir::may_speculate(op code)
     return gives_only_a_value(code);
 }
 
+bool sgl::ir::is_call_point(op code)
+{
+    switch (code)
+    {
+    case op::trace_ray:
+    case op::execute_callable:
+    case op::report_hit:
+    case op::hit_object_trace:
+    case op::trace_reorder_execute:
+    case op::hit_object_reorder:
+    case op::reorder_thread:
+    case op::hit_object_invoke:
+        return true;
+    default:
+        return false;
+    }
+}
+
 cc::span<u32 const> sgl::ir::successors_of(program const& p, instruction const& terminator, cc::vector<u32>& scratch)
 {
     scratch.clear();

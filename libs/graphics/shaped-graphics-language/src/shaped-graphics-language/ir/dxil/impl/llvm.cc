@@ -690,6 +690,11 @@ ll_value module_builder::call(ll_value callee, ll_type type, cc::span<ll_value c
     return push(inst_code::call, result, raw, is_marked ? k_ll_precise : u8(0), is_stable ? 1 : 0);
 }
 
+void module_builder::mark_call_point()
+{
+    _call_points.push_back(u32(_instructions.size()) - 1);
+}
+
 u32 module_builder::one_node()
 {
     if (_one_node == 0)

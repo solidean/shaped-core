@@ -424,6 +424,12 @@ void writer::lower_block(block_ref b)
         locate(_p.instructions[i]);
         _guarantee = _p.instructions[i].guarantee;
         operation(i);
+        // EMIT-292: a row of constants read before a call point is read again after it
+        if (is_call_point(_p.instructions[i].code))
+        {
+            _rows.clear();
+            _m.mark_call_point();
+        }
     }
     if (_failure.empty())
     {

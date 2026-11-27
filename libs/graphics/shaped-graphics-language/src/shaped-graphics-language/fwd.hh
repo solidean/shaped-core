@@ -472,6 +472,7 @@ enum class block_ref : u32;
 enum class operand : u8;
 enum class control_flow : u8;
 class dominance;
+class marked_walks;
 } // namespace sgl::ir
 
 namespace sgl::ir::dxil

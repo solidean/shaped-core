@@ -67,6 +67,18 @@ void regroup_lanes(program& p);
 /// The local's store goes, and so does the local.
 void state_constant_tables(program& p);
 
+/// Computes again, after each call point a value would be kept across, every value that reads nothing an invocation
+/// or a called shader can change: constant blocks, the launch's index and size, constants, and the arithmetic, addresses
+/// and composites made of them alone (EMIT-292).
+///
+/// A use the walk from its value to it can pass a call point at reads a copy of the value's whole chain, made at the
+/// start of the use's stretch of its block between two call points, after its phis; a phi's use is at the end of the
+/// way it comes in by.
+/// One copy serves every use of its stretch, and a copy keeps its value's statement and guarantee.
+/// A read of memory the shader or a called shader can write, a payload, a phi and a resource handle are kept as they are.
+/// Run it after every pass that shares or moves values, then `remove_unused` for what nothing reads any more.
+void recompute_after_calls(program& p);
+
 /// Reorders each run of `fast` additions in one block, so a total meets each product alone and fuses with it.
 ///
 /// A sum only reorders with sums of its own guarantee, and each addition keeps its statement and its place in the block.

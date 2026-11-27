@@ -624,6 +624,14 @@ fn main_ps(p: pixel_input) -> target_ {
   On DXIL it is a value of `%dx.types.HitObject`, from `hitObject_TraceRay`, at Shader Model 6.9.
   A trace with `reorder` is that, `maybeReorderThread` and `hitObject_Invoke`, and `maybe_reorder` regroups a `hitObject_MakeNop`.
   A regrouping with no hint states an undefined hint of 0 bits, as DXC's does.
+* **EMIT-292** After each call point, a native route computes again a value it would keep across it that reads nothing a call can change ([why](why/emitting.md#emit-292)).
+  A call point is a trace, a callable call, a reported hit, a hit object's trace or invocation, and a regrouping.
+  Such a value reads only constant blocks, the launch's index and size, and constants, through arithmetic, comparisons, conversions, `select`s, composites and addresses into memory.
+  A use the walk from the value can reach past a call point reads a copy of the value's whole chain, at the start of its block's stretch between two call points; one copy serves that stretch.
+  What the shader or a called shader can write is read where the source reads it, never again: a writable buffer, a payload, a callable's parameter.
+  A phi and a resource handle stay as they are, and so does a read of a buffer the shader cannot write, as DXC keeps them.
+  On DXIL a copy reads its constants with a `cbufferLoadLegacy` of its own and the launch with a `dispatchRaysIndex` of its own, and on SPIR-V with an `OpLoad` of its own.
+  Neither writer's own sharing joins a read ahead of a call point with one after it, but what one stretch reads twice it reads once.
 * **EMIT-247** A native route's atomic on a 64-bit integer is its target's own, as an `i32` one is.
   On DXIL it is the `i64` form of `dx.op.atomicBinOp` and `dx.op.atomicCompareExchange` on a buffer, and an `atomicrmw` or `cmpxchg` of `i64` in workgroup memory.
   A resource it reaches carries Atomic64Use in its metadata, and `PSV0` flags it `UsedByAtomic64`, since the validator compares the two.

@@ -80,3 +80,48 @@ sgl::ir::dominance::dominance(cc::span<u32 const> first, cc::span<u32 const> pre
         stack.pop_back();
     }
 }
+
+sgl::ir::marked_walks::marked_walks(cc::span<u32 const> first, cc::span<u32 const> succs, cc::span<bool const> is_marked)
+  : _first(cc::vector<u32>::create_copy_of(first)),
+    _succs(cc::vector<u32>::create_copy_of(succs)),
+    _is_marked(cc::vector<bool>::create_copy_of(is_marked))
+{
+    _is_walked.resize_to_filled(_is_marked.size(), false);
+    _past_mark.resize_to_defaulted(_is_marked.size());
+}
+
+bool sgl::ir::marked_walks::passes_mark(u32 from, u32 to)
+{
+    if (!_is_walked[from])
+    {
+        _is_walked[from] = true;
+        auto const count = _is_marked.size();
+        // two states a node: reached with no mark passed yet, and reached past one
+        auto seen = cc::vector<bool>::create_filled(count * 2, false);
+        auto stack = cc::vector<u32>();
+        auto const reach = [&](u32 node, bool is_past)
+        {
+            auto const state = node * 2 + (is_past ? 1u : 0u);
+            if (node == from || seen[state])
+                return;
+            seen[state] = true;
+            stack.push_back(state);
+        };
+        for (auto k = _first[from]; k < _first[from + 1]; ++k)
+            reach(_succs[k], false);
+        while (!stack.empty())
+        {
+            auto const state = stack.back();
+            stack.pop_back();
+            auto const node = state / 2;
+            auto const is_past = (state & 1u) != 0 || _is_marked[node];
+            for (auto k = _first[node]; k < _first[node + 1]; ++k)
+                reach(_succs[k], is_past);
+        }
+        auto& past = _past_mark[from];
+        past.resize_to_filled(count, false);
+        for (auto node = isize(0); node < count; ++node)
+            past[node] = seen[node * 2 + 1];
+    }
+    return _past_mark[from][to];
+}
