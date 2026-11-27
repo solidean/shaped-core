@@ -648,6 +648,12 @@ fn main_ps(p: pixel_input) -> target_ {
 * **EMIT-291** A loop written `@unroll(false)` (CHK-414) reaches both native routes, as HLSL's `[loop]` reaches DXC's ([why](why/emitting.md#emit-291)).
   DXIL attaches `!llvm.loop` to every branch that goes back to the loop's header, a distinct node of the loop's own naming `llvm.loop.unroll.disable`, as DXC's compile of `[loop]` does.
   SPIR-V states `DontUnroll` as the loop control of the loop's `OpLoopMerge`, which SPIR-V 1.0 has.
+* **EMIT-293** DXIL holds a variable, workgroup memory or a table holding an array of structs, vectors or matrices as DXC does ([why](why/emitting.md#emit-293)).
+  That is one array per scalar field and lane.
+  Each such array holds that leaf of every element, in order, so an index known at run time alone steps it by one element's share of it.
+  A member that is an array is a dimension of its leaves' arrays, and so is a vector or a matrix that one of the variable's indices picks a lane of at run time.
+  Anything else is one array per scalar type it holds, laid out as the value is.
+  SPIR-V keeps the variable's own type, as DXC's SPIR-V does, and the driver splits it.
   A loop nested in it, or around it, asks nothing unless it is written so too.
   A loop that asks nothing carries no metadata on DXIL and `None` on SPIR-V, an unrolled one past CHK-389's limit among them.
 * **EMIT-285** DXIL branches on what a `not` negates, with the branch's two ways swapped, as DXC writes it.

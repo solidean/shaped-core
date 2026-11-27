@@ -1,0 +1,74 @@
+// Arrays of structs in a variable, in workgroup memory and in a table, which SGL's DXIL splits a column per field and
+// lane (EMIT-293): read and written whole, by the field and by the lane, at indices known at run time alone.
+// `params` is [3, 2, 0]: a count, a lane, and 0 to take the branch that rewrites every element.
+
+struct vertex:
+    pos: float3
+    weight: float
+    uv: float2
+    tag: int
+
+binding columns:
+    params: buffer[int]
+    results: mut buffer[float]
+
+fun vertex_at(k: int) -> vertex:
+    let f = k as float
+    return vertex(pos = float3(f, 10.0 + f, 20.0 + f), weight = 30.0 + f, uv = float2(40.0 + f, 50.0 + f), tag = 60 + k)
+
+fun lift(vs: mut vertex[4], n: int):
+    for k in 0 ..< n:
+        vs[k].uv.y += 1000.0
+
+// The shape that crashed AMD's compiler on one flat array: filled, rewritten whole under a branch, then a field each.
+// Eight floats out per element, then the element `n` picks read whole.
+@compute(1) fun split_locals(){columns}:
+    let n = columns.params[0]
+    let lane = columns.params[1]
+    @indexed(.memory) let mut vs = vertex[4].filled(vertex(pos = float3(0.0), weight = 0.0, uv = float2(0.0), tag = 0))
+    if columns.params[2] == 0:
+        for k in 0 ..< 4:
+            vs[k] = vertex_at(k)
+    for g in 0 ..< n:
+        vs[g].pos.y = 100.0 + (g as float)
+    lift(mut vs, n)
+    // indexed into a vector at run time, so its lanes stay whole
+    @indexed(.memory) let mut ps = float3[4].filled(float3(0.0))
+    for k in 0 ..< 4:
+        ps[k] = vs[k].pos
+    ps[n - 1][lane] = -1.0
+    for k in 0 ..< 4:
+        let v = vs[k]
+        columns.results[k * 8 + 0] = v.pos.x
+        columns.results[k * 8 + 1] = v.pos.y
+        columns.results[k * 8 + 2] = v.pos.z
+        columns.results[k * 8 + 3] = v.weight
+        columns.results[k * 8 + 4] = v.uv.x
+        columns.results[k * 8 + 5] = v.uv.y
+        columns.results[k * 8 + 6] = v.tag as float
+        columns.results[k * 8 + 7] = ps[k][lane]
+    let picked = vs[n]
+    columns.results[32] = picked.pos.z + picked.uv.y
+    columns.results[33] = picked.tag as float
+
+@workgroup binding shelf:
+    rows: vertex[64]
+
+// Each invocation writes its row, then reads the row `params[0]` past it: two floats each.
+@compute(64) fun split_shared(@thread_id id: int3){columns, shelf}:
+    shelf.rows[id.x] = vertex_at(id.x)
+    workgroup_barrier()
+    let other = (id.x + columns.params[0]) % 64
+    columns.results[id.x * 2] = shelf.rows[other].pos.z + shelf.rows[other].uv.x
+    columns.results[id.x * 2 + 1] = shelf.rows[other].tag as float
+
+// A table, written once with constants, its row k `vertex_at(5 + k)`: the rows `params[1]` and `params[0] - 3` pick, by the field.
+@compute(1) fun split_table(){columns}:
+    @indexed(.memory) let table = [
+        vertex(pos = float3(5.0, 15.0, 25.0), weight = 35.0, uv = float2(45.0, 55.0), tag = 65),
+        vertex(pos = float3(6.0, 16.0, 26.0), weight = 36.0, uv = float2(46.0, 56.0), tag = 66),
+        vertex(pos = float3(7.0, 17.0, 27.0), weight = 37.0, uv = float2(47.0, 57.0), tag = 67)
+    ]
+    columns.results[0] = table[columns.params[1]].uv.y
+    columns.results[1] = table[columns.params[0] - 3].pos.x
+    columns.results[2] = table[columns.params[1]].tag as float

@@ -8,6 +8,16 @@ Nothing here is normative.
 The emitters follow the [compilation model](../../incubator/compilation-model.md): SGL compiles to shader text, and the text's own compiler optimizes it.
 So an emitter is a printer with opinions about names and addresses, and it transforms nothing.
 
+## EMIT-293
+
+SGL's DXIL held every variable as one array of scalars, so a local `Vertex[8]` of sixteen floats was one `[128 x float]`.
+AMD's compiler for RDNA 3 and 4 crashes on that shape, filled, rewritten under a branch and then written by the field.
+[The bug's entry](../../../../../../../docs/bugs-external/amd-dxil-flat-local-array-crashes-compiler/readme.md) reduces it to DXC's compile of plain HLSL.
+DXC's scalar replacement never writes the shape for an array of structs: it splits one into an array per field and lane, which is what the driver meets from HLSL.
+Matching DXC's layout is the narrowest fix that keeps SGL's DXIL where the driver has been, and it took the repository's shaders 1 KB smaller in all.
+A lane picked at run time needs the lanes in one array, so that variable keeps its vectors whole, as DXC keeps an array it cannot split.
+A value with no such array keeps one array per scalar type, which leaves its debug declaration and its size as they were.
+
 ## EMIT-292
 
 A driver that inlines a trace or a callable call saves every value live across it and restores it after, and its compile time follows that state.

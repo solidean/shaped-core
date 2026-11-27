@@ -263,20 +263,11 @@ void writer::declare(instruction const& i)
     auto const local = value_ref(_p.operands_of(i)[1]);
     if (!is_local(local) || _local_memory[index_of(local)] < 0)
         return;
-    // a local is one array per kind of scalar, so only one holding a single kind lays its leaves out as the variable
-    // does; one of several kinds is not declared yet
+    // only a local held in one column lays its leaves out as the variable does; one of several is not declared yet
     auto const& memory = _memories[isize(_local_memory[index_of(local)])];
-    auto pointer = ll_value::none;
-    for (auto const held : memory.storage)
-    {
-        if (held == ll_value::none)
-            continue;
-        if (pointer != ll_value::none)
-            return;
-        pointer = held;
-    }
-    if (pointer == ll_value::none)
+    if (memory.columns.size() != 1)
         return;
+    auto const pointer = memory.columns[0];
     locate(i);
     _m.debug_declare(pointer, u32(_debug_keys.size()));
     _debug_keys.push_back({.variable = _p.operands_of(i)[0], .is_declare = true});
