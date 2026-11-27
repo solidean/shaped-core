@@ -72,7 +72,7 @@ public:
     }
 
     /// Moves the finished buffer out, leaving the adapter empty.
-    /// Only bytes the stream has flushed are included, so flush (or destroy) the stream first.
+    /// Only bytes the stream has flushed are included, so flush the stream first: destroying it flushes nothing.
     [[nodiscard]] Container take() { return cc::move(_data); }
 
 protected:
