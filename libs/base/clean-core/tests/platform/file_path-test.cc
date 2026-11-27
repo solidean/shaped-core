@@ -1,3 +1,5 @@
+#include <clean-core/common/macros.hh>
+#include <clean-core/platform/environment.hh>
 #include <clean-core/platform/file_path.hh>
 #include <clean-core/streams/file_stream.hh>
 #include <clean-core/string/string_view.hh>
@@ -47,4 +49,26 @@ TEST("file_path - removing reports gone rather than removed")
 
     CHECK(cc::remove_file(path));
     CHECK(cc::file_read_stream_adapter::open(path).has_error());
+}
+
+TEST("file_path - the user's config directory is where the platform's convention puts it", nx::config::exclusive("env"))
+{
+#if defined(CC_OS_WINDOWS)
+    auto const app_data = cc::scoped_environment_variable("APPDATA", R"(C:\Users\someone\AppData\Roaming\)");
+    CHECK(cc::user_config_directory_path() == cc::string(R"(C:\Users\someone\AppData\Roaming)"));
+    auto const none = cc::scoped_environment_variable("APPDATA", "");
+    CHECK(!cc::user_config_directory_path().has_value());
+#elif defined(CC_OS_EMSCRIPTEN) || defined(CC_OS_WASI) || defined(CC_OS_ANDROID)
+    CHECK(!cc::user_config_directory_path().has_value());
+#elif defined(CC_OS_MACOS)
+    auto const home = cc::scoped_environment_variable("HOME", "/Users/someone/");
+    CHECK(cc::user_config_directory_path() == cc::string("/Users/someone/Library/Application Support"));
+#else
+    auto const home = cc::scoped_environment_variable("HOME", "/home/someone");
+    auto const xdg = cc::scoped_environment_variable("XDG_CONFIG_HOME", "/elsewhere/config/");
+    CHECK(cc::user_config_directory_path() == cc::string("/elsewhere/config"));
+    // A relative XDG_CONFIG_HOME is invalid, and falls back as an unset one does.
+    auto const relative = cc::scoped_environment_variable("XDG_CONFIG_HOME", "config");
+    CHECK(cc::user_config_directory_path() == cc::string("/home/someone/.config"));
+#endif
 }

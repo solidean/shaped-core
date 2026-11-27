@@ -1453,6 +1453,7 @@ cc::demangle_symbol(symbol)                        // cc::string — human-reada
 #include <clean-core/platform/file_path.hh>       // where scratch files go, and how to unmake one
 cc::temp_directory_path();                          // cc::string — no trailing separator; "." where none is named
 cc::temp_file_path(prefix, suffix = "");            // "<temp>/<prefix>-<pid>-<counter><suffix>" — CREATES NOTHING
+cc::user_config_directory_path();                   // optional<string> — %APPDATA%, ~/Library/Application Support, $XDG_CONFIG_HOME or ~/.config
 cc::remove_file(path);                              // true == gone, which includes never having been there
                                                     // NOT a filesystem layer: no mkdir, no iteration, no metadata,
                                                     // no path arithmetic. Reading and writing are the file streams'.
