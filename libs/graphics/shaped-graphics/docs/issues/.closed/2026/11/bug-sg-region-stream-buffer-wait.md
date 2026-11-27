@@ -9,7 +9,8 @@ resolution: fixed
 
 # A region-scoped stream into a buffer still makes every list touching the buffer wait
 
-`stream_scope::region` promises that only the streamed byte range is claimed, and that the rest of the buffer may be used concurrently ([stream.hh](../../../../../src/shaped-graphics/transfer/stream.hh)).
+`stream_scope::region` promises that only the streamed byte range is claimed ([stream.hh](../../../../../src/shaped-graphics/transfer/stream.hh)).
+The rest of the buffer may be used concurrently.
 On dx12 it is not honored for a buffer: `stream_source_buffer` stamps the buffer's `_pending_stream_copy_value` whatever the scope.
 `fold_transfer_waits` folds that value for every touched buffer, so any list touching the buffer waits for the whole transfer, and warns that it does.
 
