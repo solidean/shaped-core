@@ -2268,6 +2268,7 @@ void checker::compile_function(symbol_id id)
                                      "stages",
                                      "shadowable",
                                      "expect",
+                                     "allow",
                                      "internal",
                                      "forward",
                                      "backward"};

@@ -1324,6 +1324,8 @@ struct checker
     /// Records the `@expect(footprint = "...")` among the attributes of function `id`, and an entry point's expected
     /// diagnostics (CHK-403); any other `@expect` there is reported.
     void read_footprint_pin(symbol_id id, i32 file, ast::range_of<ast::attribute> attributes, bool is_entry_point);
+    /// CHK-576, CHK-577: an entry point's `@allow("kind")`, each a warning its inlined body is meant to raise.
+    void read_allowances(symbol_id id, i32 file, ast::range_of<ast::attribute> attributes, bool is_any_entry);
     /// `unmet-expectation` for every pin whose entry point's footprint says otherwise (CHK-267).
     void judge_footprint_pins();
     /// True where `expr` is the bare name `name`, which is how a resource type is recognized before lookup.

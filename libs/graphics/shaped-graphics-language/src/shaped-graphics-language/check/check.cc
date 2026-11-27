@@ -1052,7 +1052,7 @@ void checker::judge_attributes(i32 file,
         }
         else if (sgl::is_valid(a.list) && name != "operator" && name != "compute" && name != "preferred_subgroup_size"
                  && name != "float" && name != "stream" && name != "bits" && name != "stages" && name != "shadowable"
-                 && name != "expect" && name != "interpolate" && name != "format" && name != "depth"
+                 && name != "expect" && name != "allow" && name != "interpolate" && name != "format" && name != "depth"
                  && name != "sampler" && name != "geometry" && name != "tessellation_control" && name != "mesh"
                  && name != "task" && name != "padding" && name != "swizzle" && name != "forward" && name != "backward"
                  && name != "gradient" && name != "tangent" && name != "max_iterations" && name != "indexed"

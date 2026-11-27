@@ -62,6 +62,8 @@ class SglFile:
     # The structs its bindings place in GPU memory, each after every struct it holds.
     memory_structs: list[dict] = field(default_factory=list)
     entry_points: list[dict] = field(default_factory=list)
+    # The entry points that are never built, each with why: one that expects a diagnostic (CHK-403).
+    unbuilt_entry_points: list[dict] = field(default_factory=list)
     pipelines: list[dict] = field(default_factory=list)
     # The file-scope samplers, in index order: the static samplers of the layouts that name them.
     samplers: list[dict] = field(default_factory=list)
@@ -151,6 +153,7 @@ def describe(tool: Path, source: Path | None, shown_as: str, module_dirs: list[P
     data = json.loads(result.stdout)
     return SglFile(path=shown_as, bindings=data["bindings"], structs=data["structs"],
                    memory_structs=data.get("memory_structs", []), entry_points=data["entry_points"],
+                   unbuilt_entry_points=data.get("unbuilt_entry_points", []),
                    pipelines=data.get("pipelines", []), samplers=data.get("samplers", []),
                    ray_sets=data.get("ray_sets", []), hit_groups=data.get("hit_groups", []),
                    raytracing_pipelines=data.get("raytracing_pipelines", []), options=data.get("options", []))
@@ -260,6 +263,11 @@ def resolve(package: str, entries: list[str], source_dir: Path, tool: Path | Non
             described = file_of(path)
             found = described.entry_point(name)
             if found is None:
+                unbuilt = next((e for e in described.unbuilt_entry_points if e["name"] == name), None)
+                if unbuilt is not None:
+                    raise DescriptionError(
+                        f"shader package '{package}': entry '{entry}' names '{name}' of '{path}', which "
+                        f"{unbuilt['why']}")
                 held = ", ".join(f"{e['stage']}:{e['name']}" for e in described.entry_points) or "none"
                 raise DescriptionError(
                     f"shader package '{package}': entry '{entry}' names '{name}', which '{path}' does not declare as an "

@@ -1061,7 +1061,7 @@ fun f() -> float:
 * **CHK-565** A pixel stage with it whose result has a `@depth` or a `@sample_mask` member (CHK-276) is `invalid-entry-point`, since the tests and their writes are decided before the stage runs.
 * **CHK-566** A `discard` in such a stage keeps the pixel's depth and stencil, which the tests have written already.
   A pixel stage whose inlined body reaches one warns `early-depth-keeps-discarded` at the `discard`.
-  Where that is meant, the entry point says so with `@expect(warning = "early-depth-keeps-discarded")` (CHK-403).
+  Where that is meant, the entry point says so with `@allow("early-depth-keeps-discarded")` (CHK-576), and is built as before.
 * **CHK-567** It needs `early_depth_test` where it changes a result: where the inlined body writes through a binding (CHK-404's writes) or reaches a `discard`.
   Elsewhere it needs no feature, and a target without the attribute may leave it out, since a stage that writes no memory, no depth and never discards is tested early or late with one result.
   sg grants `early_depth_test` on dx12, vulkan and metal on every device, and webgpu on none, so a `wgsl` compile of a stage that needs it is `target-lacks-feature` (EMIT-109).
@@ -1165,7 +1165,20 @@ fun f() -> float:
   It takes them as a test's expectation takes those inside the test (CHK-232), and one none of them meets is `unmet-expectation`.
   Such an entry point is judged by them alone and never built, as such a test is never run.
   So a declaration that names one is `invalid-pipeline` at the name: a pipeline's stage, a hit group's shader, a ray-tracing pipeline's `raygen` or `miss`, and a callables table's entry.
+  It is still the file's entry point: `describe` lists it apart, as one that expects a diagnostic, so it is never built, and a compile or a link that names it is refused in those words, never as a name the file does not hold.
+  An entry point that is built and means a warning says so with `@allow` (CHK-576), never with `@expect`.
   On a function that is no entry point it is `invalid-attribute-arguments`.
+* **CHK-576** `@allow("kind")` on an entry point, of any stage, says that a warning of that kind judged of its inlined body (CHK-402) is intended ([why](why/checking.md#chk-576)).
+  Such a warning is reported nowhere, and the entry point is built as it is without the attribute.
+  Another entry point the same warning was judged of keeps it, since the allowance is of one entry point's body.
+  Each argument names one warning by its kind, exactly as its diagnostic spells it, and several arguments or several `@allow`s name several.
+  Only a warning judged of an inlined body can be allowed; one judged of the file, such as `no-effect`, belongs to no entry point, and an allowance of it is unmet (CHK-577).
+  A kind no diagnostic has, an error's kind and a pattern are `invalid-attribute-arguments`, since an error is never intended and a pattern would allow warnings nobody named.
+  So are an `@allow` with no argument, a named argument, and an `@allow` on a function that is no entry point.
+  An allowed warning is nothing an `@expect` of the entry point meets (CHK-403), which stays a test of diagnostics.
+* **CHK-577** An allowance whose kind no warning judged of its entry point's inlined body has is `unmet-expectation` at its argument ([why](why/checking.md#chk-577)).
+  It is a diagnostic of that entry point (CHK-402), so a compile of another entry point of the file does not report it.
+  An entry point that is never built, or whose own body did not check, has no inlined body judged, and reports none.
 
 ## Features
 
@@ -2241,7 +2254,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `unknown-builtin` | CHK-31 |
 | `expected-body` | CHK-32, CHK-236 |
 | `opaque-struct-needs-builtin` | CHK-34 |
-| `invalid-attribute-arguments` | CHK-546, CHK-547, CHK-548, CHK-36, CHK-39, CHK-204, CHK-208, CHK-211, CHK-212, CHK-220, CHK-231, CHK-267, CHK-403, CHK-292, CHK-293, CHK-301, CHK-304, CHK-384, CHK-369, CHK-370, CHK-371, CHK-431, CHK-435, CHK-480, CHK-522, CHK-526, CHK-538, CHK-564, CHK-571 |
+| `invalid-attribute-arguments` | CHK-546, CHK-547, CHK-548, CHK-36, CHK-39, CHK-204, CHK-208, CHK-211, CHK-212, CHK-220, CHK-231, CHK-267, CHK-403, CHK-292, CHK-293, CHK-301, CHK-304, CHK-384, CHK-369, CHK-370, CHK-371, CHK-431, CHK-435, CHK-480, CHK-522, CHK-526, CHK-538, CHK-564, CHK-571, CHK-576 |
 | `binding-not-listed` | CHK-45, CHK-131, CHK-228 |
 | `as-precedence` | CHK-411 |
 | `type-mismatch` | CHK-552, CHK-541, CHK-542, CHK-52, CHK-56, CHK-77, CHK-112 to CHK-118, CHK-121, CHK-167, CHK-210, CHK-214, CHK-219, CHK-236, CHK-243, CHK-275, CHK-276, CHK-279, CHK-281, CHK-287, CHK-329, CHK-344, CHK-362, CHK-375, CHK-392, CHK-429, CHK-433, CHK-434, CHK-558 |
@@ -2280,7 +2293,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `shadows-unshadowable` | CHK-220, CHK-266 |
 | `test-captures-runtime-value` | CHK-228 |
 | `test-must-end-in-check` | CHK-226 |
-| `unmet-expectation` | CHK-232, CHK-267, CHK-403 |
+| `unmet-expectation` | CHK-232, CHK-267, CHK-403, CHK-577 |
 | `member-name-clash` | CHK-238, CHK-386 |
 | `literal-not-representable` | CHK-60, CHK-61, CHK-253, CHK-357, CHK-549 |
 | `call-spelling` | CHK-256 |

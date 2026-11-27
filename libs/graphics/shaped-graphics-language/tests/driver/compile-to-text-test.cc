@@ -88,8 +88,7 @@ TEST("sgl driver - a line and a column are 1-based, and end of file is a place")
 
 TEST("sgl driver - every diagnostic kind has a summary a reader understands without its name")
 {
-    // `unroll_too_long` is the last kind; a kind added after it moves this bound
-    for (auto k = 0; k <= int(sgl::diagnostic_kind::unroll_too_long); ++k)
+    for (auto k = 0; k <= int(sgl::k_last_diagnostic_kind); ++k)
     {
         auto const kind = sgl::diagnostic_kind(k);
         CHECK(!sgl::summary_of(kind).empty());

@@ -178,6 +178,7 @@ The interpreter reads those `var`s when a check is false, and `sgl::test::run_te
 `sgl::test_source` is the driver of a whole file's tests, what `sgl test` and the corpus run; `text_request::run_tests` makes a failing test an error of `compile_to_text`.
 `@expect` is judged in the front end, once every phase's diagnostics are in one list.
 An entry point's `@expect(error = "kind")` takes every diagnostic judged of its inlined body, wherever it stands, and such an entry point is never built, nor named by a pipeline (CHK-403).
+An entry point's `@allow("kind")` takes the warnings of that kind judged of its body before any `@expect` does, and the entry point is built (CHK-576).
 
 ## Builtins and the prelude
 

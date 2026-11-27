@@ -165,7 +165,7 @@ TEST("sgl spec - every checked example in the spec parses the way its fence says
             // Reporting *something* is not enough when the lead names the kind: the example is about that kind.
             auto names_a_kind = false;
             auto reports_it = false;
-            for (auto k = 0; k <= int(sgl::diagnostic_kind::underscore_in_number); ++k)
+            for (auto k = 0; k <= int(sgl::k_last_diagnostic_kind); ++k)
             {
                 auto const name = sgl::to_string(sgl::diagnostic_kind(k));
                 if (!e.lead.contains(cc::format("`{}`", name)))

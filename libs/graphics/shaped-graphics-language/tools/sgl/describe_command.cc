@@ -508,6 +508,18 @@ cc::result<cc::string> to_json(sgl::module_description const& d)
                 write_entry_point(o, e);
             }
         }
+        // CHK-403: written only where there is one, so a description without one reads as it did
+        if (!d.unbuilt_entry_points.empty())
+        {
+            auto entries = root.write_array("unbuilt_entry_points");
+            for (auto const& e : d.unbuilt_entry_points)
+            {
+                auto o = entries.write_object();
+                o.write("name", cc::string_view(e.name));
+                o.write("stage", stage_word(e.stage));
+                o.write("why", cc::string_view(e.why));
+            }
+        }
         {
             auto pipelines = root.write_array("pipelines");
             for (auto const& p : d.pipelines)
@@ -769,4 +781,36 @@ TEST("sgl describe - a vertex entry point's JSON lists its vertex attributes")
     // every other entry point states the key, empty
     CHECK(entries[1]["vertex_attributes"].is_array());
     CHECK(entries[1]["vertex_attributes"].size() == 0);
+}
+
+TEST("sgl describe - the JSON lists an entry point that expects a diagnostic apart, and only where there is one")
+{
+    // CHK-403
+    constexpr auto plain = cc::string_view("struct varyings:\n"
+                                           "    @position position: hpos4\n"
+                                           "@early_depth_test\n"
+                                           "@pixel fun shade(p: varyings) -> float4 => float4(1.0)\n");
+    auto const source = cc::string(plain) + "@expect(error = \"feature-not-declared\")\n"
+                                            "@early_depth_test\n"
+                                            "@pixel fun cut(p: varyings) -> float4:\n"
+                                            "    if p.position.x < 0.5 => discard\n"
+                                            "    return float4(1.0)\n";
+    auto const described = sgl::describe({.source = source, .source_name = "t.sgl"});
+    REQUIRE(described.has_value());
+    auto const json = to_json(described.value());
+    REQUIRE(json.has_value());
+    auto const doc = babel::json::read(cc::string_view(json.value()));
+    REQUIRE(doc.has_value());
+    CHECK(doc.value().root()["entry_points"].size() == 1);
+    auto const unbuilt = doc.value().root()["unbuilt_entry_points"];
+    REQUIRE(unbuilt.size() == 1);
+    CHECK(unbuilt[0]["name"].as_string() == "cut");
+    CHECK(unbuilt[0]["stage"].as_string() == "pixel");
+    CHECK(unbuilt[0]["why"].as_string() == "expects a diagnostic, so it is never built");
+
+    auto const without = sgl::describe({.source = plain, .source_name = "t.sgl"});
+    REQUIRE(without.has_value());
+    auto const plain_json = to_json(without.value());
+    REQUIRE(plain_json.has_value());
+    CHECK(!cc::string_view(plain_json.value()).contains("unbuilt_entry_points"));
 }

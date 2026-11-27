@@ -1,5 +1,6 @@
 // CHK-564 to CHK-567: `@early_depth_test` runs a pixel stage's depth and stencil tests, and their writes, before it.
 // It needs `early_depth_test` only where the order changes a result: a stage that writes memory or discards.
+// A discard under it warns, and `@allow` says the warning is meant (CHK-576).
 
 struct varyings:
     @position position: hpos4
@@ -27,6 +28,32 @@ binding pass:
 @pixel fun cut_ps(p: varyings){pass} -> float4:
     if p.uv.x > 0.5 => discard
     return pass.tint
+
+// a discard that is meant: the entry point allows the warning, and is built as any other (CHK-576)
+@allow("early-depth-keeps-discarded")
+@early_depth_test
+@pixel fun cutout_ps(p: varyings){pass} -> float4:
+    require early_depth_test
+    if p.uv.x > 0.5 => discard
+    return pass.tint
+
+// a warning judged of a helper two stages share is allowed by one of them alone, and stays the other's
+fun cut(u: float):
+    if u > 0.5 => discard
+
+@allow("early-depth-keeps-discarded")
+@early_depth_test
+@pixel fun allowed_ps(p: varyings) -> float4:
+    require early_depth_test
+    cut(p.uv.x)
+    return float4(1.0)
+
+@expect(warning = "early-depth-keeps-discarded")
+@early_depth_test
+@pixel fun warned_ps(p: varyings) -> float4:
+    require early_depth_test
+    cut(p.uv.x)
+    return float4(1.0)
 
 // the interpreter runs no depth test, so a stage with the attribute runs as one without
 fun shaded(tint: float4, u: float) -> float4 => tint * u

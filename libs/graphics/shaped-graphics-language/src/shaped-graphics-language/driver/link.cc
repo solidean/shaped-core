@@ -409,6 +409,11 @@ cc::result<sgl::link_result, cc::string> sgl::link(link_request const& request)
                 entry = &candidate;
         if (entry == nullptr)
         {
+            // CHK-403: one that expects a diagnostic is judged by it, and is no missing entry point
+            if (file.numbered.expectation_of(asked.entry_point) != nullptr)
+                return cc::error(refusal(group, "link-no-entry-point",
+                                         cc::format("'{}' of {} expects a diagnostic, so it is never built",
+                                                    asked.entry_point, file.source_name)));
             // CHK-402: an entry point whose own body did not check has no flat tree, and its errors say why
             for (auto i = isize(0); i < m.symbols.size(); ++i)
                 if (auto const& sym = m.symbols[i]; sym.kind == check::symbol_kind::function

@@ -555,6 +555,21 @@ A function no entry point reaches is left alone, though a check could judge it w
 That would demand a mark on every library helper that derives an index from a parameter, which is exactly the index CHK-401 lets the callers prove.
 A module's function is judged where it is used, in the program whose entry points inline it.
 
+## CHK-576
+
+A warning says that code is legal and likely not what was meant, and some code means it: a cutout under forced early depth keeps its depth on purpose.
+Before `@allow`, the only way to say so was `@expect`, which makes an entry point a test of its diagnostics and never builds it (CHK-403).
+Following the warning's own advice then removed the shader, and a host asking for it was told the file held no such entry point.
+So intending a warning and testing for one are two attributes: `@expect` keeps its meaning, and `@allow` changes nothing of what is built.
+It stands on the entry point because a warning judged of an inlined body belongs to the entry points it was judged of (CHK-402), and a helper shared by two stages may warn rightly in one and by design in the other.
+It names one exact warning kind: an error is no intent, and a pattern such as `*` would keep silencing warnings added later that nobody read.
+
+## CHK-577
+
+An allowance is a claim about the body, and a claim nothing backs any longer is worth saying, as an unmet expectation is.
+Otherwise an `@allow` outlives the `discard` it was written for, and silences the next one, written where it was not meant.
+It is the entry point's own, so it fails that entry point's compile alone, as the warning it allows would have been reported there alone.
+
 ## CHK-320
 
 The geometry is part of the type because it decides what a trace against the structure is written as and what it gives back.

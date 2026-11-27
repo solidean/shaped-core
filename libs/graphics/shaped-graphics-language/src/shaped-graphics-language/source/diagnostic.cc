@@ -292,6 +292,14 @@ cc::string_view sgl::to_string(diagnostic_kind kind)
     CC_UNREACHABLE("unknown diagnostic_kind");
 }
 
+cc::optional<sgl::diagnostic_kind> sgl::diagnostic_kind_named(cc::string_view name)
+{
+    for (auto k = 0; k <= int(k_last_diagnostic_kind); ++k)
+        if (to_string(diagnostic_kind(k)) == name)
+            return diagnostic_kind(k);
+    return {};
+}
+
 cc::string_view sgl::summary_of(diagnostic_kind kind)
 {
     switch (kind)
@@ -518,7 +526,7 @@ cc::string_view sgl::summary_of(diagnostic_kind kind)
     case diagnostic_kind::test_failed:
         return "a test that ran and did not pass";
     case diagnostic_kind::unmet_expectation:
-        return "an `@expect` whose diagnostic did not occur in its test";
+        return "an `@expect` whose diagnostic did not occur, or an `@allow` whose warning did not";
     case diagnostic_kind::member_name_clash:
         return "two kinds of member under one name in one type";
     case diagnostic_kind::call_spelling:

@@ -106,7 +106,9 @@ d.value().samplers                         // the file-scope samplers: name, ind
 d.value().options                          // every `@option const`: name, type (`bool`, `int`, `float`, `uint`, an enum's name), value
                                            // as described, and `follows`: the options its default is computed from (CHK-519)
                                            // entry points, pipelines and bindings each carry the `options` they reach or name
+d.value().unbuilt_entry_points             // name, stage, why: the entry points never built, an `@expect`ing one (CHK-403)
 @expect(footprint = "work: read, work.values: read write")   // on an entry point: pins its footprint (CHK-267), any order
+@allow("early-depth-keeps-discarded")      // on an entry point: that warning of its inlined body is meant; still built (CHK-576)
 d.value().pipelines                        // name, stages, layout, vertex_input, target_set, targets, settings, open (the `.host` paths),
                                            // samplers: the file-scope ones any stage reaches, which its one layout holds
                                            // bindings and structs carry `shape`: check::structural_hash of their members,

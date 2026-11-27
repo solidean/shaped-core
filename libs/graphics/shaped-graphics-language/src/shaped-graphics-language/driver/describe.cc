@@ -1143,6 +1143,18 @@ cc::result<sgl::module_description, cc::string> sgl::describe(describe_request c
         if (errors.size() == before)
             result.entry_points.push_back(describe_entry_point(m, e, legal.back(), request.float_floor));
     }
+    // CHK-403: an entry point that expects a diagnostic is never built, and says so rather than going missing
+    if (!is_module)
+        for (auto const& x : m.entry_expectations)
+        {
+            auto const& s = m.at(x.function);
+            if (s.file != front.program_file()
+                || result.unbuilt_entry_points.values().any([&](described_unbuilt_entry_point const& u)
+                                                            { return u.name == s.name; }))
+                continue;
+            result.unbuilt_entry_points.push_back(
+                {.name = cc::string(s.name), .stage = x.entry_stage, .why = "expects a diagnostic, so it is never built"});
+        }
 
     for (auto const& p : m.pipelines)
     {

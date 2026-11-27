@@ -15,6 +15,9 @@ constexpr auto k_pin_usage = cc::string_view("on a function, @expect names what 
                                              "footprint = \"binding.member: read, binding: read\", error = \"kind\" "
                                              "or warning = \"kind\"");
 
+constexpr auto k_allow_usage = cc::string_view("@allow names the warnings an entry point intends, each by its kind: "
+                                               "@allow(\"early-depth-keeps-discarded\")");
+
 /// `text` as its `slot: access` items sorted and spaced one way, so a pin compares whatever order it is written in.
 cc::string normalized(cc::string_view text)
 {
@@ -64,6 +67,12 @@ void checker::read_footprint_pin(symbol_id id, i32 file, ast::range_of<ast::attr
     auto is_any_entry = is_entry_point;
     for (auto const stage : {"raygen", "closest_hit", "any_hit", "miss", "intersection", "callable"})
         is_any_entry = is_any_entry || find_attribute(file, attributes, stage) != nullptr;
+    // the stage its attribute names, which `describe` reports an entry point that is never built under
+    auto entry_stage = stage::none;
+    for (auto i = u8(stage::vertex); i <= u8(stage::callable) && entry_stage == stage::none; ++i)
+        if (find_attribute(file, attributes, stage_name(stage(i))) != nullptr)
+            entry_stage = stage(i);
+    read_allowances(id, file, attributes, is_any_entry);
     for (auto const& a : ast.at(attributes))
     {
         if (text_of(file, a.name) != "expect")
@@ -90,6 +99,7 @@ void checker::read_footprint_pin(symbol_id id, i32 file, ast::range_of<ast::attr
                 out.entry_expectations.push_back(
                     {.function = id,
                      .file = file,
+                     .entry_stage = entry_stage,
                      .expectation = {.kind = name == "error" ? expectation_kind::error : expectation_kind::warning,
                                      .pattern = cc::string(quoted.subview({.offset = 1, .size = quoted.size() - 2})),
                                      .where = where}});
@@ -111,6 +121,54 @@ void checker::read_footprint_pin(symbol_id id, i32 file, ast::range_of<ast::attr
                                       .file = file,
                                       .expected = cc::string(quoted.subview({.offset = 1, .size = quoted.size() - 2})),
                                       .where = where});
+        }
+    }
+}
+
+void checker::read_allowances(symbol_id id, i32 file, ast::range_of<ast::attribute> attributes, bool is_any_entry)
+{
+    auto const& ast = ast_of(file);
+    for (auto const& a : ast.at(attributes))
+    {
+        if (text_of(file, a.name) != "allow")
+            continue;
+        // CHK-576: on a function that is no entry point, an allowance has no inlined body to judge
+        if (!is_any_entry)
+        {
+            report(diagnostic_kind::invalid_attribute_arguments, file, a.name,
+                   "only an entry point allows a warning, of its inlined body");
+            continue;
+        }
+        if (ast.at(a.arguments).empty())
+            report(diagnostic_kind::invalid_attribute_arguments, file, a.name, cc::string(k_allow_usage));
+        for (auto const& argument : ast.at(a.arguments))
+        {
+            auto const where = ast::is_valid(argument.value) ? span_of(file, argument.value) : a.name;
+            auto const* const literal
+                = ast::is_valid(argument.value) ? ast.at(argument.value).node.try_as<ast::literal>() : nullptr;
+            auto const is_quoted = literal != nullptr && literal->kind == ast::literal_kind::quoted;
+            if (!argument.name.empty() || argument.is_splat || !is_quoted || text_of(file, where).size() <= 2)
+            {
+                report(diagnostic_kind::invalid_attribute_arguments, file, where, cc::string(k_allow_usage));
+                continue;
+            }
+            auto const quoted = text_of(file, where);
+            auto const name = quoted.subview({.offset = 1, .size = quoted.size() - 2});
+            // CHK-576: a warning's kind, exactly; an error is never intended, and a pattern would allow what no one named
+            auto const kind = diagnostic_kind_named(name);
+            if (!kind.has_value())
+            {
+                report(diagnostic_kind::invalid_attribute_arguments, file, where,
+                       cc::format("no warning is of kind '{}'; {}", name, k_allow_usage));
+                continue;
+            }
+            if (default_severity_of(kind.value()) != severity::warning)
+            {
+                report(diagnostic_kind::invalid_attribute_arguments, file, where,
+                       cc::format("'{}' is an error, which no entry point allows", name));
+                continue;
+            }
+            out.entry_allowances.push_back({.function = id, .file = file, .kind = cc::string(name), .where = where});
         }
     }
 }

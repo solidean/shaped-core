@@ -1,5 +1,6 @@
 #pragma once
 
+#include <clean-core/error/optional.hh>
 #include <clean-core/string/string_view.hh>
 #include <shaped-graphics-language/fwd.hh>
 #include <shaped-graphics-language/source/source_span.hh>
@@ -264,6 +265,7 @@ enum class sgl::diagnostic_kind : sgl::u8
     /// A stated workgroup size that leaves lanes of a wave idle, that no webgpu device runs, or that is shaped against
     /// the body's indexing (CHK-521); a warning.
     workgroup_wastes_lanes,
+    // A kind added after `workgroup_wastes_lanes` moves `k_last_diagnostic_kind`.
 };
 
 namespace sgl
@@ -277,6 +279,12 @@ namespace sgl
 [[nodiscard]] cc::string_view summary_of(diagnostic_kind kind);
 
 [[nodiscard]] severity default_severity_of(diagnostic_kind kind);
+
+/// The last kind of the enum, so a loop over every kind ends there.
+inline constexpr auto k_last_diagnostic_kind = diagnostic_kind::workgroup_wastes_lanes;
+
+/// The kind `to_string` spells as `name`; none where no kind is spelled so.
+[[nodiscard]] cc::optional<diagnostic_kind> diagnostic_kind_named(cc::string_view name);
 
 } // namespace sgl
 

@@ -79,6 +79,15 @@ struct front_end
         return result;
     }
 
+    /// The expectation of the source's own entry point `name`, which is never built (CHK-403); null where it has none.
+    [[nodiscard]] check::entry_expectation const* expectation_of(cc::string_view name) const
+    {
+        for (auto const& x : module.entry_expectations)
+            if (module.at(x.function).name == name && module.at(x.function).file == program)
+                return &x;
+        return nullptr;
+    }
+
     /// The source's file; behind the prelude it is the last one, and a file of the prelude stands in its own place.
     [[nodiscard]] i32 program_file() const { return program; }
 

@@ -467,6 +467,17 @@ struct sgl::described_option
     cc::vector<cc::string> follows;
 };
 
+/// An entry point of the source that is never built, and why: one that expects a diagnostic is judged by it (CHK-403).
+/// A host builds nothing from it; it is described so a request naming it is told why, rather than that it is missing.
+struct sgl::described_unbuilt_entry_point
+{
+    cc::string name;
+    /// The stage its attribute names.
+    check::stage stage = check::stage::none;
+    /// For a reader: `expects a diagnostic, so it is never built`.
+    cc::string why;
+};
+
 struct sgl::module_description
 {
     /// The file's own and those of the modules it uses, in declaration order, a module's file ahead of the source.
@@ -477,6 +488,8 @@ struct sgl::module_description
     /// Every struct a binding places in GPU memory, each after every struct it holds.
     cc::vector<described_memory_struct> memory_structs;
     cc::vector<described_entry_point> entry_points;
+    /// The source's entry points that are never built, in source order; none of them is in `entry_points`.
+    cc::vector<described_unbuilt_entry_point> unbuilt_entry_points;
     cc::vector<described_pipeline> pipelines;
     cc::vector<described_ray_set> ray_sets;
     cc::vector<described_hit_group> hit_groups;

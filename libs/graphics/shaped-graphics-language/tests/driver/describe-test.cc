@@ -1032,3 +1032,130 @@ TEST("sgl describe - a module's @inline binding's block is named by the module, 
     REQUIRE(own.value().bindings.size() == 1);
     CHECK(own.value().bindings[0].block_host_name == "constants");
 }
+
+namespace
+{
+/// The repro of an `@expect`ing pixel stage beside a built one (CHK-403), and an allowing one (CHK-576).
+constexpr auto k_expecting = cc::string_view("require early_depth_test\n"
+                                             "struct VSOutput:\n"
+                                             "    @position position: hpos4\n"
+                                             "@vertex fun mainVS(@vertex_index vertexId: int) -> VSOutput:\n"
+                                             "    return {position = hpos4(0.0, 0.0, 0.0, 1.0)}\n"
+                                             "@early_depth_test\n"
+                                             "@expect(warning = \"early-depth-keeps-discarded\")\n"
+                                             "@pixel fun withExpect(input: VSOutput) -> float4:\n"
+                                             "    if input.position.x < 0.5:\n"
+                                             "        discard\n"
+                                             "    return float4(1.0)\n"
+                                             "@early_depth_test\n"
+                                             "@allow(\"early-depth-keeps-discarded\")\n"
+                                             "@pixel fun withAllow(input: VSOutput) -> float4:\n"
+                                             "    if input.position.x < 0.5:\n"
+                                             "        discard\n"
+                                             "    return float4(1.0)\n");
+} // namespace
+
+TEST("sgl describe - an entry point that expects a diagnostic is described as never built, and named so when asked for")
+{
+    // CHK-403
+    auto const d = described(k_expecting);
+    auto names = cc::vector<cc::string>();
+    for (auto const& e : d.entry_points)
+        names.push_back(e.name);
+    CHECK(names.size() == 2);
+    CHECK((names[0] == "mainVS" && names[1] == "withAllow"));
+    REQUIRE(d.unbuilt_entry_points.size() == 1);
+    CHECK(d.unbuilt_entry_points[0].name == "withExpect");
+    CHECK(d.unbuilt_entry_points[0].stage == stage::pixel);
+    CHECK(d.unbuilt_entry_points[0].why == "expects a diagnostic, so it is never built");
+    // a description without one has none
+    CHECK(described("@compute(64) fun main(@thread_id id: int3):\n    return\n").unbuilt_entry_points.empty());
+
+    for (auto const t : {sgl::emit::target::hlsl_dx12, sgl::emit::target::hlsl_vulkan, sgl::emit::target::msl})
+    {
+        auto const asked
+            = sgl::compile_to_text({.source = k_expecting, .source_name = "edt.sgl", .entry_point = "withExpect", .target = t});
+        REQUIRE(asked.has_error());
+        CHECK(asked.error() == "edt.sgl: error: entry point 'withExpect' expects a diagnostic, so it is never built\n");
+        // CHK-576: the allowing one is built, and warns nothing
+        auto const allowed
+            = sgl::compile_to_text({.source = k_expecting, .source_name = "edt.sgl", .entry_point = "withAllow", .target = t});
+        REQUIRE(allowed.has_value());
+        CHECK(allowed.value().warnings.empty());
+    }
+    // a name the file does not hold is still told apart
+    auto const missing = sgl::compile_to_text(
+        {.source = k_expecting, .source_name = "edt.sgl", .entry_point = "nothing", .target = sgl::emit::target::hlsl_dx12});
+    REQUIRE(missing.has_error());
+    CHECK(missing.error().contains("no entry point named 'nothing'"));
+}
+
+TEST("sgl describe - an allowance nothing meets fails the description, and the compile of its entry point alone")
+{
+    // CHK-577
+    constexpr auto source = cc::string_view("struct VSOutput:\n"
+                                            "    @position position: hpos4\n"
+                                            "@vertex fun mainVS(@vertex_index vertexId: int) -> VSOutput:\n"
+                                            "    return {position = hpos4(0.0, 0.0, 0.0, 1.0)}\n"
+                                            "@allow(\"early-depth-keeps-discarded\")\n"
+                                            "@early_depth_test\n"
+                                            "@pixel fun whole(input: VSOutput) -> float4 => float4(1.0)\n");
+    CHECK(error_of(source).contains("unmet-expectation"));
+    auto const t = sgl::emit::target::hlsl_dx12;
+    auto const pixel = sgl::compile_to_text({.source = source, .source_name = "u.sgl", .entry_point = "whole", .target = t});
+    REQUIRE(pixel.has_error());
+    CHECK(pixel.error().contains("unmet-expectation"));
+    CHECK(sgl::compile_to_text({.source = source, .source_name = "u.sgl", .entry_point = "mainVS", .target = t})
+              .has_value());
+}
+
+TEST("sgl describe - a helper's warning one built stage allows stays the warning of a built sibling that does not")
+{
+    // CHK-576: the allowance is of one entry point's body, so the sibling's compile still reports what it inlines
+    constexpr auto source = cc::string_view("require early_depth_test\n"
+                                            "struct VSOutput:\n"
+                                            "    @position position: hpos4\n"
+                                            "fun cut(x: float):\n"
+                                            "    if x < 0.5 => discard\n"
+                                            "@early_depth_test\n"
+                                            "@allow(\"early-depth-keeps-discarded\")\n"
+                                            "@pixel fun allowed(input: VSOutput) -> float4:\n"
+                                            "    cut(input.position.x)\n"
+                                            "    return float4(1.0)\n"
+                                            "@early_depth_test\n"
+                                            "@pixel fun plain(input: VSOutput) -> float4:\n"
+                                            "    cut(input.position.x)\n"
+                                            "    return float4(1.0)\n");
+    CHECK(described(source).entry_points.size() == 2);
+    for (auto const t : {sgl::emit::target::hlsl_dx12, sgl::emit::target::hlsl_vulkan, sgl::emit::target::msl})
+    {
+        auto const allowed
+            = sgl::compile_to_text({.source = source, .source_name = "s.sgl", .entry_point = "allowed", .target = t});
+        REQUIRE(allowed.has_value());
+        CHECK(allowed.value().warnings.empty());
+        auto const plain
+            = sgl::compile_to_text({.source = source, .source_name = "s.sgl", .entry_point = "plain", .target = t});
+        REQUIRE(plain.has_value());
+        REQUIRE(plain.value().warnings.size() == 1);
+        CHECK(plain.value().warnings[0].contains("early-depth-keeps-discarded"));
+    }
+}
+
+TEST("sgl describe - an entry point with several expectations is one unbuilt entry point")
+{
+    // CHK-403: each `@expect` is an expectation, and the entry point is listed once
+    constexpr auto source = cc::string_view("struct VSOutput:\n"
+                                            "    @position position: hpos4\n"
+                                            "@vertex fun mainVS(@vertex_index vertexId: int) -> VSOutput:\n"
+                                            "    return {position = hpos4(0.0, 0.0, 0.0, 1.0)}\n"
+                                            "@expect(warning = \"early-depth-keeps-discarded\")\n"
+                                            "@expect(error = \"feature-not-declared\")\n"
+                                            "@early_depth_test\n"
+                                            "@pixel fun twice(input: VSOutput) -> float4:\n"
+                                            "    if input.position.x < 0.5 => discard\n"
+                                            "    return float4(1.0)\n");
+    auto const d = described(source);
+    REQUIRE(d.unbuilt_entry_points.size() == 1);
+    CHECK(d.unbuilt_entry_points[0].name == "twice");
+    CHECK(d.unbuilt_entry_points[0].stage == stage::pixel);
+}

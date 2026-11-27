@@ -503,6 +503,57 @@ void sgl::test::contain_expected(checked_module const& m, cc::vector<located_dia
                 diagnostics.push_back(cc::move(d));
     }
 
+    // CHK-576: a warning an entry point allows is intended there, and is that entry point's no longer.
+    // Taken before CHK-403's expectations, so an allowed warning is nothing an `@expect` meets either.
+    auto allowing = cc::vector<symbol_id>();
+    for (auto const& x : m.entry_allowances)
+        if (!allowing.values().contains(x.function))
+            allowing.push_back(x.function);
+    for (auto const function : allowing)
+    {
+        auto met = cc::vector<cc::string_view>();
+        auto kept = cc::vector<located_diagnostic>();
+        for (auto& d : diagnostics)
+        {
+            auto is_allowed = false;
+            if (d.what.level == severity::warning && d.entry_points.values().contains(function))
+                for (auto const& x : m.entry_allowances)
+                    is_allowed = is_allowed || (x.function == function && to_string(d.what.kind) == x.kind);
+            if (is_allowed)
+            {
+                if (!met.values().contains(to_string(d.what.kind)))
+                    met.push_back(to_string(d.what.kind));
+                // one that another entry point has too stays that one's
+                d.entry_points.remove_all_where([&](symbol_id e) { return e == function; });
+                if (d.entry_points.empty())
+                    continue;
+            }
+            kept.push_back(cc::move(d));
+        }
+        diagnostics = cc::move(kept);
+
+        // CHK-577: an allowance nothing meets is reported, at the entry point's compile alone.
+        // An entry point that is never built, or whose own body did not check, raised nothing an allowance could meet.
+        auto const is_built
+            = m.entry_points.values().any([&](flat_entry_point const& e) { return e.function == function; });
+        if (!is_built)
+            continue;
+        for (auto const& x : m.entry_allowances)
+        {
+            if (x.function != function || met.values().contains(cc::string_view(x.kind)))
+                continue;
+            auto unmet = located_diagnostic{
+                .what = {.kind = diagnostic_kind::unmet_expectation,
+                         .level = default_severity_of(diagnostic_kind::unmet_expectation),
+                         .where = x.where},
+                .file = x.file,
+                .detail = cc::format("no warning of kind {} is judged of this entry point, so it allows nothing", x.kind),
+            };
+            unmet.entry_points.push_back(function);
+            diagnostics.push_back(cc::move(unmet));
+        }
+    }
+
     // CHK-403: an entry point takes the diagnostics judged of its inlined body, which a compile of it would report
     auto expecting = cc::vector<symbol_id>();
     for (auto const& x : m.entry_expectations)

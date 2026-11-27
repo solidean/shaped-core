@@ -635,6 +635,10 @@ cc::result<sgl::emitted_source, cc::string> sgl::compile_to_text(text_request co
 
     if (found == nullptr)
     {
+        // CHK-403: one that expects a diagnostic is judged by it, and is no missing entry point
+        if (front.expectation_of(request.entry_point) != nullptr)
+            return cc::error(cc::format("{}: error: entry point '{}' expects a diagnostic, so it is never built\n",
+                                        request.source_name, request.entry_point));
         // CHK-402: an entry point whose own body did not check has no flat tree, and its errors say why
         for (auto i = isize(0); i < m.symbols.size(); ++i)
             if (auto const& s = m.symbols[i]; s.kind == check::symbol_kind::function && s.name == request.entry_point

@@ -104,9 +104,26 @@ struct sgl::check::entry_expectation
     /// The entry point's function.
     symbol_id function = symbol_id::none;
     i32 file = 0;
+    /// The stage its attribute names, which `describe` reports it under though it is never built.
+    stage entry_stage = stage::none;
     test_expectation expectation;
 
     bool operator==(entry_expectation const&) const = default;
+};
+
+/// An entry point's `@allow("kind")`: a warning of that kind judged of its inlined body is intended, and reported nowhere
+/// (CHK-576).
+struct sgl::check::entry_allowance
+{
+    /// The entry point's function.
+    symbol_id function = symbol_id::none;
+    i32 file = 0;
+    /// A warning kind's name, exactly as `to_string` spells it.
+    cc::string kind;
+    /// The argument, which an allowance nothing meets is reported at.
+    source_span where;
+
+    bool operator==(entry_allowance const&) const = default;
 };
 
 /// One `test` of the module, wherever it stands.
@@ -335,6 +352,8 @@ struct sgl::check::checked_module
     layered<flat_entry_point> test_units;
     /// Every entry point's expectation of a diagnostic; such an entry point is judged by them, and has no flat tree.
     cc::vector<entry_expectation> entry_expectations;
+    /// Every entry point's `@allow` of a warning (CHK-576).
+    cc::vector<entry_allowance> entry_allowances;
 
     /// In the order the demand-driven pass found them, which is deterministic and not source order.
     cc::vector<located_diagnostic> diagnostics;
@@ -546,7 +565,8 @@ struct sgl::check::checked_module
             && is_equal(target_type_branches, rhs.target_type_branches) && is_equal(files, rhs.files)
             && is_equal(entry_points, rhs.entry_points) && is_equal(tests, rhs.tests)
             && is_equal(test_units, rhs.test_units) && is_equal(internal_entry_points, rhs.internal_entry_points)
-            && is_equal(entry_expectations, rhs.entry_expectations) && is_equal(diagnostics, rhs.diagnostics)
+            && is_equal(entry_expectations, rhs.entry_expectations)
+            && is_equal(entry_allowances, rhs.entry_allowances) && is_equal(diagnostics, rhs.diagnostics)
             && builtins == rhs.builtins;
     }
 };
