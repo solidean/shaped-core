@@ -219,7 +219,8 @@ struct planned_sampler
     /// What the host binds it by, which is the sampler's own name.
     cc::string host_name;
     check::type_id type = check::type_id::none;
-    /// Its position among the module's file-scope samplers, which is the same in every entry point and every stage.
+    /// Its slot among the pipeline layout's static samplers, `sampler_slot`'s: its position among the module's
+    /// file-scope samplers, or its link group's slot (LINK-6), the same in every entry point and every stage.
     i32 index = 0;
 };
 
@@ -257,6 +258,8 @@ struct plan
     check::checked_module const& m;
     check::flat_entry_point const& e;
     target which;
+    /// The link group's numbering the samplers take their slots from; null for the module's own (EMIT-133).
+    emit::numbering const* numbering = nullptr;
     /// Every `atomic[float]` is the target's own float atomic, rather than a `uint`'s bits: the device adds floats in one
     /// instruction, and the target can say so (vulkan, metal).
     bool native_float_atomics = false;
@@ -405,7 +408,8 @@ struct plan
 void validate(check::checked_module const& m,
               check::flat_entry_point const& e,
               cc::vector<error>& errors,
-              bool writes_prints = false);
+              bool writes_prints = false,
+              numbering const* numbering = nullptr);
 
 /// How each target hands a stage input to an entry point (EMIT-127): its type there, and what marks it.
 struct stage_input_spelling
@@ -524,5 +528,6 @@ void plan_memory_accesses(plan& p);
 [[nodiscard]] plan make_plan(check::checked_module const& m,
                              check::flat_entry_point const& e,
                              target t,
-                             bool native_float_atomic_add = false);
+                             bool native_float_atomic_add = false,
+                             numbering const* numbering = nullptr);
 } // namespace sgl::emit::impl

@@ -423,7 +423,8 @@ struct let_simplifier
             return result;
         };
         if (x.node.is<flat_literal>() || x.node.is<flat_int_literal>() || x.node.is<flat_wide_literal>()
-            || x.node.is<flat_bool_literal>() || x.node.is<flat_enum_value>() || x.node.is<flat_file_sampler>())
+            || x.node.is<flat_bool_literal>() || x.node.is<flat_enum_value>() || x.node.is<flat_file_sampler>()
+            || x.node.is<flat_callable_base>())
             return true;
         if (auto const* const ref = x.node.try_as<flat_local_ref>())
             return is_fixed(canonical(ref->local));
@@ -474,6 +475,7 @@ struct let_simplifier
                      [&](flat_local_ref const& n) { h = cc::make_hash(h, u64(index_of(canonical(n.local)))); },
                      [&](flat_binding_member const& n) { h = cc::make_hash(h, u64(index_of(n.binding)), n.member); },
                      [&](flat_file_sampler const& n) { h = cc::make_hash(h, u64(index_of(n.sampler))); },
+                     [&](flat_callable_base const& n) { h = cc::make_hash(h, u64(index_of(n.table))); },
                      [&](flat_member const& n) { h = cc::make_hash(h, n.member, n.letters.count); },
                      [&](flat_call const& n) { h = cc::make_hash(h, u64(index_of(n.intrinsic))); }, [&](auto const&) {});
         for_each_operand(e(), x, [&](flat_expr_id operand) { h = cc::make_hash(h, hash_of(operand, depth + 1)); });
@@ -516,6 +518,7 @@ struct let_simplifier
             { equal = canonical(n.local) == canonical(y.node.as<flat_local_ref>().local); },
             [&](flat_binding_member const& n) { equal = n == y.node.as<flat_binding_member>(); },
             [&](flat_file_sampler const& n) { equal = n == y.node.as<flat_file_sampler>(); },
+            [&](flat_callable_base const& n) { equal = n == y.node.as<flat_callable_base>(); },
             [&](flat_member const& n)
             {
                 auto const& other = y.node.as<flat_member>();

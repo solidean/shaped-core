@@ -901,13 +901,14 @@ auto sgl::check::impl::flattener::flatten_callable_call(ast::expr_id id, ast::ca
     auto index = flatten_expr(ast().at(index_node.arguments)[0].value);
     if (!is_valid(index))
         return fail();
-    if (base != 0)
+    // the table's place stays symbolic until a target is written, which resolves it from the section it writes for:
+    // the program's, or a link group's (LINK-5)
     {
         type_id const types[] = {int_type(), int_type()};
         auto const plus = c.find_operator(file(), "+", types);
         if (!is_valid(plus))
             return fail();
-        flat_expr_id const operands[] = {index, add_expr(int_type(), id, flat_int_literal{.value = base})};
+        flat_expr_id const operands[] = {index, add_expr(int_type(), id, flat_callable_base{.table = t.table})};
         index = builtin_call(id, plus, operands);
     }
 

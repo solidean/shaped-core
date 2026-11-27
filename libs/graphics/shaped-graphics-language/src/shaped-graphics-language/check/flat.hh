@@ -323,6 +323,16 @@ struct sgl::check::flat_file_sampler
     constexpr bool operator==(flat_file_sampler const&) const = default;
 };
 
+/// Where callables table `table` starts in the callable section a compile writes for (CHK-344, CHK-562): an `int`.
+/// The program's section unlinked, a link group's under a link (LINK-5); a target writes it as the constant it resolves to.
+struct sgl::check::flat_callable_base
+{
+    /// Of kind `pipeline`, a `callables` table.
+    symbol_id table = symbol_id::none;
+
+    constexpr bool operator==(flat_callable_base const&) const = default;
+};
+
 /// `v.normal`, one field of a struct; or `v.zyx`, a swizzle of a prelude vector, whose value is the plain vector of
 /// its fields (CHK-385).
 /// A swizzle of a struct of the program never stands here: the check pass writes it as the construction it means.
@@ -484,7 +494,8 @@ struct sgl::check::flat_expr
                 flat_and,
                 flat_or,
                 flat_block,
-                flat_by_target>
+                flat_by_target,
+                flat_callable_base>
         node;
 
     bool operator==(flat_expr const&) const = default;
