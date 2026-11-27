@@ -6,6 +6,8 @@ refs:
   - test: sg stream - a list recorded before a fresh texture's upload and submitted after it
   - file: libs/graphics/shaped-graphics/backends/dx12/src/shaped-graphics/backends/dx12/dx12_command_list.cc
   - symbol: has_pending_transfer
+claimed-by: Claude (for Philip Trettner)
+claimed-at: 2026-11-27T14:15Z
 ---
 
 # A list recorded before a transfer and submitted after it strands that transfer's layout on dx12
