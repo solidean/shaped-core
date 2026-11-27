@@ -10,6 +10,9 @@ On macOS the floor is 2 GB: the one Mac this repository is developed on has 16 G
 Elsewhere than Windows only the watchdog runs: a per-process address-space limit would also refuse the sanitizers' shadow reservations.
 
 The environment overrides each, in GB, 0 turning it off: SC_DEV_MEMORY_PROCESS_GB, SC_DEV_MEMORY_TOTAL_GB, SC_DEV_MEMORY_FREE_GB.
+SC_DEV_MEMORY_WAIT=<minutes> makes a run that starts below the floor wait for memory instead, up to that long,
+and start once the floor is cleared by a margin, so another build on the machine finishing is enough for this one to go ahead.
+Only the start waits: a run that drops below the floor once going still ends, since a half-done step cannot be paused safely.
 A nexus binary caps itself by the same per-process variable (nx::install_memory_cap), so one run by hand or from a script is not left unguarded.
 The user chose the defaults (2026-10-31): gates failing on them is accepted, swapping is not.
 """
@@ -28,6 +31,8 @@ GB = 1 << 30
 DEFAULT_PROCESS_GB = 30.0
 DEFAULT_FREE_GB = 2.0 if platform.system() == "Darwin" else 5.0
 WATCH_SECONDS = 0.5
+WAIT_POLL_SECONDS = 2.0
+WAIT_REPORT_SECONDS = 60.0
 
 _installed = False
 # The guard's job and its limits, once installed on Windows; allow_breakaway widens them.
@@ -236,6 +241,37 @@ def allow_breakaway() -> bool:
     return platform.system() == "Windows" and _allow_breakaway()
 
 
+def _wait_for_memory(floor: int, free_gb: float, minutes: float) -> None:
+    """Blocks until the free RAM clears `floor` by a margin on two reads in a row, or ends the run once `minutes` have passed.
+
+    The margin, 1 GB or a tenth of the floor, keeps a run from starting at the edge and being ended a moment later.
+    """
+    margin = max(GB, floor // 10)
+    deadline = time.monotonic() + minutes * 60
+    last_report = None
+    clear_reads = 0
+    while True:
+        _, available = _memory()
+        if available == 0 or available >= floor + margin:
+            clear_reads += 1
+            if clear_reads >= 2:
+                if last_report is not None:
+                    _report(f"{available / GB:.1f} GB of RAM is free again; going ahead")
+                return
+        else:
+            clear_reads = 0
+            now = time.monotonic()
+            if now >= deadline:
+                _report(f"only {available / GB:.1f} GB of RAM is free after waiting {minutes:g} min for the {free_gb:g} GB floor; "
+                        f"giving up (SC_DEV_MEMORY_WAIT sets how long to wait)")
+                os._exit(3)
+            if last_report is None or now - last_report >= WAIT_REPORT_SECONDS:
+                _report(f"only {available / GB:.1f} GB of RAM is free, below the {free_gb:g} GB floor; "
+                        f"waiting for {(floor + margin) / GB:.1f} GB, at most {(deadline - now) / 60:.0f} min more")
+                last_report = now
+        time.sleep(WAIT_POLL_SECONDS)
+
+
 def install() -> None:
     """Put the guard over this process and everything it starts from now on; once per process, the later calls do nothing."""
     global _installed
@@ -250,6 +286,8 @@ def install() -> None:
     if free_gb <= 0 or total_physical == 0:
         return
     floor = int(free_gb * GB)
+    if (wait_minutes := _limit("SC_DEV_MEMORY_WAIT", 0.0)) > 0:
+        _wait_for_memory(floor, free_gb, wait_minutes)
 
     def watch() -> None:
         while True:

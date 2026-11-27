@@ -304,6 +304,9 @@ Everything dev.py starts runs under a memory guard, so a runaway process or a pi
   An allocation past either fails in the process that asked, which then fails as it would on any out-of-memory.
 - **Below 5 GB of free RAM, dev.py ends itself and everything it started**, saying so, whoever took the memory: a run that would swap is worth less than one that stops.
 - Override each in GB through the environment, 0 turning it off: `SC_DEV_MEMORY_PROCESS_GB`, `SC_DEV_MEMORY_TOTAL_GB`, `SC_DEV_MEMORY_FREE_GB`.
+- **`SC_DEV_MEMORY_WAIT=<minutes>` waits for memory instead of failing** when a run starts below the floor, for a machine another build is busy on.
+  It starts once the floor is cleared by a margin, 1 GB or a tenth of the floor, and reports once a minute while it waits.
+  Only the start waits: a run that drops below the floor once going still ends, since a half-done step cannot be paused safely.
 - On Linux and macOS only the free-RAM floor applies: a per-process address-space limit would refuse the sanitizers' shadow reservations.
 - A gate that fails on the guard is a setup to fix, or a wait for memory to free up, never a reason to raise the limits by default.
 

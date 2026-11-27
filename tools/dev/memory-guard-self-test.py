@@ -61,6 +61,8 @@ elif mode == "breakaway":
 elif mode == "wait":
     time.sleep(10)
     print("survived")
+elif mode == "quick":
+    print("started")
 """
 
 
@@ -101,6 +103,18 @@ elapsed = time.monotonic() - start
 check("a floor above the RAM there is ends the process at once", r.returncode == 3 and "survived" not in r.stdout and elapsed < 5,
       f"exit {r.returncode} after {elapsed:.1f} s: {r.stdout}{r.stderr}")
 check("the floor says why", "memory guard" in r.stderr, r.stderr)
+
+# SC_DEV_MEMORY_WAIT: a floor the machine clears starts at once, and one it never clears is waited on, then given up.
+r = child({"SC_DEV_MEMORY_PROCESS_GB": "0", "SC_DEV_MEMORY_TOTAL_GB": "0", "SC_DEV_MEMORY_FREE_GB": "0.001",
+           "SC_DEV_MEMORY_WAIT": "1"}, "quick")
+check("waiting starts at once when the floor is clear", r.returncode == 0 and r.stdout.strip() == "started", r.stdout + r.stderr)
+start = time.monotonic()
+r = child({"SC_DEV_MEMORY_PROCESS_GB": "0", "SC_DEV_MEMORY_TOTAL_GB": "0", "SC_DEV_MEMORY_FREE_GB": "100000",
+           "SC_DEV_MEMORY_WAIT": "0.05"}, "quick")
+elapsed = time.monotonic() - start
+check("a floor never cleared is waited on for the time given, then given up",
+      r.returncode == 3 and "started" not in r.stdout and 2.5 < elapsed < 20, f"exit {r.returncode} after {elapsed:.1f} s: {r.stdout}{r.stderr}")
+check("the wait says it is waiting, and why it gave up", "waiting for" in r.stderr and "giving up" in r.stderr, r.stderr)
 
 if failures:
     print(f"{failures} memory guard check(s) failed")
