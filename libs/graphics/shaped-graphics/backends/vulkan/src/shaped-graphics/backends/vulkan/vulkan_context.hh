@@ -836,9 +836,9 @@ public:
     [[nodiscard]] sg::stream_upload_handle stream_bytes_to_buffer(sg::raw_buffer_handle buffer,
                                                                   cc::pinned_data<byte const> data,
                                                                   isize offset,
-                                                                  sg::stream_scope) override
+                                                                  sg::stream_scope scope) override
     {
-        return _upload_async.stream_buffer(buffer, cc::move(data), offset);
+        return _upload_async.stream_buffer(buffer, cc::move(data), offset, scope);
     }
     [[nodiscard]] sg::stream_upload_handle stream_bytes_to_texture(sg::raw_texture_handle texture,
                                                                    cc::pinned_data<byte const> data,
@@ -851,9 +851,9 @@ public:
     [[nodiscard]] sg::stream_upload_handle stream_source_to_buffer(sg::raw_buffer_handle buffer,
                                                                    std::unique_ptr<sg::stream_source> source,
                                                                    isize offset,
-                                                                   sg::stream_scope) override
+                                                                   sg::stream_scope scope) override
     {
-        return _upload_async.stream_source_buffer(buffer, cc::move(source), offset);
+        return _upload_async.stream_source_buffer(buffer, cc::move(source), offset, scope);
     }
     [[nodiscard]] sg::stream_upload_handle stream_source_to_texture(sg::raw_texture_handle texture,
                                                                     std::unique_ptr<sg::stream_source> source,
@@ -866,9 +866,9 @@ public:
     [[nodiscard]] sg::stream_download_handle stream_bytes_from_buffer(sg::raw_buffer_handle buffer,
                                                                       isize offset,
                                                                       isize size_in_bytes,
-                                                                      sg::stream_scope) override
+                                                                      sg::stream_scope scope) override
     {
-        return _download_async.stream_buffer(buffer, offset, size_in_bytes);
+        return _download_async.stream_buffer(buffer, offset, size_in_bytes, scope);
     }
     [[nodiscard]] sg::stream_download_handle stream_bytes_from_texture(sg::raw_texture_handle texture,
                                                                        sg::subresource_index const& subresource,
@@ -882,9 +882,9 @@ public:
                                                                         sg::stream_sink sink,
                                                                         isize offset,
                                                                         isize size_in_bytes,
-                                                                        sg::stream_scope) override
+                                                                        sg::stream_scope scope) override
     {
-        return _download_async.stream_to_sink_buffer(buffer, cc::move(sink), offset, size_in_bytes);
+        return _download_async.stream_to_sink_buffer(buffer, cc::move(sink), offset, size_in_bytes, scope);
     }
     [[nodiscard]] sg::stream_download_handle stream_to_sink_from_texture(sg::raw_texture_handle texture,
                                                                          sg::stream_sink sink,

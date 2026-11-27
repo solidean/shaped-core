@@ -50,6 +50,9 @@ struct sg::backend::dx12::dx12_async_upload_job
     dx12_group_value completion;      // this upload's completion value, on the destination's upload timeline
     sg::submission_token wait_token
         = sg::submission_token::invalid; // defer the copy until this direct-queue token completes
+    // Reverse cross-queue sync vs a pending readback of the same resource, async or streaming.
+    // The copy waits on the download completion fence for this value, so it never overwrites bytes a read still owes.
+    dx12_group_value download_wait_value;
 
     // Set only for a source-driven streaming upload; the payload is produced chunk by chunk as windows open
     // rather than handed over resident, so `src` stays empty for these.
@@ -144,9 +147,11 @@ public:
 
     /// Records a source-driven streaming upload into `buffer`, chunk offsets relative to `offset`.
     /// The actor polls `source` on its own thread as windows open, and passes the transfer over on `not_yet`.
+    /// A `region` scope stamps only the lifetime value, so a list touching the rest of the buffer waits on nothing.
     [[nodiscard]] sg::stream_upload_handle stream_source_buffer(sg::raw_buffer_handle buffer,
                                                                 std::unique_ptr<sg::stream_source> source,
-                                                                isize offset);
+                                                                isize offset,
+                                                                sg::stream_scope scope);
 
     /// Records a source-driven streaming upload into one region of `texture`.
     /// Chunk offsets are into the region's tightly-packed bytes and must be row-aligned.
@@ -165,11 +170,11 @@ public:
     [[nodiscard]] bool actor_is_unthreaded() const { return _actor != nullptr && _actor->is_unthreaded(); }
 
     /// Records a streaming upload of `data` into `buffer` at `offset`, returning its control handle.
-    /// Unlike upload_buffer this does NOT stamp the forward reader value, so a later command list waits on nothing.
-    /// It stamps the streaming lifetime value instead, which only deferred deletion reads.
+    /// It stamps the streaming value rather than the async one, under stream_source_buffer's rules.
     [[nodiscard]] sg::stream_upload_handle stream_buffer(sg::raw_buffer_handle buffer,
                                                          cc::pinned_data<byte const> data,
-                                                         isize offset);
+                                                         isize offset,
+                                                         sg::stream_scope scope);
 
     /// Records a streaming upload of tightly-packed `data` into one region of `texture`.
     /// Same tier and same stamping rules as stream_buffer.

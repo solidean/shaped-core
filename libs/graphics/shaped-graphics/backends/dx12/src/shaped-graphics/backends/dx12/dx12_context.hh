@@ -622,14 +622,12 @@ public:
     }
 
     // Reached through ctx.stream — the same copy queues and the same windows, at the weaker tier.
-    // These deliberately do NOT stamp the forward reader value, so a streamed extent costs a later command list
-    // nothing; the streaming lifetime stamp keeps the storage alive without buying that wait.
     [[nodiscard]] sg::stream_upload_handle stream_bytes_to_buffer(sg::raw_buffer_handle buffer,
                                                                   cc::pinned_data<byte const> data,
                                                                   isize offset_in_bytes,
-                                                                  sg::stream_scope) override
+                                                                  sg::stream_scope scope) override
     {
-        return _upload_async.stream_buffer(cc::move(buffer), cc::move(data), offset_in_bytes);
+        return _upload_async.stream_buffer(cc::move(buffer), cc::move(data), offset_in_bytes, scope);
     }
 
     [[nodiscard]] sg::stream_upload_handle stream_bytes_to_texture(sg::raw_texture_handle texture,
@@ -644,9 +642,9 @@ public:
     [[nodiscard]] sg::stream_upload_handle stream_source_to_buffer(sg::raw_buffer_handle buffer,
                                                                    std::unique_ptr<sg::stream_source> source,
                                                                    isize offset_in_bytes,
-                                                                   sg::stream_scope) override
+                                                                   sg::stream_scope scope) override
     {
-        return _upload_async.stream_source_buffer(cc::move(buffer), cc::move(source), offset_in_bytes);
+        return _upload_async.stream_source_buffer(cc::move(buffer), cc::move(source), offset_in_bytes, scope);
     }
 
     [[nodiscard]] sg::stream_upload_handle stream_source_to_texture(sg::raw_texture_handle texture,
@@ -661,9 +659,9 @@ public:
     [[nodiscard]] sg::stream_download_handle stream_bytes_from_buffer(sg::raw_buffer_handle buffer,
                                                                       isize offset_in_bytes,
                                                                       isize size_in_bytes,
-                                                                      sg::stream_scope) override
+                                                                      sg::stream_scope scope) override
     {
-        return _download_async.stream_buffer(cc::move(buffer), offset_in_bytes, size_in_bytes);
+        return _download_async.stream_buffer(cc::move(buffer), offset_in_bytes, size_in_bytes, scope);
     }
 
     [[nodiscard]] sg::stream_download_handle stream_bytes_from_texture(sg::raw_texture_handle texture,
@@ -678,9 +676,10 @@ public:
                                                                         sg::stream_sink sink,
                                                                         isize offset_in_bytes,
                                                                         isize size_in_bytes,
-                                                                        sg::stream_scope) override
+                                                                        sg::stream_scope scope) override
     {
-        return _download_async.stream_sink_buffer(cc::move(buffer), cc::move(sink), offset_in_bytes, size_in_bytes);
+        return _download_async.stream_sink_buffer(cc::move(buffer), cc::move(sink), offset_in_bytes, size_in_bytes,
+                                                  scope);
     }
 
     [[nodiscard]] sg::stream_download_handle stream_to_sink_from_texture(sg::raw_texture_handle texture,

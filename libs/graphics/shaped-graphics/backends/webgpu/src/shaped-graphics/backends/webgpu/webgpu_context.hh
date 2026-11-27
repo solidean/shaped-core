@@ -417,9 +417,9 @@ public:
     [[nodiscard]] sg::stream_upload_handle stream_bytes_to_buffer(sg::raw_buffer_handle buffer,
                                                                   cc::pinned_data<byte const> data,
                                                                   isize offset,
-                                                                  sg::stream_scope) override
+                                                                  sg::stream_scope scope) override
     {
-        return _streams.stream_to_buffer(cc::move(buffer), sg::make_pinned_stream_source(cc::move(data)), offset);
+        return _streams.stream_to_buffer(cc::move(buffer), sg::make_pinned_stream_source(cc::move(data)), offset, scope);
     }
     [[nodiscard]] sg::stream_upload_handle stream_bytes_to_texture(sg::raw_texture_handle texture,
                                                                    cc::pinned_data<byte const> data,
@@ -433,9 +433,9 @@ public:
     [[nodiscard]] sg::stream_upload_handle stream_source_to_buffer(sg::raw_buffer_handle buffer,
                                                                    std::unique_ptr<sg::stream_source> source,
                                                                    isize offset,
-                                                                   sg::stream_scope) override
+                                                                   sg::stream_scope scope) override
     {
-        return _streams.stream_to_buffer(cc::move(buffer), cc::move(source), offset);
+        return _streams.stream_to_buffer(cc::move(buffer), cc::move(source), offset, scope);
     }
     [[nodiscard]] sg::stream_upload_handle stream_source_to_texture(sg::raw_texture_handle texture,
                                                                     std::unique_ptr<sg::stream_source> source,

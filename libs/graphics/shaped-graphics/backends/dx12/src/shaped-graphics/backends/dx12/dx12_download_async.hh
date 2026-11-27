@@ -42,7 +42,7 @@ struct sg::backend::dx12::dx12_async_download_job
     cc::shared_async<cc::unit> completion; // settled after the memcpy, or with a cancelled error
     dx12_group_value completion_value;     // reverse-sync value for this read, on the source's download timeline
     sg::submission_token wait_token = sg::submission_token::invalid; // defer the read until this token completes
-    // Forward cross-queue sync vs a pending async upload to the same buffer.
+    // Forward cross-queue sync vs a pending upload to the same resource, async or streaming.
     // The read waits on the upload completion fence for this value, so it observes the upload — the two copy queues are independent.
     dx12_group_value upload_wait_value;
 
@@ -101,16 +101,20 @@ public:
                                                     sg::texture_region const& region);
 
     /// Records a streaming readback of [offset, offset+size) from `buffer`, returning its control handle.
-    /// Unlike download_buffer this does NOT stamp the reverse value, so a later command list that writes the buffer
-    /// waits on nothing — the streamed extent is the caller's to keep clear until the handle settles.
-    [[nodiscard]] sg::stream_download_handle stream_buffer(sg::raw_buffer_handle buffer, isize offset, isize size);
+    /// It stamps the streaming value, which a later writer waits on and warns about.
+    /// A `region` scope stamps nothing: the caller keeps writers off the range, and the job holds the source alive.
+    [[nodiscard]] sg::stream_download_handle stream_buffer(sg::raw_buffer_handle buffer,
+                                                           isize offset,
+                                                           isize size,
+                                                           sg::stream_scope scope);
 
     /// Records a streaming readback of [offset, offset+size) from `buffer` delivered to `sink`.
     /// Nothing accumulates: each chunk is handed over at drain, in order, and then its staging window is recycled.
     [[nodiscard]] sg::stream_download_handle stream_sink_buffer(sg::raw_buffer_handle buffer,
                                                                 sg::stream_sink sink,
                                                                 isize offset,
-                                                                isize size);
+                                                                isize size,
+                                                                sg::stream_scope scope);
 
     /// Records a streaming readback of one texture region delivered to `sink`, a run of whole rows at a time.
     [[nodiscard]] sg::stream_download_handle stream_sink_texture(sg::raw_texture_handle texture,

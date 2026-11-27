@@ -100,6 +100,10 @@ public:
     // promote_to_async() is what moves a streaming transfer's value onto the async stamp as well.
     mutable std::atomic<u64> _pending_stream_copy_value = 0;
 
+    // The same, for a stream that claims a region alone: only deferred deletion reads it.
+    // The caller keeps lists off the region, so the rest of the buffer may be used meanwhile without a wait.
+    mutable std::atomic<u64> _pending_region_stream_copy_value = 0;
+
     // The same, on the download timeline, for a STREAMING readback.
     // Command-list access tracking reads it so a list touching a buffer a stream is still reading waits for it,
     // and warns once per stream that it did.

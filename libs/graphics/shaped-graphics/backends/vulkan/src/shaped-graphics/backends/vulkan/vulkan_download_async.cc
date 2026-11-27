@@ -657,15 +657,17 @@ namespace
 
 sg::stream_download_handle vulkan_download_async_system::stream_buffer(sg::raw_buffer_handle const& buffer,
                                                                        isize offset,
-                                                                       isize size_in_bytes)
+                                                                       isize size_in_bytes,
+                                                                       sg::stream_scope scope)
 {
-    return stream_to_sink_buffer(buffer, sg::stream_sink{}, offset, size_in_bytes);
+    return stream_to_sink_buffer(buffer, sg::stream_sink{}, offset, size_in_bytes, scope);
 }
 
 sg::stream_download_handle vulkan_download_async_system::stream_to_sink_buffer(sg::raw_buffer_handle const& buffer,
                                                                                sg::stream_sink sink,
                                                                                isize offset,
-                                                                               isize size_in_bytes)
+                                                                               isize size_in_bytes,
+                                                                               sg::stream_scope scope)
 {
     CC_ASSERT(buffer != nullptr, "streaming download source buffer is null");
     auto const src = std::dynamic_pointer_cast<vulkan_buffer const>(buffer);
@@ -707,8 +709,9 @@ sg::stream_download_handle vulkan_download_async_system::stream_to_sink_buffer(s
     job.stream = control;
     job.sink = cc::move(sink);
 
-    // The streaming tier stamps only the LIFETIME value: a later command list waits on nothing until promoted.
-    src->_pending_stream_download_value.store(value, cc::memory_order_release);
+    // The streaming value, which a later writer waits on and warns about; a region scope stamps the lifetime slot alone.
+    (scope == sg::stream_scope::region ? src->_pending_region_stream_download_value : src->_pending_stream_download_value)
+        .store(value, cc::memory_order_release);
     job.wait_token = sg::submission_token(src->_last_used_submission_token.load(cc::memory_order_acquire));
     // **Both stamps, not just the async one.**
     //

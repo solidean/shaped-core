@@ -24,3 +24,11 @@ The fix mirrors what the command lists already do, in dx12's async enqueue paths
 That is also what makes `promote_to_async` a pure statement of intent there.
 The reverse edge there — a *stream* ordering behind an in-flight async transfer — was missing until the tier-1 sweep read zeroes out of a texture an async upload was still filling.
 `order_stream_copy` now waits on the transfer timeline as well.
+
+## Resolution
+
+Every async and streaming readback on dx12 now waits on the greater of the async and the streaming upload stamp, which share one timeline.
+The reverse edge was missing too, and wider than the issue said: no dx12 upload waited on any readback, async or streaming.
+An upload now carries a download wait, counted as pending under the same acyclicity guard as its direct-queue token.
+Vulkan had both edges for async transfers, and its uploads now also wait on a streaming readback, textures included.
+`stream-test.cc` pins both edges with a gated source; without the change, dx12 read zeroes ahead of the stream, and in the reverse case read the later upload's bytes.

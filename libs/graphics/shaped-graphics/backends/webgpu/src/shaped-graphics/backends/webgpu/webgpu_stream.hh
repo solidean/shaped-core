@@ -55,9 +55,11 @@ public:
 
     // The streaming tier.
 
+    /// A `region` scope is not brought forward for a list touching the buffer, which the caller keeps off the region.
     [[nodiscard]] sg::stream_upload_handle stream_to_buffer(sg::raw_buffer_handle buffer,
                                                             std::unique_ptr<sg::stream_source> source,
-                                                            isize offset);
+                                                            isize offset,
+                                                            sg::stream_scope scope);
     [[nodiscard]] sg::stream_upload_handle stream_to_texture(sg::raw_texture_handle texture,
                                                              std::unique_ptr<sg::stream_source> source,
                                                              sg::subresource_index const& subresource,
@@ -93,6 +95,9 @@ private:
 
         /// An async-tier write queued behind a stream; it has no handle, and nothing to warn about.
         bool is_async = false;
+
+        /// A stream into a region of a buffer, which a list touching the rest of it does not bring forward.
+        bool claims_region = false;
 
         /// The chunk being moved, and how many of its bytes already went, when a window ended inside it.
         cc::optional<sg::stream_chunk> pending;

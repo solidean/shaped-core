@@ -479,7 +479,8 @@ private:
         if (a.stalled) // its source has nothing right now; fill the window with other work rather than spin
             c.eligible = false;
 
-        bool const pending_wait = u64(a.job.wait_token) > _sys._ctx._submission_fence->GetCompletedValue();
+        bool const pending_wait = u64(a.job.wait_token) > _sys._ctx._submission_fence->GetCompletedValue()
+                               || !a.job.download_wait_value.has_reached();
         if (pending_wait && !_open_finished.empty())
             c.eligible = false;
         if (_open_risky_job.has_value() && _open_risky_job.value() != a.sequence)
@@ -695,7 +696,9 @@ private:
         // Max over the window; the submission fence is monotonic.
         if (u64(a.job.wait_token) > _open_max_wait_token)
             _open_max_wait_token = u64(a.job.wait_token);
-        if (u64(a.job.wait_token) > _sys._ctx._submission_fence->GetCompletedValue())
+        fold_open_download_wait(a.job.download_wait_value);
+        if (u64(a.job.wait_token) > _sys._ctx._submission_fence->GetCompletedValue()
+            || !a.job.download_wait_value.has_reached())
             _open_risky_job = a.sequence; // the window is now dedicated to it — see candidate_for
 
         // Completing is NOT this function's business, even when the packer just finished: one packer covers one
@@ -744,6 +747,7 @@ private:
         _window_used = 0;
         _open_finished.clear();
         _open_max_wait_token = 0;
+        _open_download_waits.clear();
         _open_risky_job = {};
         _window_async_bytes = 0;
         _window_stream_bytes = 0;
@@ -768,6 +772,11 @@ private:
         // Over-waiting on a higher (monotonic) token is safe, and an already-completed token returns at once.
         if (_open_max_wait_token > 0)
             _sys._copy_queue->Wait(_sys._ctx._submission_fence.Get(), _open_max_wait_token);
+
+        // Reverse cross-queue sync vs a pending readback: one Wait per download timeline this window's copies owe.
+        // The acyclicity guard in candidate_for covers it as it covers the token above.
+        for (auto const& w : _open_download_waits)
+            _sys._copy_queue->Wait(w.group->fence.Get(), w.value);
 
         ID3D12CommandList* lists[] = {_list.Get()};
         _sys._copy_queue->ExecuteCommandLists(1, lists);
@@ -859,6 +868,20 @@ private:
     isize _window_used = 0;       // bytes written into the open window so far
     u64 _open_max_wait_token = 0; // highest direct-queue token the open window's copies must wait for
 
+    // The download timelines the open window's copies must wait out, at the highest value each owes.
+    cc::vector<dx12_group_value> _open_download_waits;
+
+    // Raises the entry sharing `w`'s timeline, or adds one; unrelated timelines cannot be merged into a single max.
+    void fold_open_download_wait(dx12_group_value const& w)
+    {
+        if (!w.is_pending())
+            return;
+        for (auto& existing : _open_download_waits)
+            if (existing.try_raise_to(w))
+                return;
+        _open_download_waits.push_back(w);
+    }
+
     // Per-timeline highest completion value the open window finished; empty means it finished nothing, which is
     // also the question the acyclicity guard asks — see candidate_for.
     cc::vector<open_completion> _open_finished;
@@ -919,6 +942,18 @@ cc::result<cc::unit> dx12_upload_async_system::initialize(isize window_bytes)
     return cc::unit{};
 }
 
+namespace
+{
+/// Every readback of `dst` enqueued before a write to it, async or streaming: the write must not overtake one.
+/// One maximum is exact, since the two stamps share the resource's download timeline, whose values complete in order.
+template <class Resource>
+[[nodiscard]] sg::backend::dx12::dx12_group_value pending_download_of(Resource const& dst)
+{
+    return {dst._download_group, cc::max(dst._pending_async_download_value.load(std::memory_order_acquire),
+                                         dst._pending_stream_download_value.load(std::memory_order_acquire))};
+}
+} // namespace
+
 void dx12_upload_async_system::upload_buffer(sg::raw_buffer_handle buffer, cc::pinned_data<byte const> data, isize offset)
 {
     CC_ASSERT(buffer != nullptr, "async upload target buffer is null");
@@ -952,6 +987,7 @@ void dx12_upload_async_system::upload_buffer(sg::raw_buffer_handle buffer, cc::p
     job.completion = dx12_group_value{dst->_upload_group, value};
     // Reverse sync: defer this copy behind the last direct-queue list that used the buffer, so it never overwrites bytes an earlier-submitted list still reads.
     job.wait_token = sg::submission_token(dst->_last_used_submission_token.load(std::memory_order_acquire));
+    job.download_wait_value = pending_download_of(*dst);
     job.drain = _drain.start();
     job.ambient = {job.completion.group, job.completion.value};
     _actor->enqueue_message(cc::move(job));
@@ -996,6 +1032,7 @@ void dx12_upload_async_system::upload_texture(sg::raw_texture_handle texture,
     job.completion = dx12_group_value{dst->_upload_group, value};
     // Reverse sync: defer the copy behind the last direct-queue list that used this texture.
     job.wait_token = sg::submission_token(dst->_last_used_submission_token.load(std::memory_order_acquire));
+    job.download_wait_value = pending_download_of(*dst);
     job.drain = _drain.start();
     job.ambient = {job.completion.group, job.completion.value};
     _actor->enqueue_message(cc::move(job));
@@ -1030,11 +1067,12 @@ template <class ResourceT>
 
 sg::stream_upload_handle dx12_upload_async_system::stream_buffer(sg::raw_buffer_handle buffer,
                                                                  cc::pinned_data<byte const> data,
-                                                                 isize offset)
+                                                                 isize offset,
+                                                                 sg::stream_scope scope)
 {
     // The resident form is one always-ready chunk, so it is the source seam's simplest case rather than a path of
     // its own — everything below it is shared.
-    return stream_source_buffer(cc::move(buffer), sg::make_pinned_stream_source(cc::move(data)), offset);
+    return stream_source_buffer(cc::move(buffer), sg::make_pinned_stream_source(cc::move(data)), offset, scope);
 }
 
 sg::stream_upload_handle dx12_upload_async_system::stream_texture(sg::raw_texture_handle texture,
@@ -1047,7 +1085,8 @@ sg::stream_upload_handle dx12_upload_async_system::stream_texture(sg::raw_textur
 
 sg::stream_upload_handle dx12_upload_async_system::stream_source_buffer(sg::raw_buffer_handle buffer,
                                                                         std::unique_ptr<sg::stream_source> source,
-                                                                        isize offset)
+                                                                        isize offset,
+                                                                        sg::stream_scope scope)
 {
     CC_ASSERT(buffer != nullptr, "stream upload target buffer is null");
     CC_ASSERT(source != nullptr, "stream upload source is null");
@@ -1059,12 +1098,13 @@ sg::stream_upload_handle dx12_upload_async_system::stream_source_buffer(sg::raw_
                                                             "buffer_usage::copy_dst");
     CC_ASSERT(_mapped != nullptr, "async upload system used before initialization");
 
-    // Reserve a completion value and stamp the STREAMING slot only.
-    // Deferred deletion reads it, so the storage outlives the copy; command-list access tracking does not, so no
-    // later reader inherits a wait — which is the whole difference between the two tiers.
+    // Reserve a completion value and stamp the STREAMING slot, which a later list waits on and warns about.
+    // A region scope promises the caller keeps every list off the streamed range, so the rest of the buffer stays
+    // free: it stamps the lifetime slot instead, which deferred deletion alone reads.
     CC_ASSERT(dst->_upload_group != nullptr, "a stream upload target must have been created with copy_dst");
     u64 const value = dst->_upload_group->reserve();
-    stamp_max(dst->_pending_stream_copy_value, value);
+    stamp_max(scope == sg::stream_scope::region ? dst->_pending_region_stream_copy_value : dst->_pending_stream_copy_value,
+              value);
 
     auto typed = std::static_pointer_cast<dx12_buffer const>(cc::move(buffer));
     auto control = make_stream_control(typed, value, source->total_size_hint());
@@ -1075,6 +1115,7 @@ sg::stream_upload_handle dx12_upload_async_system::stream_source_buffer(sg::raw_
     job.dst_offset = offset;
     job.completion = dx12_group_value{dst->_upload_group, value};
     job.wait_token = sg::submission_token(dst->_last_used_submission_token.load(std::memory_order_acquire));
+    job.download_wait_value = pending_download_of(*dst);
     job.stream = control;
     job.source = cc::move(source);
     job.drain = _drain.start();
@@ -1122,6 +1163,7 @@ sg::stream_upload_handle dx12_upload_async_system::stream_source_texture(sg::raw
     job.is_texture = true;
     job.completion = dx12_group_value{dst->_upload_group, value};
     job.wait_token = sg::submission_token(dst->_last_used_submission_token.load(std::memory_order_acquire));
+    job.download_wait_value = pending_download_of(*dst);
     job.stream = control;
     job.source = cc::move(source);
     job.drain = _drain.start();

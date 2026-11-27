@@ -94,7 +94,8 @@ Preserve these; the rest is tuning:
    Once per stream rather than once per resource, since a resource streamed every frame would otherwise report the first one and stay silent about the hundred after it.
 
    The stamp stays *separate* from the async one, because the two carry different meanings: the async stamp's wait is silent, and promotion is what moves a value onto it.
-   Deferred deletion reads the max of both, as it always did.
+   Deferred deletion reads the max of both, as it always did, and so does an async transfer the other way, which waits on a stream as on an async transfer and says nothing.
+   It stalls no one but itself, so there is nothing to warn about.
 
    The value is reserved on the **resource's own completion timeline**, never a shared counter — see [async upload](upload.async.md).
    Streaming is what makes that unavoidable: a stream picked ahead of an older async transfer finishes first, and on one shared timeline its completion would report that older transfer done.

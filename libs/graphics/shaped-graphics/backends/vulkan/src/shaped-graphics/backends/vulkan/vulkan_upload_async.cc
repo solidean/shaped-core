@@ -827,7 +827,10 @@ void vulkan_upload_async_system::upload_buffer(sg::raw_buffer_handle const& buff
     // Forward: a later graphics-queue list touching this buffer waits for this value at submit.
     dst->_pending_async_upload_value.store(job.completion.value, cc::memory_order_release);
     job.wait_token = sg::submission_token(dst->_last_used_submission_token.load(cc::memory_order_acquire));
-    if (auto const pending = dst->_pending_async_download_value.load(cc::memory_order_acquire); pending != 0)
+    // Every readback enqueued before this, async or streaming: one maximum, since both stamps share one timeline.
+    if (auto const pending = cc::max(dst->_pending_async_download_value.load(cc::memory_order_acquire),
+                                     dst->_pending_stream_download_value.load(cc::memory_order_acquire));
+        pending != 0)
         job.download_wait = {.group = dst->_download_group, .value = pending};
 
     job.drain = _drain.start(); // before the hand-over, so a job still in the inbox is counted too
@@ -837,14 +840,16 @@ void vulkan_upload_async_system::upload_buffer(sg::raw_buffer_handle const& buff
 
 sg::stream_upload_handle vulkan_upload_async_system::stream_buffer(sg::raw_buffer_handle const& buffer,
                                                                    cc::pinned_data<byte const> data,
-                                                                   isize offset)
+                                                                   isize offset,
+                                                                   sg::stream_scope scope)
 {
-    return stream_source_buffer(buffer, sg::make_pinned_stream_source(cc::move(data)), offset);
+    return stream_source_buffer(buffer, sg::make_pinned_stream_source(cc::move(data)), offset, scope);
 }
 
 sg::stream_upload_handle vulkan_upload_async_system::stream_source_buffer(sg::raw_buffer_handle const& buffer,
                                                                           std::unique_ptr<sg::stream_source> source,
-                                                                          isize offset)
+                                                                          isize offset,
+                                                                          sg::stream_scope scope)
 {
     CC_ASSERT(buffer != nullptr, "streaming upload target buffer is null");
     CC_ASSERT(source != nullptr, "a streaming upload needs a source");
@@ -871,9 +876,15 @@ sg::stream_upload_handle vulkan_upload_async_system::stream_source_buffer(sg::ra
     // A command list waits on this stamp too (vulkan_command_list.cc) and so does a readback, so what the async
     // stamp adds is the absence of the stall warning — see promote_to_async below.
     // Deferred deletion gates on it as well, so the buffer cannot go while a copy is queued.
-    dst->_pending_stream_copy_value.store(job.completion.value, cc::memory_order_release);
+    // A region scope promises the caller keeps lists off the range, so it stamps the lifetime slot alone, and the
+    // rest of the buffer stays free.
+    (scope == sg::stream_scope::region ? dst->_pending_region_stream_copy_value : dst->_pending_stream_copy_value)
+        .store(job.completion.value, cc::memory_order_release);
     job.wait_token = sg::submission_token(dst->_last_used_submission_token.load(cc::memory_order_acquire));
-    if (auto const pending = dst->_pending_async_download_value.load(cc::memory_order_acquire); pending != 0)
+    // Every readback enqueued before this, async or streaming: one maximum, since both stamps share one timeline.
+    if (auto const pending = cc::max(dst->_pending_async_download_value.load(cc::memory_order_acquire),
+                                     dst->_pending_stream_download_value.load(cc::memory_order_acquire));
+        pending != 0)
         job.download_wait = {.group = dst->_download_group, .value = pending};
 
     // promote_to_async's backend half: move this transfer's value onto the async stamp too, so a list recorded after
@@ -951,6 +962,11 @@ void vulkan_upload_async_system::upload_texture(sg::raw_texture_handle const& te
 
     dst->_pending_async_upload_value.store(job.completion.value, cc::memory_order_release);
     job.wait_token = sg::submission_token(dst->_last_used_submission_token.load(cc::memory_order_acquire));
+    // Every readback enqueued before this, async or streaming: one maximum, since both stamps share one timeline.
+    if (auto const pending = cc::max(dst->_pending_async_download_value.load(cc::memory_order_acquire),
+                                     dst->_pending_stream_download_value.load(cc::memory_order_acquire));
+        pending != 0)
+        job.download_wait = {.group = dst->_download_group, .value = pending};
 
     job.drain = _drain.start(); // before the hand-over, so a job still in the inbox is counted too
     job.ambient = {job.completion.group, job.completion.value};
@@ -1010,6 +1026,11 @@ sg::stream_upload_handle vulkan_upload_async_system::stream_source_texture(sg::r
 
     dst->_pending_stream_copy_value.store(job.completion.value, cc::memory_order_release);
     job.wait_token = sg::submission_token(dst->_last_used_submission_token.load(cc::memory_order_acquire));
+    // Every readback enqueued before this, async or streaming: one maximum, since both stamps share one timeline.
+    if (auto const pending = cc::max(dst->_pending_async_download_value.load(cc::memory_order_acquire),
+                                     dst->_pending_stream_download_value.load(cc::memory_order_acquire));
+        pending != 0)
+        job.download_wait = {.group = dst->_download_group, .value = pending};
 
     // Since a streaming transfer is waited on either way now, what promotion adds is the *statement of intent*: the
     // wait off the async stamp carries no warning, because a caller who asked for it does not need telling it stalls.

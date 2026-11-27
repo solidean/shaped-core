@@ -617,6 +617,18 @@ cc::result<cc::unit> dx12_download_async_system::initialize(isize window_bytes)
     return cc::unit{};
 }
 
+namespace
+{
+/// Every upload to `src` enqueued before a read of it, async or streaming: the read must observe both.
+/// One maximum is exact, since the two stamps share the resource's upload timeline, whose values complete in order.
+template <class Resource>
+[[nodiscard]] sg::backend::dx12::dx12_group_value pending_upload_of(Resource const& src)
+{
+    return {src._upload_group, cc::max(src._pending_async_upload_value.load(std::memory_order_acquire),
+                                       src._pending_stream_copy_value.load(std::memory_order_acquire))};
+}
+} // namespace
+
 sg::bytes_future dx12_download_async_system::download_buffer(sg::raw_buffer_handle buffer, isize offset, isize size)
 {
     CC_ASSERT(buffer != nullptr, "async download source buffer is null");
@@ -636,10 +648,10 @@ sg::bytes_future dx12_download_async_system::download_buffer(sg::raw_buffer_hand
                                                             "buffer_usage::copy_src");
     CC_ASSERT(_mapped != nullptr, "async download system used before initialization");
 
-    // Forward cross-queue sync vs a pending async UPLOAD to the same buffer: the read must observe it.
+    // Forward cross-queue sync vs a pending upload to the same buffer, async or streaming: the read must observe it.
     // Upload and download own independent copy queues, so the read's window waits on the upload completion fence for this value.
     // That wait is issued on the download queue in submit_window — a clean GPU wait, no CPU stall.
-    u64 const upload_wait = src->_pending_async_upload_value.load(std::memory_order_acquire);
+    auto const upload_wait = pending_upload_of(*src);
 
     // Destination the read bytes land in; the pinned_data keeps it alive until the copy runs (or cancels).
     auto dst = cc::pinned_data<byte>::create_uninitialized(size);
@@ -670,7 +682,7 @@ sg::bytes_future dx12_download_async_system::download_buffer(sg::raw_buffer_hand
     // Forward sync: defer the read behind the last direct-queue list that used the buffer, so it reads committed bytes and never races an earlier-submitted writer.
     job.wait_token = sg::submission_token(src->_last_used_submission_token.load(std::memory_order_acquire));
     // A null upload group means the source can never have been an upload target, so nothing to observe.
-    job.upload_wait_value = dx12_group_value{src->_upload_group, upload_wait};
+    job.upload_wait_value = upload_wait;
     job.drain = _drain.start();
     _actor->enqueue_message(cc::move(job));
 
@@ -700,7 +712,7 @@ sg::bytes_future dx12_download_async_system::download_texture(sg::raw_texture_ha
 
     dx12_texture_footprint const fp = compute_texture_footprint(src->description(), subresource, region);
 
-    u64 const upload_wait = src->_pending_async_upload_value.load(std::memory_order_acquire);
+    auto const upload_wait = pending_upload_of(*src);
 
     auto dst = cc::pinned_data<byte>::create_uninitialized(fp.tight_size());
     cc::span<byte> const dst_span = dst.span();
@@ -725,7 +737,7 @@ sg::bytes_future dx12_download_async_system::download_texture(sg::raw_texture_ha
     job.completion = completion;
     job.completion_value = dx12_group_value{src->_download_group, value};
     job.wait_token = sg::submission_token(src->_last_used_submission_token.load(std::memory_order_acquire));
-    job.upload_wait_value = dx12_group_value{src->_upload_group, upload_wait};
+    job.upload_wait_value = upload_wait;
     job.drain = _drain.start();
     _actor->enqueue_message(cc::move(job));
 
@@ -769,7 +781,10 @@ template <class ResourceT>
 }
 } // namespace
 
-sg::stream_download_handle dx12_download_async_system::stream_buffer(sg::raw_buffer_handle buffer, isize offset, isize size)
+sg::stream_download_handle dx12_download_async_system::stream_buffer(sg::raw_buffer_handle buffer,
+                                                                     isize offset,
+                                                                     isize size,
+                                                                     sg::stream_scope scope)
 {
     CC_ASSERT(buffer != nullptr, "stream download source buffer is null");
     auto const* const src = dynamic_cast<dx12_buffer const*>(buffer.get());
@@ -785,7 +800,8 @@ sg::stream_download_handle dx12_download_async_system::stream_buffer(sg::raw_buf
     // same wait is silent because the caller asked for it.
     CC_ASSERT(src->_download_group != nullptr, "a download source must have been created with copy_src");
     u64 const value = src->_download_group->reserve();
-    stamp_max(src->_pending_stream_download_value, value);
+    if (scope != sg::stream_scope::region) // the caller keeps writers off a claimed region
+        stamp_max(src->_pending_stream_download_value, value);
 
     auto dst = cc::pinned_data<byte>::create_uninitialized(size);
     cc::span<byte> const dst_span = dst.span();
@@ -804,8 +820,7 @@ sg::stream_download_handle dx12_download_async_system::stream_buffer(sg::raw_buf
     job.completion_value = dx12_group_value{src->_download_group, value};
     // The forward waits stay, since reading bytes an earlier list has not finished writing would just be wrong.
     job.wait_token = sg::submission_token(src->_last_used_submission_token.load(std::memory_order_acquire));
-    job.upload_wait_value
-        = dx12_group_value{src->_upload_group, src->_pending_async_upload_value.load(std::memory_order_acquire)};
+    job.upload_wait_value = pending_upload_of(*src);
     job.drain = _drain.start();
     _actor->enqueue_message(cc::move(job));
 
@@ -852,8 +867,7 @@ sg::stream_download_handle dx12_download_async_system::stream_texture(sg::raw_te
     job.completion = control->completion;
     job.completion_value = dx12_group_value{src->_download_group, value};
     job.wait_token = sg::submission_token(src->_last_used_submission_token.load(std::memory_order_acquire));
-    job.upload_wait_value
-        = dx12_group_value{src->_upload_group, src->_pending_async_upload_value.load(std::memory_order_acquire)};
+    job.upload_wait_value = pending_upload_of(*src);
     job.drain = _drain.start();
     _actor->enqueue_message(cc::move(job));
 
@@ -863,7 +877,8 @@ sg::stream_download_handle dx12_download_async_system::stream_texture(sg::raw_te
 sg::stream_download_handle dx12_download_async_system::stream_sink_buffer(sg::raw_buffer_handle buffer,
                                                                           sg::stream_sink sink,
                                                                           isize offset,
-                                                                          isize size)
+                                                                          isize size,
+                                                                          sg::stream_scope scope)
 {
     CC_ASSERT(buffer != nullptr, "stream download source buffer is null");
     auto const* const src = dynamic_cast<dx12_buffer const*>(buffer.get());
@@ -876,7 +891,8 @@ sg::stream_download_handle dx12_download_async_system::stream_sink_buffer(sg::ra
 
     CC_ASSERT(src->_download_group != nullptr, "a download source must have been created with copy_src");
     u64 const value = src->_download_group->reserve();
-    stamp_max(src->_pending_stream_download_value, value);
+    if (scope != sg::stream_scope::region) // the caller keeps writers off a claimed region
+        stamp_max(src->_pending_stream_download_value, value);
 
     auto typed = std::static_pointer_cast<dx12_buffer const>(cc::move(buffer));
     auto control = make_stream_control(typed, value, size);
@@ -890,8 +906,7 @@ sg::stream_download_handle dx12_download_async_system::stream_sink_buffer(sg::ra
     job.completion = control->completion;
     job.completion_value = dx12_group_value{src->_download_group, value};
     job.wait_token = sg::submission_token(src->_last_used_submission_token.load(std::memory_order_acquire));
-    job.upload_wait_value
-        = dx12_group_value{src->_upload_group, src->_pending_async_upload_value.load(std::memory_order_acquire)};
+    job.upload_wait_value = pending_upload_of(*src);
     job.drain = _drain.start();
     _actor->enqueue_message(cc::move(job));
 
@@ -939,8 +954,7 @@ sg::stream_download_handle dx12_download_async_system::stream_sink_texture(sg::r
     job.completion = control->completion;
     job.completion_value = dx12_group_value{src->_download_group, value};
     job.wait_token = sg::submission_token(src->_last_used_submission_token.load(std::memory_order_acquire));
-    job.upload_wait_value
-        = dx12_group_value{src->_upload_group, src->_pending_async_upload_value.load(std::memory_order_acquire)};
+    job.upload_wait_value = pending_upload_of(*src);
     job.drain = _drain.start();
     _actor->enqueue_message(cc::move(job));
 

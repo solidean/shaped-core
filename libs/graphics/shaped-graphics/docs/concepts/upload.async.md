@@ -48,6 +48,11 @@ A command list submitted *before* the upload that uses the buffer must finish be
   When the actor submits the window holding the copy, it first makes the **transfer queue wait on the main queue's submission fence** for that token.
   One wait per window covers every buffer copied in it.
 
+**Reverse — the copy also waits on a pending readback.**
+An async or streaming *download* of the same resource runs on the download's own transfer queue, so the submission-fence wait does not cover it.
+The upload reads the resource's pending download values, async and streaming, when recorded, and the window holding the copy **waits on that resource's download timeline** before executing.
+A job with that wait still pending counts as risky under the scheduling rules below, exactly like one whose token is.
+
 Both waits point strictly **backward in the CPU submission order**, so *per operation* the dependency graph is acyclic — no deadlock — and the timeline is easy to reason about.
 Multiple async uploads to the **same** buffer compose correctly.
 They are processed in order, their copies stay in order on the transfer queue, and each waits on a token at least as high as the previous, so the last upload wins.
