@@ -114,7 +114,7 @@ TEST("sgl samples - matrices is written for all four targets")
              "}\n");
 
     // the dropped value, as each language says it
-    CHECK(function_text("main_ps", sgl::emit::target::hlsl_vulkan).contains("    saturate(n.x);\n"));
+    CHECK(function_text("main_ps", sgl::emit::target::hlsl_vulkan).contains("    (void)(saturate(n.x));\n"));
     CHECK(function_text("main_ps", sgl::emit::target::wgsl).contains("    _ = saturate(n.x);\n"));
     CHECK(function_text("main_ps", sgl::emit::target::msl).contains("    (void)(saturate(n.x));\n"));
 }

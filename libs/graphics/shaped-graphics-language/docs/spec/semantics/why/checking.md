@@ -445,6 +445,47 @@ A pixel stage's output is its return value, all of it, which is SGL's model for 
 `@position` is the precedent: a marked member of a stage's struct that the stage link treats specially.
 A struct holding only `@depth` is how a depth-only pixel stage is written, which is what a shadow pass with a cut-out needs.
 
+## CHK-571
+
+An array is what SPIR-V's `ClipDistance`, Metal's `[[clip_distance]]` and WGSL's `clip_distances` built-in are, so the field is written as it is on three targets.
+A shader fills it in a loop over its planes.
+HLSL's semantics are a spelling the writer makes of it (EMIT-290).
+8 is what every target allows: D3D's eight clip and cull distances together, Vulkan's `maxClipDistances` of at least 8 with the feature, Metal's 8 and WebGPU's 8.
+A plane that is off writes a distance of 0 or more, so one shader serves a frame with three planes and one with none, at the cost of the dot products.
+Every target clips by what the last stage before its rasterizer writes, whichever stage that is, so each of them may write the field, and the stages before it may not.
+The polyfills, which would carry the field in their words and write it from their vertex half, wait for a shader that needs them.
+
+## CHK-573
+
+An entry point is compiled alone, so what a vertex stage writes cannot depend on whether a geometry stage follows it in some pipeline.
+Passing the field on as an ordinary member would make one struct mean two things, clip distances in one pipeline and plain values in another.
+And the rasterizer would never see the earlier stage's planes anyway.
+So the stage that clips writes its own, which it computes from what it takes, and a stage before it writes none.
+
+## CHK-574
+
+D3D, Vulkan and Metal let a pixel stage read the interpolated distances, which no shader asks for yet, and WebGPU does not.
+So the pixel stage's link leaves the field out, which keeps WGSL's fragment input valid and asks the device nothing for the pixel stage.
+On dx12 a link member after the clip distances would then sit on another register in each stage, so there the pixel stage keeps them.
+
+## CHK-575
+
+A feature because core WebGPU lacks it, not because a desktop device does: D3D12 has it at every feature level, and desktop Vulkan devices report `shaderClipDistance`.
+
+## CHK-564
+
+Its use is a stage that writes memory, as an order-independent or a visibility pass does.
+Without it such a stage runs for every rasterized pixel, hidden ones included, since every target runs a stage that writes memory late unless told otherwise.
+An attribute of the entry point is HLSL's, MSL's and SPIR-V's own shape, a property of the function and not of a statement.
+D3D, Vulkan and Metal each make a depth output under forced early tests meaningless or an error, so the one rule is to refuse it (CHK-565).
+Metal makes `[[early_fragment_tests]]` an error beside a `[[depth]]` or a `[[stencil]]` output, and has been seen to ignore a sample mask under it.
+So a sample mask is refused as well, rather than meaning one thing on three targets and another on Metal.
+A forced early test writes depth before the stage runs, so a cutout that discards leaves a hole in color and none in depth (CHK-566).
+That is every target's behavior, and rarely what a port meant, so it warns rather than refuses.
+WGSL has no such attribute (CHK-567).
+Refusing it outright would refuse the common case, a shading pass at EQUAL depth with no memory write, where the attribute is a hint every driver follows anyway.
+So the feature is asked only where the order is observable.
+
 ## CHK-277
 
 A `discard` is a jump rather than a builtin call, since control flow reads as control flow: `if … => discard` ends that path the way `if … => return x` does.
@@ -464,6 +505,11 @@ A `return` is the exit that does not come back, so a loop some invocations leave
 SGL runs its own analysis, so inheriting Tint's pessimism would buy nothing but refusals, and the WGSL text switches Tint's verdict off (EMIT-103).
 A barrier is where that switch does not exist: WGSL refuses one in what Tint judges non-uniform, whatever the directive.
 So a barrier keeps WGSL's rule on every target, and one shader means the same on all of them.
+
+A trace's decision is the body of the candidate loop the trace stands for (CHK-560), and the driver presents each invocation its own candidates, however alike their rays.
+So a barrier, an implicit derivative or a subgroup operation there meets the group in an order and a number no program decides, as in the loop's body.
+Judging a decision by its ray let a constant ray take a barrier the equivalent loop refuses, which broke CHK-560's promise that the two agree.
+The decision's result is still judged as a value, so a trace with a constant ray and a decision of constants hands every invocation the same hit, and code after it keeps its barriers.
 
 ## CHK-285
 
@@ -773,6 +819,21 @@ An `if` with an `else` is a `case` over a `bool` in all but its spelling, and it
 An arm with an effect, or one that must not be computed, runs only where it is taken.
 That is the control-flow half of HLSL's `?:`; `select` is the other half (CHK-365).
 
+## CHK-568
+
+A feature of its own would make portable code ask a second question that only Vulkan can answer differently, and on Metal it would refuse code whose stages are compute there.
+Vulkan reports subgroup stages per stage because it covers more hardware; D3D12 grants wave operations in every DXR stage with `WaveOps`, so a desktop device with ray tracing has them.
+The cost is a Vulkan device with ray-tracing pipelines whose `supportedStages` lacks one of the four bits: it loses `subgroups` whole.
+Of the reports on vulkan.gpuinfo.org with ray-tracing bits (2026-11-24), 4 of about 3,980 lack the callable bit, and 53 lack the any-hit bit, which these stages do not need.
+The any-hit and intersection stages run as often and in such groups as the traversal decides (CHK-404's reasoning), so a subgroup there is no group a program can reason about.
+
+## CHK-569
+
+DXR and Vulkan let the device regroup a ray-tracing stage's invocations wherever it calls another shader, which is how a hit's invocations come from rays of other launch positions.
+SER's reorder does it on purpose.
+A reduction and an elect taken between two such calls are exact over the invocations that ran them together, which is all a count of a stage's invocations needs.
+Checking that no lane-naming value crosses a regroup would be a data-flow analysis of its own, so the rule states the meaning and leaves the check for later.
+
 ## CHK-376
 
 The whole family is designed at once so that it has one naming pass, one feature and one uniformity rule; the quad swaps a single-pass mip reduction needs are three of them.
@@ -840,6 +901,7 @@ HLSL's `float3x4` is three rows, which only `row_major` keeps in that order, and
 ## CHK-404
 
 An atomic counts the invocations that reach it, so it means something only where the program can say how many there are.
+Workgroup memory is a buffer the group's other invocations see, so a store to it from a decision has the buffer's problem, and the decision's own locals and the enclosing body's stay writable.
 A raygen runs once per launch index, a miss once per ray that leaves the scene, a closest hit once per trace that hit, and a callable once per call.
 An any hit runs for each candidate the traversal asks about, including candidates a nearer hit later replaces, in an order the device picks.
 DXR and Vulkan may run it more than once for one candidate, unless the geometry sets `NO_DUPLICATE_ANYHIT_INVOCATION`, and Metal has no such flag.
@@ -850,6 +912,26 @@ Every target compiles the atomic itself in all six stages, so the refusal is SGL
 An inline trace runs the same two decisions inside a loop of its own stage, as often as the same traversal asks, so the rule follows the decision rather than the entry point.
 What it gives up is every write whose count the program tolerates: a traversal-cost heat map, and multi-hit collection appending each candidate through an atomic counter.
 Both would come back as a relaxation that breaks no program, the second better served by a decision that answers through its payload.
+
+## CHK-563
+
+CHK-312 exists for WGSL, which refuses a non-finite const-expression.
+Writing the named constants through their bits (EMIT-287) keeps EMIT-13's promise on every target, so the names can be constants.
+A non-finite value that arithmetic makes from finite constants is still refused, since such a result is almost always a bug; naming it says it is meant.
+There is no "quiet": GPUs raise no floating-point exceptions, so a signalling NaN behaves as any other, and the word would promise a distinction no target keeps.
+Its use is a value written to memory for hardware to read, such as a vertex position that disables a triangle: a copy and a store, never arithmetic.
+At `.fast` a target may assume no NaN or infinity arises: DXC's fast math, Vulkan without `SignedZeroInfNanPreserve` and WGSL may each fold or rewrite one.
+So SGL cannot promise them there, and refuses them instead.
+`.fast` is the common default, so the fix is local: the function that means a NaN states `.specials`, and the guarantee is that scope's.
+A target that can only keep it for the whole entry point, as DXC's `-Gis` does, raises the entry point, which costs speed, not meaning.
+The check judges the source, which knows no floor, as CHK-436 does; a floor only ever raises the level, so what passes stays sound.
+A check that no run-time NaN or infinity reaches `.fast` code, such as a `from_bits` of a run-time word, is left for later.
+
+## CHK-405
+
+`log10` is the product DXC compiles HLSL's `log10` to, `log2(x)` times 0x3E9A209B, so a port stays bit for bit with its HLSL twin on dx12.
+MSL's own `log10`, and a SPIR-V that wrote one through its own extended set, would each round otherwise, so SGL writes the product on every target rather than the target's function.
+A `double` overload waits for a `log2` of a `double`.
 
 ## CHK-531
 

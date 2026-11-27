@@ -109,6 +109,20 @@ void sgl::check::impl::flattener::judge_stage(ast::expr_id call, symbol_id calle
     if (record != nullptr && entry.entry_stage == stage::compute
         && (record->is_barrier || record->is_uniform_load || record->is_subgroup_operation || record->is_quad_operation))
         group_calls.push_back({.file = file(), .call = call, .callee = callee});
+    // CHK-284: a trace's decision runs for each invocation's own candidates, so its body is non-uniform control flow
+    // whatever the ray; a candidate loop's body is the uniformity pass's, through the loop's step (CHK-555)
+    if (record != nullptr && inlined_decision != stage::none && !is_candidate_body
+        && (record->is_barrier || record->is_uniform_load || record->is_subgroup_operation || record->is_quad_operation
+            || record->uses_derivatives))
+    {
+        // a call in the prelude is no line of the program, so the program's call that reached it is reported
+        auto at = call_site{.file = file(), .call = call};
+        if (c.is_prelude_file(file()))
+            for (auto const& site : entry.at(current()->chain))
+                if (!c.is_prelude_file(site.file))
+                    at = site;
+        decision_group_calls.push_back({.file = at.file, .call = at.call, .callee = callee, .written = decision_site});
+    }
     // CHK-404: a decision runs as often as the traversal asks it, whichever stage's loop asks
     if (auto const decision = decision_stage();
         decision != stage::none && record != nullptr
@@ -154,14 +168,20 @@ auto sgl::check::impl::flattener::decision_stage() const -> stage
 
 void sgl::check::impl::flattener::judge_decision_store(flat_expr_id place, ast::expr_id target)
 {
-    // whether the place is an element of a `mut buffer`, or a part of one
+    // whether the place is an element of a `mut buffer`, a member of a `@workgroup` binding, or a part of either
     auto is_buffer_store = false;
+    auto is_workgroup_store = false;
     for (auto depth = 0; is_valid(place) && depth < k_max_inline_depth; ++depth)
     {
         auto const& node = entry.at(place).node;
         if (node.is<flat_buffer_element>())
         {
             is_buffer_store = true;
+            break;
+        }
+        if (auto const* const bound = node.try_as<flat_binding_member>())
+        {
+            is_workgroup_store = bound->is_workgroup;
             break;
         }
         if (auto const* const member = node.try_as<flat_member>())
@@ -171,8 +191,9 @@ void sgl::check::impl::flattener::judge_decision_store(flat_expr_id place, ast::
         else
             break;
     }
-    if (!is_buffer_store)
+    if (!is_buffer_store && !is_workgroup_store)
         return;
+    // CHK-404: workgroup memory is seen by the group's other invocations, so a decision writes it as little as a buffer
     if (auto const decision = decision_stage(); decision != stage::none)
     {
         stage_violations.push_back({.file = file(),
@@ -180,9 +201,12 @@ void sgl::check::impl::flattener::judge_decision_store(flat_expr_id place, ast::
                                     .decision = decision,
                                     .is_inlined_decision = inlined_decision != stage::none,
                                     .is_candidate_body = is_candidate_body,
-                                    .is_buffer_store = true});
+                                    .is_buffer_store = is_buffer_store,
+                                    .is_workgroup_store = is_workgroup_store});
         return;
     }
+    if (!is_buffer_store)
+        return;
     // CHK-531: a vertex, geometry or tessellation stage's store needs what vulkan asks of the device for it
     if (!is_test && (stage_bit(entry.entry_stage) & k_vertex_pipeline_stages) != 0)
         note_vertex_pipeline_store(target, true);
@@ -1000,6 +1024,7 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
     f.entry.workgroup[2] = info.workgroup[2];
     f.entry.is_auto_workgroup = info.is_auto_workgroup;
     f.entry.preferred_subgroup_size = info.preferred_subgroup_size;
+    f.entry.is_early_depth_test = info.is_early_depth_test;
     f.entry.features = info.features;
     // CHK-527: a reserved binding an internal entry point of the prelude lists keeps its reserved place
     for (auto const binding : out.at(info.bindings))
@@ -1161,6 +1186,69 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
             });
     };
 
+    // CHK-574: WGSL hands a pixel stage no clip distance, so no target reads one there yet
+    if (info.entry_stage == stage::pixel)
+        for (auto const& x : f.entry.exprs)
+            if (auto const* const member = x.node.try_as<flat_member>(); member != nullptr && !member->is_swizzle())
+                if (auto const object = f.entry.at(member->object).type;
+                    is_valid(object) && object != checked_module::error_type && out.builtin_type_of(object) == nullptr
+                    && out.at(object).kind == type_kind::structure && member->member >= 0
+                    && member->member < isize(out.at(object).members.count)
+                    && out.at(out.at(object).members)[member->member].is_clip_distances)
+                    report_of_entry(diagnostic_kind::unsupported_yet, x.from.file,
+                                    ast::is_valid(x.from.expr) ? span_of(x.from.file, x.from.expr)
+                                                               : span_of(x.from.file, x.from.stmt),
+                                    "a read of clip distances in a pixel stage, which WGSL hands it none of");
+    // CHK-566, CHK-567: early tests write depth before the stage, which a discard keeps and memory writes observe
+    if (info.is_early_depth_test)
+    {
+        auto const* const attribute
+            = find_attribute(s.file, ast_of(s.file).at(s.declaration).attributes, "early_depth_test");
+        for (auto const& d : f.discards)
+            of_entry(
+                [&]() -> located_diagnostic&
+                {
+                    return report_once(diagnostic_kind::early_depth_keeps_discarded, d.file,
+                                       ast::is_valid(d.expr) ? span_of(d.file, d.expr) : span_of(d.file, d.stmt),
+                                       "the depth and stencil tests ran before the stage and wrote what they pass, so "
+                                       "a discarded pixel keeps its depth and stencil and loses its color alone");
+                });
+        auto writes = false;
+        for (auto const& x : f.entry.exprs)
+            if (auto const* const call = x.node.try_as<flat_call>())
+                if (auto const* const record = out.builtin_function(call->intrinsic);
+                    record != nullptr && (record->is_atomic || record->is_image_store || record->is_bytes_store))
+                    writes = true;
+        for (auto const& st : f.entry.stmts)
+            if (auto const* const assign = st.node.try_as<flat_assign>())
+                for (auto place = assign->place; is_valid(place);)
+                {
+                    auto const& node = f.entry.at(place).node;
+                    if (node.is<flat_buffer_element>())
+                    {
+                        writes = true;
+                        break;
+                    }
+                    if (auto const* const member = node.try_as<flat_member>())
+                        place = member->object;
+                    else if (auto const* const element = node.try_as<flat_element>())
+                        place = element->object;
+                    else
+                        break;
+                }
+        if ((writes || !f.discards.empty()) && attribute != nullptr)
+        {
+            if (!notes[s.info].declared_features.has(feature::early_depth_test))
+                report_of_entry(diagnostic_kind::feature_not_declared, s.file, attribute->name,
+                                cc::format("{} needs early_depth_test, since it {}, which the order of the tests "
+                                           "changes; neither its file, a binding it lists nor its body requires it",
+                                           s.name, writes ? "writes memory through a binding" : "discards"));
+            mark_requires_used(cc::vector<symbol_id>{id}, feature_set(feature::early_depth_test));
+            if (!out.functions[s.info].features.has(feature::early_depth_test))
+                out.functions.own(s.info).features.set(feature::early_depth_test);
+            f.entry.features.set(feature::early_depth_test);
+        }
+    }
     auto used = feature_set();
     for (auto const& u : f.feature_uses)
         used |= u.features;
@@ -1220,6 +1308,40 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
                                            "is_nan tests the bits and holds at every level, or the function needs "
                                            "@float(.specials)");
                     });
+    // CHK-563: a named NaN or infinity stands where its scope keeps the special values, the strictest `@float` of
+    // the entry point and of each function its expression was inlined through (CHK-435)
+    auto const stated_level = [&](symbol_id function)
+    {
+        if (!is_valid(function) || index_of(function) >= out.symbols.size())
+            return float_level::fast;
+        auto const& fs = out.at(function);
+        if (fs.kind != symbol_kind::function || fs.info < 0 || fs.info >= out.functions.size())
+            return float_level::fast;
+        return out.functions[fs.info].float_guarantee;
+    };
+    for (auto const& x : f.entry.exprs)
+    {
+        auto const* const literal = x.node.try_as<flat_literal>();
+        if (literal == nullptr || literal->value - literal->value == 0)
+            continue;
+        auto level = stated_level(f.entry.function);
+        for (auto i = isize(0); i < isize(x.inlined_through.count); ++i)
+            if (auto const callee = stated_level(f.entry.call_sites[isize(x.inlined_through.first) + i].callee);
+                u8(callee) > u8(level))
+                level = callee;
+        if (level != float_level::fast)
+            continue;
+        of_entry(
+            [&]() -> located_diagnostic&
+            {
+                return report_once(
+                    diagnostic_kind::non_finite_at_fast, x.from.file,
+                    ast::is_valid(x.from.expr) ? span_of(x.from.file, x.from.expr) : span_of(x.from.file, x.from.stmt),
+                    "a NaN or an infinity, which code at @float(.fast) may assume never arises; state "
+                    "@float(.specials) on the function that uses it, which keeps the special values "
+                    "in that function alone");
+            });
+    }
     // CHK-227: once, however many trees inline the function the assert stands in
     for (auto const& a : f.effectful_asserts)
         of_entry(
@@ -1251,7 +1373,8 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
         if (traversal != nullptr)
             continue;
         // CHK-404: a write runs as often as its function, which traversal decides for a decision
-        auto const* const record = v.is_buffer_store ? nullptr : out.builtin_function(out.at(v.callee).intrinsic);
+        auto const* const record
+            = v.is_buffer_store || v.is_workgroup_store ? nullptr : out.builtin_function(out.at(v.callee).intrinsic);
         auto const is_any_hit = v.decision == stage::any_hit;
         auto const what
             = v.is_candidate_body ? cc::string("this stands in a candidate loop's body")
@@ -1271,6 +1394,10 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
         auto written = cc::string();
         if (v.is_buffer_store)
             written = "this store to a buffer would write a number of times no spec defines, and race with itself";
+        else if (v.is_workgroup_store)
+            written
+                = "this store to workgroup memory, which the group's other invocations see, would write a number of "
+                  "times no spec defines, and race with itself";
         else if (record != nullptr && record->is_atomic)
         {
             // an image's texel atomic is the prelude's internal `texel_max`, which the program wrote as `.max`
@@ -1284,6 +1411,30 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
         report_of_entry(
             diagnostic_kind::stage_not_allowed, v.file, where,
             cc::format("{}, {}; a decision writes no memory through a binding, so {}", what, how_often, written));
+    }
+    // CHK-284: a trace's decision is non-uniform control flow whatever the ray, as a candidate loop's body is
+    for (auto const& g : f.decision_group_calls)
+    {
+        auto const* const record = out.builtin_function(out.at(g.callee).intrinsic);
+        if (record == nullptr)
+            continue;
+        auto const at = call_site{.file = g.file, .call = g.call};
+        auto const name = cc::string_view(record->name);
+        auto& d = report_of_entry(
+            diagnostic_kind::non_uniform_control_flow, at.file, span_of(at.file, at.call),
+            record->is_barrier || record->is_uniform_load
+                ? cc::format("{} waits for every thread of the workgroup, and not every one reaches it here", name)
+            : record->is_subgroup_operation || record->is_quad_operation
+                ? cc::format("{} exchanges values within the subgroup, and not every invocation of it reaches it here",
+                             name)
+                : cc::format("{} takes derivatives across a quad of pixels, and not every pixel of the quad reaches "
+                             "it here",
+                             name));
+        if (d.notes.empty() && ast::is_valid(g.written.call))
+            d.notes.push_back({.file = g.written.file,
+                               .where = span_of(g.written.file, g.written.call),
+                               .message = "this trace runs its decision for each invocation's own candidates, so the "
+                                          "decision's body is non-uniform control flow whatever the ray"});
     }
     // CHK-380: HLSL forms a compute stage's quads from its threads' ids, which only one axis keeps consecutive
     auto const is_linear = info.workgroup[0] % 4 == 0 && info.workgroup[1] == 1 && info.workgroup[2] == 1;

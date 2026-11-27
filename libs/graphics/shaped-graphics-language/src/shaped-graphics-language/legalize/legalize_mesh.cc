@@ -168,6 +168,9 @@ cc::result<mesh_polyfill_layout, cc::string> sgl::check::mesh_polyfill_layout_of
         if (auto const payload = leaves_of(m, e.locals[i].type); payload.has_error())
             return cc::error(cc::format("{}'s payload holds a '{}', which no word holds", e.name, payload.error()));
     }
+    // CHK-571: the polyfill's vertex half would write them, which no polyfill does yet
+    if (impl::holds_clip_distances(m, t.element))
+        return cc::error(cc::format("{}'s vertex holds clip distances, which the polyfill does not carry yet", e.name));
     auto const leaves = leaves_of(m, t.element);
     if (leaves.has_error())
         return cc::error(cc::format("{}'s vertex holds a '{}', which no word holds", e.name, leaves.error()));

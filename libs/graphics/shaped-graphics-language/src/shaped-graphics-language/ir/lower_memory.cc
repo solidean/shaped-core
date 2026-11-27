@@ -121,11 +121,6 @@ type_ref lowering::image_type(check::type_info const& t)
     if (t.kind == check::type_kind::image)
     {
         auto const& format = k_image_formats[t.format];
-        if (format.spirv.empty())
-        {
-            unsupported(cc::format("the image format {}, which SPIR-V does not name", format.name));
-            return type_ref::none;
-        }
         description.is_storage_image = true;
         description.format = i16(t.format);
         description.element = scalar_type(format.component);

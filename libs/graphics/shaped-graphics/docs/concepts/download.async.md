@@ -32,7 +32,9 @@ Each direction is a **cross-queue GPU wait** rather than a CPU stall, and it reu
 
 **Forward — the read also waits on a pending async upload.**
 An async *upload* to the same buffer runs on a **separate** transfer queue (see below), so it is not covered by the submission-fence wait.
-The download reads the buffer's pending-async-upload value when recorded and carries it, and the window holding the read **waits on that buffer's upload timeline** for the value before executing.
+The download reads the buffer's pending upload value when recorded, the greater of the async and the streaming stamp, and carries it.
+The window holding the read **waits on that buffer's upload timeline** for the value before executing.
+One value covers both, since the two stamps are reserved on that one timeline and complete in order.
 That is a clean cross-queue GPU wait, so `submit-upload → async-download` of the same buffer just works with no CPU stall.
 
 **Reverse — a later writer waits on the read.** A command list that **writes** the buffer after the download must not overwrite the bytes while the transfer queue is still reading them.

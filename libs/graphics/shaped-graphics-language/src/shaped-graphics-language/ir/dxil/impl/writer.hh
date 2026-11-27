@@ -149,7 +149,8 @@ private:
         enum class kind_t : u8
         {
             none,
-            /// A variable or workgroup memory: `offset` counts scalars into `slots`.
+            /// A variable or workgroup memory: `offset` counts its leaves, and each index known at run time alone is a
+            /// run of `_terms`, since a split variable steps by a different stride in each of its columns.
             memory,
             /// A block of constants: `offset` counts bytes from its start.
             constants,
@@ -179,16 +180,45 @@ private:
         u32 path_count = 0;
         /// It reaches a column of a matrix, which a payload holds flat: the path's last index is the column's first lane.
         bool is_column = false;
+        /// A memory's indices known at run time alone, a range of `_terms`.
+        u32 term_first = 0;
+        u32 term_count = 0;
     };
 
-    /// Variables or workgroup memory: one array of each scalar type a value of it holds, indexed by leaf.
+    /// An index of a memory's place known at run time alone: `index` steps `stride` leaves, within an array of `count`.
+    struct memory_term
+    {
+        ll_value index = ll_value::none;
+        u32 stride = 0;
+        u32 count = 0;
+    };
+
+    /// What a memory's column holds: its scalar type, its size, and its name's suffix.
+    struct column_shape
+    {
+        ll_type type = ll_type::none;
+        u32 size = 0;
+        u32 suffix = 0;
+    };
+
+    /// Variables or workgroup memory, as arrays of scalars called columns, each leaf at a position in one of them.
+    ///
+    /// A value holding an array of structs, vectors or matrices is split as DXC splits it: a column per scalar field
+    /// and lane, its positions the array's elements (EMIT-293).
+    /// Any other is one column per scalar type it holds, each laid out as the value is, the other types' leaves left
+    /// unused.
     struct memory
     {
         type_ref value = type_ref::none;
         u32 leaves = 0;
-        /// One storage per `k_scalar_kinds`, `none` for a type it does not hold.
-        ll_value storage[8] = {ll_value::none, ll_value::none, ll_value::none, ll_value::none,
-                               ll_value::none, ll_value::none, ll_value::none, ll_value::none};
+        /// Parallel to the leaves: the column each is held in, and its position there.
+        cc::vector<u32> column_of;
+        cc::vector<u32> position_of;
+        /// Each column's storage; a table's is made when first read, since the validator refuses an unused one.
+        cc::vector<ll_value> columns;
+        /// A table's global, and the shape of each column, for the columns made when first read.
+        i32 table = -1;
+        cc::vector<column_shape> shapes;
     };
 
     struct handle_entry
@@ -271,12 +301,24 @@ private:
         u32 back = 0;
         /// A conditional branch's block on its edge to `merge`, which holds the branch on the condition.
         ll_block split = ll_block::none;
+        /// Whether `back` is the header of an `@unroll(false)` loop, so the split block's branch is a back edge of it.
+        bool is_rolled_back = false;
     };
     /// Every such break, found once the reachable blocks are known.
     void find_loop_breaks();
     /// The break from block `from` to block `to`; null where that edge is none.
     [[nodiscard]] loop_break const* loop_break_of(u32 from, u32 to) const;
     cc::vector<loop_break> _loop_breaks;
+    /// EMIT-291: by block, the header of the `@unroll(false)` loop its terminator goes back to, `k_no_loop` for none.
+    /// Of loops it goes back to several of, the innermost decides, as it is the innermost a `continue` names.
+    cc::vector<u32> _rolled_back_to;
+    /// By block, the `llvm.loop` node of the loop it heads, made where its first back edge is written; 0 before.
+    cc::vector<u32> _loop_nodes;
+    /// `!{!"llvm.loop.unroll.disable"}`, which every rolled loop's node names; 0 before the first.
+    u32 _unroll_disable = 0;
+    static constexpr u32 k_no_loop = 0xffffffffu;
+    /// Attaches the loop node of `header` to the terminator just written.
+    void mark_back_edge(u32 header);
     /// `@dx.break.cond`'s word, compared to 0: true wherever it is read, which no compile can tell.
     ll_value _break_condition = ll_value::none;
     /// The block `lower_block` is writing.
@@ -384,8 +426,20 @@ private:
     void declare_memory();
     [[nodiscard]] ll_value add_dynamic(ll_value dynamic, ll_value index, u32 scale);
     /// A table's memory: an internal constant per scalar type it holds.
-    [[nodiscard]] u32 memory_of_table(global const& g);
-    [[nodiscard]] u32 memory_of_type(type_ref value, bool is_workgroup, cc::string_view name);
+    [[nodiscard]] u32 memory_of_table(global const& g, bool whole_lanes);
+    /// A table's column `c`, made the first time it is read.
+    [[nodiscard]] ll_value table_column(memory& held, u32 c);
+    [[nodiscard]] u32 memory_of_type(type_ref value, bool is_workgroup, cc::string_view name, bool whole_lanes);
+    [[nodiscard]] cc::vector<column_shape> lay_out_memory(memory& entry, bool whole_lanes);
+    void lay_out_split(memory& entry,
+                       type_ref t,
+                       cc::vector<u32>& key,
+                       u64 position,
+                       bool whole_lanes,
+                       cc::vector<cc::vector<u32>>& keys,
+                       cc::vector<column_shape>& shapes);
+    /// Whether `t` holds an array of structs, vectors or matrices anywhere, which its memory splits.
+    [[nodiscard]] bool holds_composite_array(type_ref t);
     /// DXC's shape of a payload's `t`: a vector or a matrix is an array of scalars, and a `bool` an `i32`.
     [[nodiscard]] ll_type payload_type(type_ref t);
     /// The bytes `t` takes in a payload, and its alignment, as LLVM lays `payload_type` out.
@@ -406,7 +460,7 @@ private:
     void store(instruction const& i);
     void load_memory(place const& p, type_ref t, cc::vector<ll_value>& out);
     void store_memory(place const& p, type_ref t, cc::span<ll_value const> leaves);
-    [[nodiscard]] ll_value memory_pointer(place const& p, u32 leaf, type_ref scalar);
+    [[nodiscard]] ll_value memory_pointer(place const& p, u32 leaf);
     void set_mesh_counts(instruction const& i);
     void write_primitive(instruction const& i);
     void load_bytes(place const& p, type_ref t, u32 offset, i32 matrix_stride, cc::vector<ll_value>& out);
@@ -560,6 +614,8 @@ private:
     cc::vector<place> _places;
 
     cc::vector<memory> _memories;
+    /// The runs of every memory place's indices known at run time alone.
+    cc::vector<memory_term> _terms;
     /// Parallel to `_p.locals` and `_p.globals`: the position in `_memories`, or -1.
     cc::vector<i32> _local_memory;
     cc::vector<i32> _global_memory;

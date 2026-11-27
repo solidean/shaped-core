@@ -283,9 +283,12 @@ if(SC_BUILD_TESTS)
             tests/sgl-double-maths-spirv-test.cc
             tests/sgl-draw-start-dxil-test.cc
             tests/sgl-hit-object-spirv-test.cc
+            tests/sgl-link-dxil-test.cc
+            tests/sgl-loop-hint-dxil-test.cc
             tests/sgl-native-dxil-test.cc
             tests/sgl-native-line-table-test.cc
             tests/sgl-real-shaders-test.cc
+            tests/sgl-recompute-dxil-test.cc
             tests/sgl-shader-model-floor-test.cc
             tests/sgl-signature-golden-test.cc
         )

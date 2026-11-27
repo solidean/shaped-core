@@ -27,7 +27,7 @@ cc::shared_async<cc::unit> mix_routine::init(sg::routine_init_scope scope)
     if (pipeline->try_value() == nullptr)
     {
         impl::log_build_failure(pipeline, "mix", params());
-        fail_init(); // not pending: this will not come good until a reload, and a caller should be able to tell
+        fail_init(scope); // not pending: this will not come good until a reload, and a caller should be able to tell
         co_return;
     }
 

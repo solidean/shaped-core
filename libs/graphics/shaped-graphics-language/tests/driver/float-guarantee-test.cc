@@ -636,3 +636,72 @@ TEST("sgl float - a text's cross is each lane's a_p * b_q - a_q * b_p at .precis
         CHECK(bare_calls(strict, "cross") == 0).dump("text", strict);
     }
 }
+
+TEST("sgl float - a named NaN or infinity is written through its bits on every target and route (EMIT-287)")
+{
+    constexpr cc::string_view source = "require float_specials, shader_f16, shader_f64\n"
+                                       "\n"
+                                       "binding work:\n"
+                                       "    values: mut buffer[float]\n"
+                                       "binding narrow:\n"
+                                       "    halves: mut buffer[half2]\n"
+                                       "binding wide:\n"
+                                       "    doubles: mut buffer[double]\n"
+                                       "\n"
+                                       "@float(.specials) @compute(64) fun floats(@thread_id id: int3){work}:\n"
+                                       "    work.values[id.x] = select(id.x > 3, float.nan, -float.infinity)\n"
+                                       "\n"
+                                       "@float(.specials) @compute(64) fun halves(@thread_id id: int3){narrow}:\n"
+                                       "    narrow.halves[id.x] = half2(half.nan, 1.0)\n"
+                                       "\n"
+                                       "@float(.specials) @compute(64) fun doubles(@thread_id id: int3){wide}:\n"
+                                       "    wide.doubles[id.x] = double.infinity\n";
+    auto const of = [&](cc::string_view entry, target t, sgl::emit::native_route native)
+    {
+        auto const e = sgl::compile_to_text({.source = source,
+                                             .source_name = "named.sgl",
+                                             .entry_point = entry,
+                                             .target = t,
+                                             .weakens_float = t == target::wgsl,
+                                             .native = native});
+        REQUIRE(e.has_value())
+            .dump("entry", entry)
+            .dump("target", sgl::emit::to_string(t))
+            .dump("error", e.has_error() ? e.error() : cc::string());
+        return e.value();
+    };
+    for (auto const t : {target::hlsl_dx12, target::hlsl_vulkan})
+    {
+        auto const text = of("floats", t, sgl::emit::native_route::text).text;
+        CHECK(text.contains("select(id.x > 3, asfloat(0x7fc00000u), -asfloat(0x7f800000u))")).dump("text", text);
+        CHECK(of("halves", t, sgl::emit::native_route::text).text.contains("asfloat16(uint16_t(0x7e00u))"));
+        CHECK(of("doubles", t, sgl::emit::native_route::text).text.contains("asdouble(0x00000000u, 0x7ff00000u)"));
+    }
+    auto const msl = of("floats", target::msl, sgl::emit::native_route::text).text;
+    CHECK(msl.contains("as_type<float>(0x7fc00000u)")).dump("text", msl);
+    CHECK(msl.contains("-as_type<float>(0x7f800000u)")).dump("text", msl);
+    CHECK(of("halves", target::msl, sgl::emit::native_route::text).text.contains("as_type<half>(ushort(0x7e00))"));
+
+    // a `let` is no const-expression, so WGSL creates the shader without folding the bits into a value it refuses
+    auto const wgsl = of("floats", target::wgsl, sgl::emit::native_route::text).text;
+    CHECK(wgsl.contains("fn sgl_non_finite_f32_7fc00000() -> f32 {\n    let bits = 0x7fc00000u;\n    return "
+                        "bitcast<f32>(bits);\n}\n"))
+        .dump("text", wgsl);
+    CHECK(wgsl.contains("select(-sgl_non_finite_f32_7f800000(), sgl_non_finite_f32_7fc00000(), id.x > 3)")).dump("text", wgsl);
+    auto const wgsl_half = of("halves", target::wgsl, sgl::emit::native_route::text).text;
+    CHECK(wgsl_half.contains("    let bits = 0x7e00u;\n    return bitcast<vec2<f16>>(bits).x;\n")).dump("text", wgsl_half);
+
+    // SGL's own DXIL and SPIR-V hold a constant of the bits
+    for (auto const entry : {"floats", "halves", "doubles"})
+    {
+        CHECK(!of(entry, target::hlsl_dx12, sgl::emit::native_route::require).dxil.empty()).dump("entry", entry);
+        auto const spirv = of(entry, target::hlsl_vulkan, sgl::emit::native_route::require).spirv;
+        auto holds = false;
+        for (auto at = isize(5); at < spirv.size(); at += isize(spirv[at] >> 16))
+            if ((spirv[at] & 0xffffu) == 43) // OpConstant
+                holds = holds || spirv[at + 3] == 0x7fc00000u || spirv[at + 3] == 0xff800000u || spirv[at + 3] == 0x7e00u
+                     || (spirv[at + 3] == 0u && at + 4 < spirv.size() && (spirv[at] >> 16) == 5
+                         && spirv[at + 4] == 0x7ff00000u);
+        CHECK(holds).dump("entry", entry);
+    }
+}

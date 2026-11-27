@@ -102,6 +102,7 @@ struct validator
     flat_entry_point const& e;
     cc::vector<error>& errors;
     bool writes_prints = false;
+    emit::numbering const* numbering = nullptr;
 
     void report(error_kind kind, symbol_id symbol, cc::string detail)
     {
@@ -147,6 +148,23 @@ struct validator
             validate_binding(m, id, errors);
     }
 
+    /// LINK-6: a callables table the entry point calls has a first record wherever it is written.
+    void callable_bases()
+    {
+        auto reported = cc::vector<symbol_id>();
+        for (auto const& x : e.exprs)
+        {
+            auto const* const base = x.node.try_as<check::flat_callable_base>();
+            if (base == nullptr || callable_record(m, numbering, base->table) >= 0
+                || reported.values().contains(base->table))
+                continue;
+            reported.push_back(base->table);
+            report(error_kind::unnumbered, base->table,
+                   cc::format("'{}' calls callables table '{}', which the {} numbers no record for", e.name,
+                              m.qualified_name_of(base->table), numbering != nullptr ? "link" : "callable section"));
+        }
+    }
+
     /// EMIT-133: refused on every target, so an entry point written for one is written for all of them.
     void file_samplers()
     {
@@ -154,7 +172,10 @@ struct validator
         for (auto const& x : e.exprs)
         {
             auto const* const smp = x.node.try_as<check::flat_file_sampler>();
-            if (smp == nullptr || file_sampler_index(m, smp->sampler) < k_max_file_samplers)
+            if (smp == nullptr)
+                continue;
+            auto const slot = sampler_slot(m, numbering, smp->sampler);
+            if (slot >= 0 && slot < k_max_file_samplers)
                 continue;
             auto is_repeat = false;
             for (auto const r : reported)
@@ -162,11 +183,19 @@ struct validator
             if (is_repeat)
                 continue;
             reported.push_back(smp->sampler);
-            report(
-                error_kind::too_many_samplers, smp->sampler,
-                cc::format("'{}' reaches sampler '{}' at index {}, and a stage holds {}; every sampler declared above "
-                           "it counts toward its index, whether reached or not",
-                           e.name, m.at(smp->sampler).name, file_sampler_index(m, smp->sampler), k_max_file_samplers));
+            if (slot < 0)
+                report(error_kind::unnumbered, smp->sampler,
+                       cc::format("'{}' reaches sampler '{}', which the link numbers no slot for", e.name,
+                                  m.qualified_name_of(smp->sampler)));
+            else if (numbering != nullptr)
+                report(error_kind::too_many_samplers, smp->sampler,
+                       cc::format("'{}' reaches sampler '{}' at its link group's slot {}, and a stage holds {}", e.name,
+                                  m.qualified_name_of(smp->sampler), slot, k_max_file_samplers));
+            else
+                report(error_kind::too_many_samplers, smp->sampler,
+                       cc::format("'{}' reaches sampler '{}' at index {}, and a stage holds {}; every sampler declared "
+                                  "above it counts toward its index, whether reached or not",
+                                  e.name, m.at(smp->sampler).name, slot, k_max_file_samplers));
         }
     }
 
@@ -195,13 +224,6 @@ struct validator
                 if (!is_listed)
                     report(error_kind::malformed_tree, e.function,
                            cc::format("a member of '{}', which the entry point does not list", m.at(b->binding).name));
-            }
-            else if (auto const* l = x.node.try_as<flat_literal>())
-            {
-                // Only a finite value minus itself is zero.
-                if (!(l->value - l->value == 0))
-                    report(error_kind::non_finite_literal, e.function,
-                           cc::format("a literal of type '{}'", m.name_of(x.type)));
             }
             else if (auto const* c = x.node.try_as<flat_call>(); c != nullptr && c->text >= 0)
             {
@@ -261,7 +283,7 @@ struct planner
     {
         auto count = 0;
         for (auto const& member : p.m.at(p.m.at(type).members))
-            if (!member.is_position && !member.is_layer && !member.is_viewport_index
+            if (!member.is_position && !member.is_layer && !member.is_viewport_index && !member.is_clip_distances
                 && member.type != check::checked_module::void_type)
             {
                 count += locations_taken(member.type);
@@ -379,8 +401,11 @@ struct planner
         auto next_location = first_location;
         for (auto const& member : members)
         {
+            // EMIT-290: HLSL writes clip distances a lane at a time, which MSL and WGSL take as the array itself
+            auto const is_hlsl = p.which == emit::target::hlsl_dx12 || p.which == emit::target::hlsl_vulkan;
             auto const split = has_locations && !member.is_position && !member.is_layer && !member.is_viewport_index
                                     && member.factor == check::tessellation_factor::none
+                                    && (!member.is_clip_distances || is_hlsl)
                                  ? pieces_of(member.type)
                                  : edge_pieces();
             result.push_back({
@@ -390,11 +415,12 @@ struct planner
                 .is_position = has_locations && member.is_position,
                 .is_layer = has_locations && member.is_layer,
                 .is_viewport_index = has_locations && member.is_viewport_index,
+                .is_clip_distances = has_locations && member.is_clip_distances,
                 .interpolate = member.interpolate,
                 .output = member.output,
                 .factor = member.factor,
                 .location = has_locations && !member.is_position && !member.is_layer && !member.is_viewport_index
-                                 && member.output == check::pixel_output::color
+                                 && !member.is_clip_distances && member.output == check::pixel_output::color
                                  && member.factor == check::tessellation_factor::none
                               ? next_location
                               : -1,
@@ -487,8 +513,13 @@ struct planner
         for (auto const& member : p.m.at(info.members))
         {
             need(member.type, struct_role::plain);
-            member_of.push_back(member.type == check::checked_module::void_type ? -1 : i32(written.size()));
-            if (member.type != check::checked_module::void_type)
+            // CHK-574: a pixel stage reads no clip distance, so a link matched by location leaves them out
+            // dx12 matches its stages by register, so there the pixel stage declares them, unread, as the vertex stage does
+            auto const is_left_out = member.type == check::checked_module::void_type
+                                  || (member.is_clip_distances && p.e.entry_stage == check::stage::pixel
+                                      && p.which != emit::target::hlsl_dx12);
+            member_of.push_back(is_left_out ? -1 : i32(written.size()));
+            if (!is_left_out)
                 written.push_back(member);
         }
 
@@ -729,7 +760,7 @@ struct planner
             if (smp == nullptr || sampler_of(p, smp->sampler) >= 0)
                 continue;
             auto const& s = p.m.at(smp->sampler);
-            auto const index = file_sampler_index(p.m, smp->sampler);
+            auto const index = sampler_slot(p.m, p.numbering, smp->sampler);
             auto at = isize(0);
             while (at < p.samplers.size() && p.samplers[at].index < index)
                 ++at;
@@ -1361,7 +1392,7 @@ cc::vector<sgl::emit::impl::planned_member> sgl::emit::impl::declared_members(pl
             piece.name = cc::format("{}_{}", member.name, i);
             piece.source_name = cc::format("{}_{}", member.source_name, i);
             piece.type = member.piece;
-            piece.location = member.location + i * member.piece_locations;
+            piece.location = member.location < 0 ? -1 : member.location + i * member.piece_locations;
             piece.pieces = 0;
             result.push_back(cc::move(piece));
         }
@@ -1441,9 +1472,10 @@ sgl::emit::impl::block_placement sgl::emit::impl::place_block(check::checked_mod
 void sgl::emit::impl::validate(check::checked_module const& m,
                                check::flat_entry_point const& e,
                                cc::vector<error>& errors,
-                               bool writes_prints)
+                               bool writes_prints,
+                               emit::numbering const* numbering)
 {
-    auto v = validator{.m = m, .e = e, .errors = errors, .writes_prints = writes_prints};
+    auto v = validator{.m = m, .e = e, .errors = errors, .writes_prints = writes_prints, .numbering = numbering};
     // a mesh stage made from a geometry stage takes no payload and returns nothing, as a compute stage does
     if (e.input == e.result && e.entry_stage != stage::compute && e.entry_stage != stage::task
         && !(e.entry_stage == stage::mesh && !check::is_valid(e.input)))
@@ -1474,6 +1506,7 @@ void sgl::emit::impl::validate(check::checked_module const& m,
     v.bindings();
     v.tree();
     v.file_samplers();
+    v.callable_bases();
 }
 
 namespace
@@ -1537,9 +1570,10 @@ struct live_nodes
 sgl::emit::impl::plan sgl::emit::impl::make_plan(check::checked_module const& m,
                                                  check::flat_entry_point const& e,
                                                  target t,
-                                                 bool native_float_atomic_add)
+                                                 bool native_float_atomic_add,
+                                                 emit::numbering const* numbering)
 {
-    auto result = plan{.m = m, .e = e, .which = t};
+    auto result = plan{.m = m, .e = e, .which = t, .numbering = numbering};
     // dx12 and WebGPU have no float add, so there an `atomic[float]` stays a uint's bits whatever the device says.
     // MSL has float atomics in threadgroup memory only from 4.1, past sg's floor of 4.0 (the spec's bindings file).
     // So an entry point sharing one keeps every `atomic[float]` a uint's bits, the type being one whatever holds it.
@@ -1746,6 +1780,9 @@ cc::string sgl::emit::impl::semantic_of(plan const& p, planned_struct const& s, 
         return "SV_RenderTargetArrayIndex";
     if (member.is_viewport_index)
         return "SV_ViewportArrayIndex";
+    // EMIT-290: a lane each, which DXC packs into the rows a float4 and the rest take, and concatenates for vulkan
+    if (member.is_clip_distances)
+        return cc::format("SV_ClipDistance{}", member.piece_index >= 0 ? member.piece_index : 0);
     switch (s.role)
     {
     case struct_role::vertex_input:

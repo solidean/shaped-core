@@ -284,3 +284,32 @@ ASYNC_INVOCABLE_TEST("sg - a mesh-shaded pipeline of triangles built from its ow
         for (auto x = 0; x < size; ++x)
             CHECK(pixels[0].rgba8(x, y) == tg::vec4i(0, 255, 0, 255)).context(cc::format("pixel ({}, {})", x, y));
 }
+
+ASYNC_INVOCABLE_TEST("sg - an SGL mesh stage's clip distances cut the triangle it writes",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::mesh_shader))
+        SKIP("this device has no mesh stage, and no polyfill carries clip distances");
+    if (!ctx->supports(sg::feature::clip_distances))
+        SKIP("this context clips by no distance a stage writes");
+
+    // a triangle over the whole target whose second clip distance is x: the left half is cut away, and the right half
+    // shows the color after the lanes
+    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(sg::test::sgl_shaders::meshes::clipped_covered);
+    auto target = mesh_target();
+    target.target_set = sg::test::sgl_shaders::meshes::painted::name;
+    target.clear_color = tg::vec4f(1, 0, 0, 1);
+    auto const pixels = co_await sg_test::draw_offscreen(*ctx, target,
+                                                         [&](sg::rendering_scope& scope)
+                                                         {
+                                                             scope.bind_pipeline(*pipeline);
+                                                             scope.draw_mesh_tasks(1);
+                                                         });
+    for (auto y = 0; y < size; ++y)
+        for (auto x = 0; x < size; ++x)
+            CHECK(pixels[0].rgba8(x, y) == (x < size / 2 ? tg::vec4i(255, 0, 0, 255) : tg::vec4i(0, 255, 0, 255)))
+                .context(cc::format("pixel ({}, {})", x, y));
+}

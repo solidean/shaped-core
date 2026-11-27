@@ -3,8 +3,6 @@ created: 2026-11-03
 priority: next
 refs:
   - test: shaped-viewer-test
-claimed-by: Claude (for Philip Trettner)
-claimed-at: 2026-11-26T14:26Z
 ---
 
 # shaped-viewer-test exits with -1, silently, partway through a gate's run
@@ -30,3 +28,8 @@ Next: Windows' silent process exit monitoring (gflags, SilentProcessExit) names 
 `uv run dev.py test "mesh" --repeat 6` lost shaped-viewer-test this way in about one iteration in five.
 Its log ended a few seconds in, after `sv: grew the vertex pool to 131072 vertices`, with no results file and no crash report.
 Not measured: the exit code, and whether it happens without the other binaries the pattern runs beside it.
+
+**2026-11-26, later: gone with Intel's mesh blobs.**
+28 runs of `uv run dev.py test "mesh" --repeat` passed once `dx12_bind.cc` stopped an Intel GPU restoring mesh-shaded blobs; the earlier one in five was while it still could.
+With them allowed again, the whole binary died of heap corruption instead, bug-sv-test-heap-corruption-with-real-cache, so the two are likely one bug reached two ways.
+The Nov 3 runs predate mesh blobs reaching the persistent tier, though, so another restore may reach it too.

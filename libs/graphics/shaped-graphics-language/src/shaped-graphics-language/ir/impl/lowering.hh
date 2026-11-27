@@ -47,6 +47,8 @@ private:
     [[nodiscard]] block_ref new_block();
     void open_block(block_ref b);
     void set_merge(merge_kind kind, block_ref merge, block_ref continue_to = block_ref::none);
+    /// CHK-414: marks the open block, a loop's header, as the loop `label` written `@unroll(false)`.
+    void hint_loop(check::label_id label);
     value_ref add(op code, type_ref type, cc::span<u32 const> operands, u8 sub = 0, u8 aux = 0);
     value_ref add(op code, type_ref type, std::initializer_list<value_ref> operands, u8 sub = 0, u8 aux = 0);
     /// EMIT-281: a dot or matrix product, or a smoothstep, at `.precise` or stricter, as the scalar operations of its

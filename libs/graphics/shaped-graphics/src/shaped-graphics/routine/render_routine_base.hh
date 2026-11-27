@@ -82,9 +82,9 @@ protected:
     /// accepting no format any registered compiler produces.
     ///
     /// Cleared when the phases re-run at a new generation, so a genuine reload is a fresh verdict.
-    /// The spelling changes once init is a coroutine — a failed await will resolve the init async on its error
-    /// channel — but the state it reports does not.
-    void fail_init();
+    /// It fails the run `scope` belongs to, taken in when that run is collected, so a phase a reload abandoned fails
+    /// nothing that is still current.
+    void fail_init(routine_init_scope const& scope);
 
     /// Persistent one-time work, independent of shader content.
     /// NEVER re-runs, not even on reload, and is never cancelled by one.
@@ -181,10 +181,8 @@ private:
     cc::atomic<double> _first_pending_secs = 0.0;
     cc::atomic<bool> _warned_pending = false;
 
-    /// Set by fail_init from inside a phase, cleared when the phases re-run at a new generation.
-    ///
-    /// Atomic and beside _init rather than inside it: a phase runs on whichever worker the scheduler gave it, so this
-    /// is written off the lock while a reader may be asking for readiness.
+    /// The verdict of the last collected run, set from its own failed flag, and cleared when the phases re-run at a
+    /// new generation.
     cc::atomic<bool> _failed = false;
 
     cc::mutex<init_state> _init;

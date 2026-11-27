@@ -629,6 +629,101 @@ TEST("sgl ir flatten_branches - a loop stays a loop, and its phi still names its
     CHECK(count_of(b.p, op::branch_conditional) == 1);
 }
 
+TEST("sgl ir flatten_branches - a header threaded away hands its loop's hint to the block that heads it now (EMIT-291)")
+{
+    // b1 is the header of a loop written `@unroll(false)`, a branch alone, so what reached it goes straight to b2
+    auto b = program_builder();
+    b.blocks(5);
+    b.open(0);
+    b.branch(1);
+    b.open(1);
+    b.p.blocks[1].hint = loop_hint::rolled;
+    b.branch(2);
+    b.open(2);
+    auto const x = unknown(b);
+    b.branch_if(b.add(op::flt, b.bool_type, {u32(x), u32(b.two)}), 3, 4);
+    b.open(3);
+    b.keep(x);
+    b.branch(1);
+    b.open(4);
+    b.finish();
+    flatten_branches(b.p);
+    require_whole(b.p, control_flow::unstructured);
+    // the block the back edge reaches is the one the hint is on
+    auto rolled = isize(-1);
+    for (auto i = isize(0); i < b.p.blocks.size(); ++i)
+        if (b.p.blocks[i].hint == loop_hint::rolled)
+        {
+            CHECK(rolled == -1);
+            rolled = i;
+        }
+    REQUIRE(rolled >= 0);
+    CHECK(b.p.instructions[b.p.blocks[rolled].first + b.p.blocks[rolled].count - 1].code == op::branch_conditional);
+    auto back_edges = 0;
+    for (auto const& block : b.p.blocks)
+    {
+        auto const& last = b.p.instructions[block.first + block.count - 1];
+        if (last.code == op::branch && b.p.operands_of(last)[0] == u32(rolled) && &block != &b.p.blocks[0])
+            ++back_edges;
+    }
+    CHECK(back_edges == 1).dump("program", dump(b.p));
+}
+
+TEST("sgl ir flatten_branches - a header that goes straight to another loop's of a different hint stays its own "
+     "(EMIT-291)")
+{
+    // b1 heads a loop that asks nothing, and goes straight to b2, which heads one written `@unroll(false)`;
+    // threading b1 would make the two one loop, whose one hint the outer one never asked for
+    for (auto const outer_hint : {loop_hint::plain, loop_hint::rolled})
+    {
+        auto const inner_hint = outer_hint == loop_hint::plain ? loop_hint::rolled : loop_hint::plain;
+        auto b = program_builder();
+        b.blocks(7);
+        b.open(0);
+        b.branch(1);
+        b.open(1);
+        b.p.blocks[1].hint = outer_hint;
+        b.branch(2);
+        b.open(2);
+        b.p.blocks[2].hint = inner_hint;
+        b.branch(3);
+        b.open(3);
+        auto const x = unknown(b);
+        b.branch_if(b.add(op::flt, b.bool_type, {u32(x), u32(b.two)}), 4, 5);
+        b.open(4);
+        b.keep(x);
+        b.branch(2);
+        b.open(5);
+        auto const y = unknown(b);
+        b.branch_if(b.add(op::flt, b.bool_type, {u32(y), u32(b.one)}), 1, 6);
+        b.open(6);
+        b.finish();
+        flatten_branches(b.p);
+        require_whole(b.p, control_flow::unstructured);
+        auto outer = isize(-1);
+        auto inner = isize(-1);
+        for (auto i = isize(0); i < b.p.blocks.size(); ++i)
+        {
+            if (b.p.blocks[i].hint == outer_hint)
+                outer = i;
+            if (b.p.blocks[i].hint == inner_hint)
+                inner = i;
+        }
+        REQUIRE(outer >= 0).dump("program", dump(b.p));
+        REQUIRE(inner >= 0).dump("program", dump(b.p));
+        // the outer header still stands between the outer back edge and the inner loop
+        auto const& outer_last = b.p.instructions[b.p.blocks[outer].first + b.p.blocks[outer].count - 1];
+        REQUIRE(outer_last.code == op::branch);
+        CHECK(b.p.operands_of(outer_last)[0] == u32(inner)).dump("program", dump(b.p));
+        auto reaches_outer = 0;
+        auto scratch = cc::vector<u32>();
+        for (auto const& block : b.p.blocks)
+            for (auto const to : successors_of(b.p, b.p.instructions[block.first + block.count - 1], scratch))
+                reaches_outer += to == u32(outer) ? 1 : 0;
+        CHECK(reaches_outer == 2).dump("program", dump(b.p));
+    }
+}
+
 TEST("sgl ir flatten_branches structured - nested selections fold from the inside out into one block")
 {
     auto b = program_builder();

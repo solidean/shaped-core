@@ -637,6 +637,14 @@ type_id checker::check_dispatch_mesh(function_scope& scope, ast::expr_id id, ast
             if (is_valid(info.mesh_payload) && info.mesh_payload != payload)
                 report(diagnostic_kind::invalid_entry_point, file, where,
                        "a task stage hands its mesh stage one payload struct");
+            // CHK-571: a payload reaches the mesh stage alone, and no rasterizer
+            if (info.mesh_payload != payload)
+                for (auto const& m : out.at(out.at(payload).members))
+                    if (m.is_clip_distances)
+                        report(diagnostic_kind::invalid_entry_point, file, where,
+                               cc::format("'{}' is a task stage's payload, which reaches no rasterizer, so "
+                                          "@clip_distances means nothing on it",
+                                          m.name));
             info.mesh_payload = payload;
         }
     }

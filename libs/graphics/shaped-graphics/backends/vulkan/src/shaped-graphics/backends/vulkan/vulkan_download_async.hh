@@ -145,13 +145,16 @@ public:
     /// nothing until promote_to_async is called.
     [[nodiscard]] sg::stream_download_handle stream_buffer(sg::raw_buffer_handle const& buffer,
                                                            isize offset,
-                                                           isize size_in_bytes);
+                                                           isize size_in_bytes,
+                                                           sg::stream_scope scope);
 
     /// The same, delivering each chunk to `sink` as it arrives rather than accumulating a resident result.
+    /// A `region` scope stamps only the lifetime value, so a list writing the rest of the buffer waits on nothing.
     [[nodiscard]] sg::stream_download_handle stream_to_sink_buffer(sg::raw_buffer_handle const& buffer,
                                                                    sg::stream_sink sink,
                                                                    isize offset,
-                                                                   isize size_in_bytes);
+                                                                   isize size_in_bytes,
+                                                                   sg::stream_scope scope);
 
     /// The texture forms.
     /// A readback's chunks are whole rows, the smallest unit a texture copy can address.

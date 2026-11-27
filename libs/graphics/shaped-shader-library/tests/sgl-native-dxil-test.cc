@@ -1140,12 +1140,32 @@ namespace
 {
 /// The protocol's calls in a disassembled module as `protocol_of` finds them, but with each SSA name renamed by where
 /// it first appears among them, so two writers' modules compare by which value each call takes as well as its shape.
+/// A read of the launch's index is named by its lane, since SGL reads it again after a call point where DXC keeps it
+/// (EMIT-292).
 [[nodiscard]] cc::vector<cc::string> protocol_flow_of(cc::string_view disassembly)
 {
     auto const is_name = [](char c)
     { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '.'; };
     auto seen = cc::vector<cc::string>();
     auto result = cc::vector<cc::string>();
+    // each read of the launch's index, by its SSA name, and the lane it reads
+    auto launch_reads = cc::vector<cc::string>();
+    auto launch_lanes = cc::vector<cc::string>();
+    for (auto from = isize(0); from < disassembly.size();)
+    {
+        auto end = disassembly.find('\n', from);
+        if (end < 0)
+            end = disassembly.size();
+        auto const line = disassembly.subview({.offset = from, .size = end - from});
+        from = end + 1;
+        auto const call = line.find(" = call i32 @dx.op.dispatchRaysIndex.i32(i32 145, i8 ");
+        auto const name = line.find('%');
+        if (call < 0 || name < 0 || name > call)
+            continue;
+        launch_reads.push_back(cc::string(line.subview({.offset = name + 1, .size = call - name - 1})));
+        auto const lane = call + cc::string_view(" = call i32 @dx.op.dispatchRaysIndex.i32(i32 145, i8 ").size();
+        launch_lanes.push_back(cc::string(line.subview({.offset = lane, .size = 1})));
+    }
     auto at = isize(0);
     while (at < disassembly.size())
     {
@@ -1175,8 +1195,14 @@ namespace
             auto const name = cc::string(line.subview({.offset = i + 1, .size = j - i - 1}));
             // a type's name, `%dx.types.Handle`, stays what it is, and a handle is any one of the resource's: DXC makes
             // one per access, and SGL's writer one per resource; so is a trace's payload, which DXC copies per trace
+            auto launch_lane = isize(-1);
+            for (auto k = isize(0); k < launch_reads.size(); ++k)
+                if (launch_reads[k] == name)
+                    launch_lane = k;
             if (name.starts_with("dx.") || name.starts_with("struct."))
                 plain.appendf("%{}", name);
+            else if (launch_lane >= 0)
+                plain.appendf("%launch{}", launch_lanes[launch_lane]);
             else if (plain.ends_with("%dx.types.Handle "))
                 plain += "%handle";
             else if (plain.ends_with("* ") || plain.ends_with("* nonnull "))
@@ -1635,4 +1661,62 @@ TEST("slib - SGL's DXIL of a 16-bit normalized image passes the validator, and i
             REQUIRE(theirs.has_value());
             CHECK(theirs.value().contains(component)).dump("format", f.name).dump("theirs", theirs.value());
         }
+}
+
+TEST("slib - SGL's DXIL splits a local array of structs a column per field and lane, as DXC does (EMIT-293)")
+{
+    auto compiler = ssc::dxc::compiler::create();
+    if (compiler.has_error())
+        SKIP("no DXC");
+#ifndef CC_OS_WINDOWS
+    SKIP("DXC compiles DXIL only on Windows, where its reflection is");
+#endif
+    // AMD's compiler for RDNA4 crashed creating this pipeline when SGL held `q` as one `[128 x float]`
+    constexpr cc::string_view source
+        = "struct vertex:\n"
+          "    pos: float3\n"
+          "    variation: float\n"
+          "    normal: float3\n"
+          "    spread: float\n"
+          "    tangent: float3\n"
+          "    pad0: float\n"
+          "    uv: float2\n"
+          "    pad1: float2\n"
+          "\n"
+          "binding pass:\n"
+          "    params: buffer[uint]\n"
+          "    @padding(.none) target: mut buffer[vertex]\n"
+          "\n"
+          "fun zero_v() -> vertex =>\n"
+          "    vertex(pos = float3(0.0), variation = 0.0, normal = float3(0.0), spread = 0.0, tangent = float3(0.0), "
+          "pad0 = 0.0, uv = float2(0.0), pad1 = float2(0.0))\n"
+          "\n"
+          "@compute(64) fun split(@thread_id id: int3){pass}:\n"
+          "    let mut q = vertex[8].filled(zero_v())\n"
+          "    if pass.params[0] == 0u:\n"
+          "        for z in 0 ..< 8:\n"
+          "            q[z] = zero_v()\n"
+          "    let n = pass.params[1]\n"
+          "    for g in 0 ..< (n as int):\n"
+          "        q[g].pad1.y = 0.5\n"
+          "    for i in 0 ..< (n as int):\n"
+          "        pass.target[(id.x as uint) * 8u + (i as uint)] = q[i]\n"
+          "\n"
+          "@compute(64) fun whole(@thread_id id: int3){pass}:\n"
+          "    @indexed(.memory) let mut q = vertex[8].filled(zero_v())\n"
+          "    q[pass.params[1] as int].pos[pass.params[2] as int] = 0.5\n"
+          "    pass.target[id.x] = q[pass.params[3] as int]\n";
+
+    // sixteen leaves, each its own column of the eight elements
+    auto const split = native_dxil_of(compiler.value(), source, "split");
+    CHECK(lines_with(split, "alloca [8 x float]") == 16).dump("dxil", split);
+    CHECK(lines_with(split, "alloca [128 x float]") == 0).dump("dxil", split);
+    auto const theirs = text_dxil_of(compiler.value(), source, "split");
+    CHECK(lines_with(theirs, "alloca [8 x float]") == 16).dump("dxil", theirs);
+
+    // a lane picked at run time keeps each vector whole, so the three of a vector are one column
+    auto const whole = native_dxil_of(compiler.value(), source, "whole");
+    CHECK(lines_with(whole, "alloca [24 x float]") == 3).dump("dxil", whole);
+    CHECK(lines_with(whole, "alloca [16 x float]") == 2).dump("dxil", whole);
+    CHECK(lines_with(whole, "alloca [8 x float]") == 3).dump("dxil", whole);
 }

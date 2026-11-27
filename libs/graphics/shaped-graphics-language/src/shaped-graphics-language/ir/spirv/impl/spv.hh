@@ -253,6 +253,7 @@ enum capability : u32
     Int64 = 11,
     Int64Atomics = 12,
     Int16 = 22,
+    ClipDistance = 32,
     ImageCubeArray = 34,
     SampleRateShading = 35,
     Sampled1D = 43,
@@ -260,6 +261,8 @@ enum capability : u32
     SampledCubeArray = 45,
     ImageMSArray = 48,
     StorageImageExtendedFormats = 49,
+    StorageImageReadWithoutFormat = 55,
+    StorageImageWriteWithoutFormat = 56,
     ImageQuery = 50,
     GroupNonUniform = 61,
     GroupNonUniformVote = 62,
@@ -343,4 +346,6 @@ constexpr u32 k_semantics_workgroup = 0x100;
 constexpr u32 k_semantics_image = 0x800;
 /// The image operand of an offset every lane of which is a constant.
 constexpr u32 k_image_const_offset = 0x8;
+/// `OpLoopMerge`'s loop control: `DontUnroll`, which SPIR-V 1.0 has.
+constexpr u32 k_loop_dont_unroll = 0x2;
 } // namespace sgl::ir::spirv::impl

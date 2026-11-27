@@ -1,3 +1,4 @@
+#include <clean-core/math/bit.hh>
 #include <shaped-graphics-language/check/impl/flattener.hh>
 
 using namespace sgl;
@@ -87,6 +88,11 @@ auto sgl::check::impl::flattener::flatten_expr(ast::expr_id id) -> flat_expr_id
         // CHK-557, CHK-559: a member of a candidate or a query
         if (where.kind == target_kind::query_member)
             return flatten_query_member(id, where);
+        // CHK-563: a NaN of the bits SGL states, and positive infinity; the targets write either through its bits
+        if (where.kind == target_kind::non_finite_constant)
+            return add_expr(type, id,
+                            flat_literal{.value = where.index == 0 ? cc::bit_cast<f64>(u64(0x7ff8'0000'0000'0000))
+                                                                   : cc::bit_cast<f64>(u64(0x7ff0'0000'0000'0000))});
         // `a.foo` that is no field is a call of `foo` with `a` (CHK-249)
         if (tables().call_at(id) >= 0)
             return flatten_bound_call(id, type, c.out.call_records[tables().call_at(id)]);
@@ -895,13 +901,14 @@ auto sgl::check::impl::flattener::flatten_callable_call(ast::expr_id id, ast::ca
     auto index = flatten_expr(ast().at(index_node.arguments)[0].value);
     if (!is_valid(index))
         return fail();
-    if (base != 0)
+    // the table's place stays symbolic until a target is written, which resolves it from the section it writes for:
+    // the program's, or a link group's (LINK-5)
     {
         type_id const types[] = {int_type(), int_type()};
         auto const plus = c.find_operator(file(), "+", types);
         if (!is_valid(plus))
             return fail();
-        flat_expr_id const operands[] = {index, add_expr(int_type(), id, flat_int_literal{.value = base})};
+        flat_expr_id const operands[] = {index, add_expr(int_type(), id, flat_callable_base{.table = t.table})};
         index = builtin_call(id, plus, operands);
     }
 
@@ -1578,15 +1585,25 @@ auto sgl::check::impl::flattener::call_closure(ast::expr_id id,
         return call_candidate_body(id, f.candidate_loop, values);
     // CHK-404: a function handed a candidate or a box is a decision the traversal calls in its loop
     auto const outer_decision = inlined_decision;
+    auto const outer_site = decision_site;
     auto decision = outer_decision;
+    auto site = outer_site;
     if (!values.empty() && is_valid(values[0]))
         if (auto const d = decision_of(entry.at(values[0]).type); d != stage::none)
+        {
             decision = d;
+            // the program's call that reached the prelude's trace, which runs the decision
+            for (auto const& s : entry.at(current()->chain))
+                if (!c.is_prelude_file(s.file))
+                    site = s;
+        }
     if (is_valid(f.function))
     {
         inlined_decision = decision;
+        decision_site = site;
         auto const inlined = inline_bound(id, f.function, values, slots, argument_closures);
         inlined_decision = outer_decision;
+        decision_site = outer_site;
         return add_expr(type, id, flat_block{.label = inlined.label, .body = inlined.body});
     }
     auto const& lambda_ast = c.ast_of(f.file);
@@ -1631,8 +1648,10 @@ auto sgl::check::impl::flattener::call_closure(ast::expr_id id,
                       .bindings = f.bindings,
                       .instance = f.instance});
     inlined_decision = decision;
+    decision_site = site;
     auto const value = flatten_expr(l.body.value);
     inlined_decision = outer_decision;
+    decision_site = outer_site;
     frames.remove_back();
     return value;
 }

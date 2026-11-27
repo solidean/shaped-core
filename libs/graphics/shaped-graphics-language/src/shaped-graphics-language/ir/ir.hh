@@ -603,6 +603,19 @@ enum class sgl::ir::merge_kind : sgl::u8
     loop,
 };
 
+/// What a loop's header asks of the target's unrolling (EMIT-291).
+/// A pass that moves a header's construct to another block moves its hint too, and none makes two loops of different
+/// hints one.
+enum class sgl::ir::loop_hint : sgl::u8
+{
+    /// The block heads no loop.
+    none,
+    /// It heads a loop that asks nothing.
+    plain,
+    /// It heads a loop written `@unroll(false)` (CHK-414), which the target is asked to keep a loop.
+    rolled,
+};
+
 struct sgl::ir::block
 {
     /// A range of `program::instructions`, whose last one is the terminator.
@@ -612,6 +625,8 @@ struct sgl::ir::block
     /// Where its construct ends, and a loop's continue target.
     block_ref merge = block_ref::none;
     block_ref continue_to = block_ref::none;
+    /// Where it heads a loop, what the loop asks; it outlives `merges`, which DXIL's passes fold away.
+    loop_hint hint = loop_hint::none;
 };
 
 /// A scalar constant, its bits low word first, or zero or nothing of any type.
@@ -695,6 +710,8 @@ enum class sgl::ir::built_in : sgl::u8
     /// A patch's edge and inside tessellation factors, one element per factor.
     tess_edge,
     tess_inside,
+    /// What reaches the rasterizer's clip distances, one element per lane (EMIT-290).
+    clip_distance,
 };
 
 /// Which edge of an entry point an element crosses.
@@ -920,6 +937,8 @@ struct sgl::ir::program
     bool draw_start_in_root_constants = false;
     /// CHK-561: SPIR-V states `MaximallyReconvergesKHR`, `flat_entry_point::maximally_reconverges`; DXIL has no such mode.
     bool maximally_reconverges = false;
+    /// EMIT-289: a pixel stage's depth and stencil tests run before it, `flat_entry_point::is_early_depth_test`.
+    bool early_depth_test = false;
     /// The entry point's guarantee: what no single operation can say, its denormals above all.
     check::float_level guarantee = check::float_level::fast;
     /// The `.sgl` lines each writer states beside its operations, where the compile asked for them.
@@ -1005,6 +1024,11 @@ namespace sgl::ir
 
 /// Whether `code` may run on a path that did not ask for it: it gives only a value, and no operand makes it trap.
 [[nodiscard]] bool may_speculate(op code);
+
+/// Whether `code` hands the invocation to other shaders or other lanes and goes on after: a trace, a callable call, a
+/// reported hit, a hit object's trace or invocation, and a regrouping.
+/// A driver keeps what is live across one, which EMIT-292 has the native routes recompute rather than keep.
+[[nodiscard]] bool is_call_point(op code);
 
 /// The blocks a terminator reaches, which `scratch` holds; one block may stand twice.
 [[nodiscard]] cc::span<u32 const> successors_of(program const& p, instruction const& terminator, cc::vector<u32>& scratch);

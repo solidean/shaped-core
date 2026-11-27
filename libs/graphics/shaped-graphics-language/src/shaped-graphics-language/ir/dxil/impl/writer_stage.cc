@@ -69,6 +69,7 @@ struct system_rule
 constexpr system_rule k_systems[] = {
     {0, 0},   // an ordinary link or attribute
     {1, 3},   // SV_Position
+    {2, 6},   // SV_ClipDistance
     {6, 1},   // SV_VertexID
     {8, 2},   // SV_InstanceID
     {64, 16}, // SV_Target
@@ -100,6 +101,7 @@ constexpr u32 k_model_minor_start_location = 8;
 constexpr u32 k_model_minor_micromaps = 9;
 /// Shader model 6.7 on, a module with UAVs states that resources may not alias.
 constexpr u64 k_flag_res_may_not_alias = 1ull << 33;
+constexpr u64 k_flag_force_early_depth_stencil = 1ull << 3;
 constexpr u32 k_tag_shader_flags = 0;
 constexpr u32 k_tag_usage_mask = 3;
 constexpr u32 k_tag_geometry_state = 1;
@@ -750,6 +752,9 @@ void writer::write_entry_metadata()
             _uses.layer_output = _uses.layer_output
                               || (e.table == signature_table::output && (e.system_value == 4 || e.system_value == 5));
     auto metadata_flags = k_native_low_precision;
+    // EMIT-289: `ForceEarlyDepthStencil`, as DXC states `[earlydepthstencil]`
+    if (_p.early_depth_test)
+        metadata_flags |= k_flag_force_early_depth_stencil;
     for (auto const& b : _bindings)
         if (b.cls == 1 && model_minor >= 7)
             metadata_flags |= k_flag_res_may_not_alias;

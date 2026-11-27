@@ -155,6 +155,20 @@ ASYNC_INVOCABLE_TEST("sg - an SGL ray-tracing pipeline traces two ray types, one
     CHECK((co_await first_wrong_cell(ctx, shaders::raytracing_pipeline::path)) == "");
 }
 
+ASYNC_INVOCABLE_TEST("sg - an SGL trace whose flags are combined at run time traces what constant flags would",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::raytracing_pipeline))
+        SKIP("this device has no ray-tracing pipelines");
+
+    // a `has` that answered wrong, or an `&` or `|` lowered wrong, forces the rays opaque or culls them, and the cutout
+    // any hit then keeps or loses cells it should not
+    CHECK((co_await first_wrong_cell(ctx, shaders::raytracing_pipeline::flagged_path)) == "");
+}
+
 // `reordered_path`'s raygen asks for its invocations to be regrouped before it traces, which changes which of them run
 // together and nothing they compute: a real reordering on a device with the feature, and no instruction elsewhere.
 ASYNC_INVOCABLE_TEST("sg - an SGL raygen that reorders its invocations traces what it would have traced",
@@ -1287,4 +1301,62 @@ ASYNC_INVOCABLE_TEST("sg - an SGL ray-tracing pipeline's raygen, closest hit and
     co_await ctx->idle_completion();
     ctx->process_completed_epochs();
     co_await ctx->idle_completion();
+}
+
+// raytracing_subgroups.sgl: a raygen, a closest hit and a miss each sum their invocations by subgroup and add the sum
+// once per subgroup, which counts each stage's invocations exactly however the device groups them (CHK-376, CHK-568).
+ASYNC_INVOCABLE_TEST("sg - SGL subgroup operations in a raygen, a closest hit and a miss sum each stage's invocations",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::raytracing_pipeline))
+        SKIP("this device has no ray-tracing pipelines");
+    if (!ctx->supports(sg::feature::subgroups))
+        SKIP("this device has no subgroup operations");
+
+    using grouped_t = shaders::raytracing_subgroups::grouped_path_t;
+    auto const pipeline = co_await ctx->cached.acquire_raytracing_pipeline(
+        co_await shaders::raytracing_subgroups::grouped_path.description(*ctx));
+    REQUIRE(pipeline != nullptr);
+    auto table_desc = grouped_t::table_description(pipeline);
+    auto const row = grouped_t::add_row(table_desc, grouped_t::hit_groups_t::grouped_hits);
+    auto const table = ctx->uncached.create_raytracing_shader_table(table_desc);
+    REQUIRE(table != nullptr);
+
+    float const vertices[] = {0, 0, 0, 4, 0, 0, 0, 4, 0, 4, 0, 0, 4, 4, 0, 0, 4, 0};
+    auto const input = ctx->persistent.create_buffer_from_data(vertices, sg::buffer_usage::accel_structure_build_input);
+    auto const counts = ctx->persistent.create_buffer_from_data(
+        cc::vector<u32>::create_defaulted(5), sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
+
+    auto cmd = ctx->create_command_list();
+    auto const triangles = sg::blas_triangles{.vertices = input.raw(), .vertex_count = 6, .is_opaque = true};
+    auto const blas = cmd->raytracing.build_blas(cc::span<sg::blas_triangles const>(&triangles, 1),
+                                                 sg::accel_build_flag::fast_trace, grouped_t::ray_count);
+    auto const offset = table->offset_of(row);
+    sg::tlas_instance const instances[] = {
+        {.blas = blas, .instance_id = 10, .hit_group_offset = offset},
+        {.blas = blas, .transform = {1, 0, 0, 4, 0, 1, 0, 0, 0, 0, 1, 2}, .instance_id = 20, .hit_group_offset = offset},
+    };
+    auto const tlas = cmd->raytracing.build_tlas(instances);
+    auto const group = ctx->transient.create_binding_group(
+        *cmd, ctx->cached.acquire_binding_group_layout<shaders::raytracing_subgroups::grouped>(),
+        shaders::raytracing_subgroups::grouped{.world = tlas->as_view(), .counts = counts.as_readwrite_buffer()});
+    cmd->raytracing.bind_pipeline(*pipeline);
+    cmd->raytracing.bind_group(0, *group);
+    cmd->raytracing.dispatch_rays(*table, sg::raygen_index(0), grid, grid);
+    auto const back = cmd->download.data_from_buffer(counts);
+    ctx->submit_command_list(cc::move(cmd));
+
+    auto const got = co_await back.data();
+    REQUIRE(got.size() == 5);
+    CHECK(got[0] == u32(grid * grid));
+    // one elected invocation per subgroup, of as many subgroups as the device made of the launch
+    CHECK((got[1] >= 1u && got[1] <= u32(grid * grid))).dump("subgroups", got[1]);
+    CHECK(got[2] == u32(grid - 1));
+    // every ray either hit or missed, and the opaque scene hits some of them and misses some
+    CHECK(got[3] + got[4] == u32(grid * grid)).dump("hits", got[3]).dump("misses", got[4]);
+    CHECK(got[3] > 0u);
+    CHECK(got[4] > 0u);
 }

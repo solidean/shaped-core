@@ -504,6 +504,23 @@ constexpr cc::string_view k_cases[] = {
     "    for i in 0 ..< 3:\n"
     "        stream.emit({ position = tri[i].position, layer = id as uint, color = tri[i].color })\n"
     "    stream.end_strip()\n",
+    // clip distances after a member that leaves room in its row, which they take no lane of, and one after them that does
+    "struct clip_link:\n"
+    "    @position position: hpos4\n"
+    "    tag: float\n"
+    "    @clip_distances planes: float[3]\n"
+    "    more: float2\n"
+    "@vertex fun clip_vs(@vertex_index i: int) -> clip_link:\n"
+    "    require clip_distances\n"
+    "    let x = i as float\n"
+    "    return { position = hpos4(x, x, 0.0, 1.0), tag = x, planes = [x, 2.0, 3.0], more = float2(x, 1.0) }\n"
+    "@pixel fun clip_ps(p: clip_link) -> float4 => float4(p.tag, p.more.x, p.more.y, 1.0)\n"
+    "@geometry(max_vertices = 3)\n"
+    "fun clip_gs(tri: out_link[3], stream: mut triangle_stream[clip_link]):\n"
+    "    require clip_distances\n"
+    "    for i in 0 ..< 3:\n"
+    "        stream.emit({ position = tri[i].position, tag = tri[i].alpha, planes = [1.0, 2.0, 3.0], more = "
+    "tri[i].color.xy })\n",
 };
 
 /// A small repeatable stream, so a failing link can be run again from its seed.

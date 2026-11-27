@@ -58,6 +58,7 @@ constexpr built_in_number k_built_ins[] = {
     {built_in::depth_greater_equal, 22},
     {built_in::depth_less_equal, 22},
     {built_in::tess_edge, 11},
+    {built_in::clip_distance, 3},
     {built_in::tess_inside, 12},
     {built_in::domain_location, 13},
     {built_in::launch_id, 5319},
@@ -106,6 +107,7 @@ constexpr u32 k_incoming_ray_payload = 5342;
 constexpr u32 k_model_task = 5364;
 constexpr u32 k_model_mesh = 5365;
 constexpr u32 k_mode_origin_upper_left = 7;
+constexpr u32 k_mode_early_fragment_tests = 9;
 constexpr u32 k_mode_depth_replacing = 12;
 constexpr u32 k_mode_quad_derivatives = 5088;
 constexpr u32 k_mode_maximally_reconverges = 6023;
@@ -136,9 +138,10 @@ constexpr u32 k_mode_output_triangles = 5298;
 constexpr u32 k_primitive_line_indices = 5295;
 constexpr u32 k_primitive_triangle_indices = 5296;
 
+/// A lane of an array the target declares whole: a tessellation factor, or a clip distance.
 [[nodiscard]] constexpr bool is_factor(built_in b)
 {
-    return b == built_in::tess_edge || b == built_in::tess_inside;
+    return b == built_in::tess_edge || b == built_in::tess_inside || b == built_in::clip_distance;
 }
 } // namespace
 
@@ -328,6 +331,7 @@ void writer::write_image(ir::type const& t, u32 id)
     auto format = u32(0);
     if (t.is_storage_image)
     {
+        // EMIT-98: a format SPIR-V has no name for is `Unknown`, which a read or a write states its capability for
         auto const spelled = check::k_image_formats[t.format].spirv;
         for (auto const& f : k_formats)
             if (f.spelled == spelled)
@@ -336,7 +340,7 @@ void writer::write_image(ir::type const& t, u32 id)
                 if (f.is_extended)
                     require(spv::StorageImageExtendedFormats);
             }
-        CC_ASSERT(format != 0, "every format the lowering takes has a number");
+        CC_ASSERT(format != 0 || spelled.empty(), "every format SPIR-V names has a number");
     }
     if (t.dimension == 0)
         require(t.is_storage_image ? spv::Image1D : spv::Sampled1D);
@@ -439,10 +443,16 @@ void writer::write_stage_elements()
                 if (_p.types[t].kind == type_kind::vector && _p.types[t].count == 3
                     && _p.types[t].element == _p.at(e.type).element && !_p.types[t].is_debug_only)
                     held = _type_ids[t];
-        auto const count = e.system == built_in::sample_mask ? u32(1)
-                         : e.system == built_in::tess_edge   ? k_outer_factors
-                         : e.system == built_in::tess_inside ? k_inner_factors
-                                                             : e.array_size;
+        // the clip distances are as many as the lanes that follow
+        auto lanes = u32(0);
+        while (e.system == built_in::clip_distance && i + isize(lanes) < _p.stage_elements.size()
+               && _p.stage_elements[i + isize(lanes)].system == built_in::clip_distance)
+            ++lanes;
+        auto const count = e.system == built_in::sample_mask   ? u32(1)
+                         : e.system == built_in::tess_edge     ? k_outer_factors
+                         : e.system == built_in::tess_inside   ? k_inner_factors
+                         : e.system == built_in::clip_distance ? lanes
+                                                               : e.array_size;
         auto lane = u32(0);
         if (count > 0)
         {
@@ -450,6 +460,13 @@ void writer::write_stage_elements()
             auto const array = _bound++;
             emit(_declarations, spv::TypeArray, {array, held, literal_id(count)});
             held = array;
+            // a mesh stage writes them a vertex at a time, so its array of lanes is one of each vertex's
+            if (e.system == built_in::clip_distance && e.array_size > 0)
+            {
+                auto const vertices = _bound++;
+                emit(_declarations, spv::TypeArray, {vertices, held, literal_id(e.array_size)});
+                held = vertices;
+            }
         }
         _element_variables.push_back(id);
         _element_lanes.push_back(lane);
@@ -478,6 +495,8 @@ void writer::write_stage_elements()
                 if (e.system == built_in::layer && _p.stage != check::stage::mesh)
                     require(_p.stage == check::stage::pixel || _p.stage == check::stage::geometry ? spv::Geometry
                                                                                                   : spv::ShaderLayer);
+                if (e.system == built_in::clip_distance)
+                    require(spv::ClipDistance);
                 if (e.system == built_in::viewport_index && _p.stage != check::stage::mesh)
                     require(_p.stage == check::stage::pixel || _p.stage == check::stage::geometry
                                 ? spv::MultiViewport
@@ -709,6 +728,9 @@ void writer::write_entry()
     if (_p.stage == check::stage::pixel)
     {
         emit(_modes, spv::ExecutionMode, {_function, k_mode_origin_upper_left});
+        // EMIT-289: as DXC states `[earlydepthstencil]`
+        if (_p.early_depth_test)
+            emit(_modes, spv::ExecutionMode, {_function, k_mode_early_fragment_tests});
         // CHK-533: as DXC states it for HLSL's QuadAny and QuadAll
         if (_uses_quad_control)
         {

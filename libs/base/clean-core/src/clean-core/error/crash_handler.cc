@@ -662,6 +662,9 @@ void run_hooks() noexcept
 
 #ifdef CC_OS_WINDOWS
 
+/// STATUS_HEAP_CORRUPTION, which the heap raises before it fails the process fast.
+constexpr unsigned long k_heap_corruption = 0xC0000374;
+
 char const* seh_reason(unsigned long code) noexcept
 {
     switch (code)
@@ -684,6 +687,8 @@ char const* seh_reason(unsigned long code) noexcept
         return "float divide by zero";
     case EXCEPTION_BREAKPOINT:
         return "breakpoint / __debugbreak (often std::terminate or a failed assert unwinding through noexcept)";
+    case k_heap_corruption:
+        return "heap corruption, found by the heap where the faulting thread freed or allocated";
     default:
         return "unhandled structured exception";
     }
@@ -763,6 +768,18 @@ LONG WINAPI seh_filter(EXCEPTION_POINTERS* info) noexcept
     return EXCEPTION_EXECUTE_HANDLER; // let the process terminate
 }
 
+/// A heap corruption ends the process by fail-fast, which no unhandled-exception filter sees, so it is reported here first.
+/// Every other exception is left alone: a vectored handler sees first-chance exceptions a frame may still handle.
+LONG WINAPI heap_corruption_handler(EXCEPTION_POINTERS* info) noexcept
+{
+    if (info == nullptr || info->ExceptionRecord == nullptr || info->ExceptionRecord->ExceptionCode != k_heap_corruption)
+        return EXCEPTION_CONTINUE_SEARCH;
+    auto const capture = report_crash(seh_reason(k_heap_corruption));
+    write_minidump(GetCurrentThreadId(), info);
+    release_report(capture);
+    return EXCEPTION_CONTINUE_SEARCH; // the heap fails the process fast after this
+}
+
 /// Starts the parked reporter thread, with a stack of its own for the report; without it an overflow is reported in place, as any fault.
 void start_overflow_reporter() noexcept
 {
@@ -805,6 +822,7 @@ void install_platform_handlers() noexcept
 {
     start_overflow_reporter();
     SetUnhandledExceptionFilter(seh_filter);
+    AddVectoredExceptionHandler(1, heap_corruption_handler);
     std::signal(SIGABRT, abort_handler);
 }
 

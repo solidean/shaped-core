@@ -224,6 +224,10 @@ public:
     void md_named(cc::string_view name, cc::span<u32 const> nodes);
     /// A specialized node, such as a `DIFile`: LLVM's record `code` and its fields as LLVM 3.7 writes them.
     [[nodiscard]] u32 md_record(u32 code, cc::span<u64 const> fields);
+    /// A loop's `llvm.loop` node: distinct, itself its first operand, then `properties` (EMIT-291).
+    [[nodiscard]] u32 md_loop(cc::span<u32 const> properties);
+    /// Attaches the `llvm.loop` node `node` to the instruction added last, a terminator going back to its loop's header.
+    void set_loop(u32 node) { _instructions.back().loop = node; }
 
     // ---- debug info (EMIT-257), which only `write(..., with_debug_info)` states
     /// Where an instruction's debug location stands, and in what scope; ids are metadata ids, 0 for none.
@@ -309,10 +313,16 @@ public:
     void return_void();
     void unreachable();
 
+    /// Marks the instruction added last as the end of a call point (EMIT-292): what ran before it and what runs after it
+    /// are apart for `share_common_values` and `merge_buffer_loads`, until `remove_unused`.
+    void mark_call_point();
+
     /// Gives two equal computations one value, where the first dominates the second.
     /// What reads memory counts only where `call` said that memory never changes, a block of constants above all.
+    /// A call of either kind is shared with none a call point could run before (EMIT-292), but a handle's.
     void share_common_values();
-    /// Merges loads of one buffer whose lanes follow on in one block into one load of up to four lanes, as DXC does.
+    /// Merges loads of one buffer whose lanes follow on in one block, and no call point between, into one load of up to
+    /// four lanes, as DXC does.
     /// Only a load of a buffer the shader cannot write merges, `call`'s `is_stable`, so no store stands between two.
     /// `opcode` is `rawBufferLoad`'s.
     void merge_buffer_loads(u32 opcode);
@@ -468,6 +478,8 @@ private:
         u32 count = 0;
         /// The debug location's key, 0 for none.
         u32 location = 0;
+        /// The `llvm.loop` node a loop's back edge carries, 0 for none.
+        u32 loop = 0;
     };
     struct block_entry
     {
@@ -540,6 +552,8 @@ private:
     /// Blocks are filled in the order they open, so each one's run ends where the next opens.
     ll_block _open = ll_block::none;
     isize _call_count = 0;
+    /// The instruction each call point ends with, by position, in the order they were added (EMIT-292).
+    cc::vector<u32> _call_points;
     cc::string _names;
 
     ll_type _void = ll_type::none;

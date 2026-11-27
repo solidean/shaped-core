@@ -3,6 +3,7 @@
 #include <clean-core/common/utility.hh> // cc::unit, cc::move
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_coroutine.hh>
+#include <clean-core/thread/atomic.hh>
 #include <shaped-graphics/fwd.hh>
 
 /// What an initializing routine is given, and the only way it reaches a command list.
@@ -27,6 +28,10 @@ struct routine_run
     /// Cooperative: it is observed at `yield` and at `with_cmd`, so a phase with neither is abandoned rather than
     /// cancelled — its result is dropped, it just does not stop early.
     bool cancelled = false;
+
+    /// Set by fail_init from inside the phase, which may resume on any worker.
+    /// The run's own, so a phase a reload abandoned can fail only itself, never the run that replaced it.
+    cc::atomic<bool> failed = false;
 };
 } // namespace sg::impl
 

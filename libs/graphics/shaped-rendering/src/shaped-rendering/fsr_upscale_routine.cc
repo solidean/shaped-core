@@ -83,7 +83,7 @@ cc::shared_async<cc::unit> fsr_upscale_routine::init(sg::routine_init_scope scop
 
     if (!impl::fsr_passes_available(ctx))
     {
-        fail_init();
+        fail_init(scope);
         co_return;
     }
 
@@ -121,7 +121,7 @@ cc::shared_async<cc::unit> fsr_upscale_routine::init(sg::routine_init_scope scop
     if (depth_pipeline == nullptr)
     {
         CC_LOG_ERROR("fsr: the fsr_prepare_depth pipeline did not build");
-        fail_init();
+        fail_init(scope);
         co_return;
     }
     built->prepare_depth
@@ -135,7 +135,7 @@ cc::shared_async<cc::unit> fsr_upscale_routine::init(sg::routine_init_scope scop
         if (pipeline == nullptr)
         {
             CC_LOG_ERROR("fsr: the clear of pixel_format {} did not build", int(clears[i].format));
-            fail_init();
+            fail_init(scope);
             co_return;
         }
         clears[i].program.pipeline = *pipeline;
@@ -149,7 +149,7 @@ cc::shared_async<cc::unit> fsr_upscale_routine::init(sg::routine_init_scope scop
         // Building a pipeline the backend refuses throws, which arrives here as the async's error rather than a log.
         if (auto const* const why = fsr->try_error(); why != nullptr)
             CC_LOG_ERROR("fsr: its passes did not build: {}", why->underlying().to_string());
-        fail_init();
+        fail_init(scope);
         co_return;
     }
     built->fsr = *fsr_passes;

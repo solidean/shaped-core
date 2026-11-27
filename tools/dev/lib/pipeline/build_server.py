@@ -25,8 +25,9 @@ The client contract, which is all dev.py knows of a server:
 
 What opts in, the first that says either way: `--no-server`, `--server`, `SC_BUILD_SERVER=1|0`, the project's `BuildServer.enabled`.
 A checkout's gitignored `dev.toml` sets the project's half through its `[build_server]` table (`from_dev_toml`): enabled, client, speculative_tests, ship_proof.
+The project passes its own defaults for those to `from_dev_toml`, and the table overrides each one it names.
 Without a word from it, the server is on wherever ccs is installed (`installed_client`), and off, silently, wherever it is not.
-Background test runs are the project's choice alone, off unless `BuildServer.speculative_tests` is set.
+Background test runs are off unless `BuildServer.speculative_tests` is set, by the project's default or the checkout's dev.toml.
 `check`, and so `ship`, builds and runs its test suite through the server under the same opt-in, `check --no-server` and `ship --no-server` included.
 `ship` proves through the server instead of running the gate's build and test steps only with the server opted in and
 `ship --proof` or the project's `BuildServer.ship_proof`; any problem with the server runs the full gate instead.
@@ -112,14 +113,20 @@ def installed_client(environ: Mapping[str, str] = os.environ) -> Path | None:
 
 
 def from_dev_toml(
-    root: Path, *, client: Path | None = None, install_hint: str = _GENERIC_HINT, environ: Mapping[str, str] = os.environ
+    root: Path,
+    *,
+    client: Path | None = None,
+    install_hint: str = _GENERIC_HINT,
+    speculative_tests: bool = False,
+    ship_proof: bool = False,
+    environ: Mapping[str, str] = os.environ,
 ) -> BuildServer:
-    """The BuildServer `<root>/dev.toml`'s `[build_server]` asks for; `client` and `install_hint` are the project's defaults.
+    """The BuildServer `<root>/dev.toml`'s `[build_server]` asks for; every keyword but `environ` is the project's default.
 
     The server is on by default wherever its client exists: the project's `client`, or else an installed ccs.
     `enabled = false` in the table turns it off for this checkout, and `enabled = true` on even where no client exists, which warns.
     `client = "<path>"` in the table overrides the project's client, a relative path taken from `root`.
-    `speculative_tests` and `ship_proof` are on only when set to `true`; any other value is off.
+    `speculative_tests` and `ship_proof` in the table override the project's default only when set to `true` or `false`; any other value keeps it.
     """
     table = dev_toml_table(root)
     named = table.get("client")
@@ -132,9 +139,14 @@ def from_dev_toml(
         client=client,
         install_hint=install_hint,
         enabled=asked if isinstance(asked, bool) else client is not None and client.is_file(),
-        speculative_tests=table.get("speculative_tests") is True,
-        ship_proof=table.get("ship_proof") is True,
+        speculative_tests=_switch(table, "speculative_tests", speculative_tests),
+        ship_proof=_switch(table, "ship_proof", ship_proof),
     )
+
+
+def _switch(table: dict, key: str, default: bool) -> bool:
+    asked = table.get(key)
+    return asked if isinstance(asked, bool) else default
 
 
 @dataclass(frozen=True)

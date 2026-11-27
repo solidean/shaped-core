@@ -832,7 +832,12 @@ public:
                 out += "    vk::ext_execution_mode(6023);\n";
         }
         else
+        {
+            // EMIT-289: the depth and stencil tests run before the stage
+            if (p.e.entry_stage == stage::pixel && p.e.is_early_depth_test)
+                out += "[earlydepthstencil]\n";
             out.appendf("{} {}({})\n{{\n", type_text(p, *this, p.e.result), p.entry_name, list);
+        }
         // A target hands an index over unsigned and SGL counts in int, so each conversion stands at the top.
         for (auto i = isize(0); i < p.e.stage_inputs.size(); ++i)
         {

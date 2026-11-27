@@ -93,7 +93,7 @@ cc::shared_async<cc::unit> bloom_routine::init(sg::routine_init_scope scope)
             auto const* const why = (*p)->try_error();
             CC_LOG_ERROR("bloom: a pipeline did not build{}{}", why != nullptr ? ": " : "",
                          why != nullptr ? why->underlying().to_string() : cc::string());
-            fail_init();
+            fail_init(scope);
             co_return;
         }
     }

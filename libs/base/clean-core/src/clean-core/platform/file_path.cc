@@ -1,4 +1,5 @@
 #include <clean-core/common/macros.hh> // CC_OS_WINDOWS
+#include <clean-core/platform/environment.hh>
 #include <clean-core/platform/file_access.hh>
 #include <clean-core/platform/file_path.hh>
 #include <clean-core/string/format.hh>
@@ -108,6 +109,31 @@ u64 current_process_id()
 } // namespace
 
 #endif
+
+cc::optional<cc::string> user_config_directory_path()
+{
+#if defined(CC_OS_WINDOWS)
+    if (auto const app_data = cc::environment_variable("APPDATA"); app_data.has_value())
+        return cc::string(without_trailing_separator(app_data.value()));
+    return {};
+#elif defined(CC_OS_EMSCRIPTEN) || defined(CC_OS_WASI) || defined(CC_OS_ANDROID)
+    return {};
+#else
+#if !defined(CC_OS_MACOS)
+    // XDG says a relative value is invalid and must be ignored.
+    if (auto const xdg = cc::environment_variable("XDG_CONFIG_HOME"); xdg.has_value() && xdg.value().starts_with('/'))
+        return cc::string(without_trailing_separator(xdg.value()));
+#endif
+    auto const home = cc::environment_variable("HOME");
+    if (!home.has_value())
+        return {};
+#if defined(CC_OS_MACOS)
+    return cc::format("{}/Library/Application Support", without_trailing_separator(home.value()));
+#else
+    return cc::format("{}/.config", without_trailing_separator(home.value()));
+#endif
+#endif
+}
 
 cc::string temp_file_path(cc::string_view prefix, cc::string_view suffix)
 {

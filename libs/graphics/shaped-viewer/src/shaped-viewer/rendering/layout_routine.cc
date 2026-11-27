@@ -100,7 +100,7 @@ cc::shared_async<cc::unit> layout_routine::init(sg::routine_init_scope scope)
 
     if (compiled_vs == nullptr || compiled_border == nullptr || compiled_view == nullptr || compiled_wipe == nullptr)
     {
-        fail_init();
+        fail_init(scope);
         co_return;
     }
 
@@ -161,7 +161,7 @@ cc::shared_async<cc::unit> layout_routine::init(sg::routine_init_scope scope)
             auto const* const built = node->try_value();
             if (built == nullptr)
             {
-                fail_init(); // one pipeline missing makes the whole routine unusable, so say so once
+                fail_init(scope); // one pipeline missing makes the whole routine unusable, so say so once
                 co_return;
             }
             _pipelines[kind_index][blended] = *built;

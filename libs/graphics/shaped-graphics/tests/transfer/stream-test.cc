@@ -466,6 +466,106 @@ ASYNC_INVOCABLE_TEST("sg stream - an async transfer behind a stalled stream is o
     CHECK(bytes[2047] == overwrite[2047]);
 }
 
+ASYNC_INVOCABLE_TEST("sg stream - an async readback behind a stalled stream reads what the stream wrote",
+                     (sg::context_handle const& handle))
+{
+    REQUIRE(handle != nullptr);
+    auto& c = *handle;
+
+    // The readback is enqueued after the stream, so it must observe it, though the two run on different queues.
+    auto const streamed = pattern(2048, 61);
+
+    auto buf = c.persistent.create_raw_buffer(2048, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
+    REQUIRE(buf != nullptr);
+
+    auto const opener = std::make_shared<gate>();
+    auto blocked
+        = c.stream.from_source_to_buffer(buf, std::make_unique<gated_source>(cc::span<byte const>(streamed), opener));
+    auto const back = c.download.bytes_from_buffer(buf, 0, 2048);
+
+    // A whole actor cycle with the source still gated, so a readback that ignored the stream has had its chance.
+    auto other = c.persistent.create_raw_buffer(2048, sg::buffer_usage::copy_dst);
+    REQUIRE(other != nullptr);
+    auto unrelated = c.stream.bytes_to_buffer(other, cc::make_pinned_data(pattern(2048, 63)));
+    REQUIRE((co_await cc::async_as_result(unrelated.completion())).has_value());
+    CHECK(!back.is_ready());
+
+    opener->release();
+    auto const bytes = co_await back.bytes();
+    CHECK(bytes[0] == streamed[0]);
+    CHECK(bytes[2047] == streamed[2047]);
+}
+
+ASYNC_INVOCABLE_TEST("sg stream - an async upload does not overwrite what an earlier readback still owes",
+                     (sg::context_handle const& handle))
+{
+    REQUIRE(handle != nullptr);
+    auto& c = *handle;
+
+    // The readback waits on the gated stream, and the upload is enqueued after the readback.
+    // So the upload must wait for the read, not only for the stream it shares a queue with.
+    auto const streamed = pattern(2048, 71);
+    auto const overwrite = pattern(2048, 73);
+
+    auto buf = c.persistent.create_raw_buffer(2048, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
+    REQUIRE(buf != nullptr);
+
+    auto const opener = std::make_shared<gate>();
+    auto blocked
+        = c.stream.from_source_to_buffer(buf, std::make_unique<gated_source>(cc::span<byte const>(streamed), opener));
+    auto const back = c.download.bytes_from_buffer(buf, 0, 2048);
+    c.upload.bytes_to_buffer(buf, cc::make_pinned_data(overwrite));
+
+    opener->release();
+    auto const read = co_await back.bytes();
+    CHECK(read[0] == streamed[0]);
+    CHECK(read[2047] == streamed[2047]);
+
+    auto const after = c.download.bytes_from_buffer(buf, 0, 2048);
+    auto const final_bytes = co_await after.bytes();
+    CHECK(final_bytes[0] == overwrite[0]);
+    CHECK(final_bytes[2047] == overwrite[2047]);
+}
+
+ASYNC_INVOCABLE_TEST("sg stream - a list touching the rest of a buffer a region streams into does not wait for it",
+                     (sg::context_handle const& handle))
+{
+    REQUIRE(handle != nullptr);
+    auto& c = *handle;
+
+    // The region is the caller's until the handle settles, and the rest of the buffer is not, so a list reading the
+    // rest neither waits for the stream nor warns that it did.
+    // The source is gated across the submit, which is where a list folds the wait and warns about it.
+    auto const streamed = pattern(4096, 81);
+    auto const resident = pattern(4096, 83);
+    auto buf = c.persistent.create_raw_buffer(
+        8192, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst | sg::buffer_usage::allow_region_stream);
+    REQUIRE(buf != nullptr);
+    auto filled = c.stream.bytes_to_buffer(buf, cc::make_pinned_data(resident), 4096);
+    REQUIRE((co_await cc::async_as_result(filled.completion())).has_value());
+
+    auto const opener = std::make_shared<gate>();
+    auto blocked = c.stream.from_source_to_buffer(
+        buf, std::make_unique<gated_source>(cc::span<byte const>(streamed), opener), 0, sg::stream_scope::region);
+
+    auto cmd = c.create_command_list();
+    REQUIRE(cmd != nullptr);
+    auto back = cmd->download.bytes_from_buffer(buf, 4096, 4096);
+    c.submit_command_list(cc::move(cmd));
+    CHECK(!blocked.is_settled());
+    opener->release();
+
+    auto const bytes = co_await back.bytes();
+    CHECK(bytes[0] == resident[0]);
+    CHECK(bytes[4095] == resident[4095]);
+
+    REQUIRE((co_await cc::async_as_result(blocked.completion())).has_value());
+    auto const region = c.download.bytes_from_buffer(buf, 0, 4096);
+    auto const landed = co_await region.bytes();
+    CHECK(landed[0] == streamed[0]);
+    CHECK(landed[4095] == streamed[4095]);
+}
+
 ASYNC_INVOCABLE_TEST("sg stream - a failing source settles the transfer on its error channel",
                      (sg::context_handle const& handle))
 {

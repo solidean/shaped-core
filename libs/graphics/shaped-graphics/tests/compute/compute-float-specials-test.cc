@@ -87,3 +87,34 @@ ASYNC_INVOCABLE_TEST("sg - an SGL float keeps NaNs, infinities and signed zeros 
         CHECK(compared[4] == 0u);
     }
 }
+
+ASYNC_INVOCABLE_TEST("sg - an SGL float's named NaN and infinities reach the GPU with their bits",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::float_specials))
+        SKIP("this device keeps no NaNs, infinities and signed zeros a shader asks for");
+
+    auto const pipeline = co_await shaders::float_specials::named.acquire_pipeline(*ctx);
+    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::float_specials::named_specials>();
+    auto const values = ctx->persistent.create_buffer_from_data(
+        cc::vector<float>::create_defaulted(4), sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
+
+    auto cmd = ctx->create_command_list();
+    auto const group = ctx->transient.create_binding_group(
+        *cmd, layout, shaders::float_specials::named_specials{.values = values.as_readwrite_buffer()});
+    cmd->compute.bind_pipeline(*pipeline);
+    cmd->compute.bind_group(0, *group);
+    cmd->compute.dispatch_threads(1);
+    auto const back = cmd->download.data_from_buffer(values);
+    ctx->submit_command_list(cc::move(cmd));
+
+    auto const got = co_await back.data();
+    REQUIRE(got.size() == 4);
+    CHECK(cc::is_nan(got[0])).dump("bits", cc::bit_cast<u32>(got[0]));
+    CHECK(cc::bit_cast<u32>(got[1]) == 0x7f800000u);
+    CHECK(cc::bit_cast<u32>(got[2]) == 0xff800000u);
+    CHECK(got[3] == 7.0f);
+}

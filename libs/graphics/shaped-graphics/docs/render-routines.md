@@ -32,7 +32,7 @@ It carries the context, the generation this run belongs to, and the two things a
   The tick's budget is checked between routines, so a phase that knows its work is chunky awaits this between chunks and becomes pacable.
 
 A failed shader is a **verdict this routine reports**, not an error to propagate.
-So a phase awaits it with `cc::async_settled` and calls `fail_init()` — see [Readiness](#readiness-and-what-a-routine-reports) below.
+So a phase awaits it with `cc::async_settled` and calls `fail_init(scope)` — see [Readiness](#readiness-and-what-a-routine-reports) below.
 `co_await` on its own short-circuits, which is right for work whose failure really is this phase's failure.
 
 The customary call shape is a **static `execute()`** taking the command list, opening with `try_acquire` / `try_acquire_exclusive` and branching once:
@@ -65,7 +65,7 @@ protected:
         auto const* const compiled = shader->try_value();
         if (compiled == nullptr)
         {
-            fail_init();                                // failed, not pending — a caller can tell the two apart
+            fail_init(scope);                           // failed, not pending — a caller can tell the two apart
             co_return;
         }
 
@@ -228,7 +228,8 @@ There is deliberately **no `operator bool`**, so a call site says which one it i
 - **pending** — still building; come back after another tick.
 - **ready** — every phase ran at the current reload generation, and so did every routine in its token subtree.
 - **failed** — initialization will not succeed until something changes (a reload, an eviction).
-  A phase says so with `fail_init()`, or by failing its node.
+  A phase says so with `fail_init(scope)`, or by failing its node.
+  The failure is that run's, so a phase a reload abandoned cannot fail the run that replaced it.
 
 "Still compiling" and "will never compile" produce the same answer to a caller that only draws, and collapsing them is how a broken shader becomes a black rectangle that reports nothing.
 The common branch is the same either way, so the third state costs nothing at the sites that ignore it, and it is the difference between a failure a test can assert on and one a person has to notice.

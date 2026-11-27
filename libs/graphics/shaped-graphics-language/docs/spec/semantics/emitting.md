@@ -45,6 +45,7 @@ Back to the [semantics](_index.md); the reasons are in [why/emitting.md](why/emi
   And it is `wgsl` against `shader_int64`, `shader_f64` and `shader_int64_atomics`, which no WebGPU has.
   It is `wgsl` against `vertex_pipeline_stores` too, which only a native vertex stage needs there, since WebGPU draws the others as compute (CHK-531).
   It is `wgsl` and `msl` against `readwrite_norm16_image_formats`, a `mut` image of a 16-bit normalized format, whose read-write tiers 2 both leave the six out.
+  It is `wgsl` against `early_depth_test`, a pixel stage whose early tests change a result, since WGSL has no such attribute (CHK-567).
   `ray_query` is none of them: WGSL writes a trace's emulated form (EMIT-135).
   The shader chose it by `require`, so a portable shader still meets EMIT-13's promise.
 * **EMIT-66** A tree that is not core is the error `not-core`, and its detail names the first node that offends.
@@ -168,6 +169,16 @@ const light_kind_sun: i32 = 2;
 * **EMIT-25** What an edge struct is comes from where it stands in the signature, by the table below.
 * **EMIT-26** Member order is the address: the **location** of a member is its position among the members that carry no `@position`.
 * **EMIT-27** A member with `@position` is `SV_Position` in HLSL and `@builtin(position)` in WGSL, and it takes no location.
+* **EMIT-290** A `@clip_distances` field (CHK-571) is the target's clip distances, in lane order ([why](why/emitting.md#emit-290)).
+  It is written alike on each of CHK-571's stages: a vertex or a domain stage's output, each vertex a geometry stage appends, and each vertex a mesh stage writes.
+  HLSL writes it a lane at a time, `float planes_0 : SV_ClipDistance0` to `SV_ClipDistanceN-1`.
+  DXC packs those into the rows a `float4` and the rest take, and concatenates them into one `ClipDistance` array for vulkan.
+  A native route declares what that text compiles to: on DXIL a signature element of the system value `ClipDistance` per lane, packed as EMIT-235 packs a system value.
+  As DXC packs them, the lanes share a row with lanes alone, whatever ordinary member leaves room in a row before them.
+  On SPIR-V it is one `Output` variable of `float[N]` decorated `BuiltIn ClipDistance`, with the capability `ClipDistance`.
+  A mesh stage's is that array per vertex, `float[N][V]` for `V` vertices, and a lane written is `[vertex][lane]`.
+  MSL writes the field `float planes [[clip_distance]] [N];`, filled a lane at a time, in a mesh stage's vertex too.
+  WGSL writes `@builtin(clip_distances) planes: array<f32, N>` behind `enable clip_distances;`.
 * **EMIT-28** A member of a vertex input at location i has the dx12 semantic of its name in upper case, `[[vk::location(i)]]` in vulkan, and `@location(i)` in WGSL.
   A name that ends in a digit gets a `_` after it, `uv1` -> `UV1_`, since HLSL reads a trailing number as the semantic's index.
   A semantic an earlier member of the struct took, ignoring case, gets a `_` after it until it is its own: `uv1` then `uv1_` is `UV1_` then `UV1__`.
@@ -310,6 +321,8 @@ A binding that is not `@inline` is a group.
 * **EMIT-97** A texture, an image and a sampler member are each one global minted as a buffer's is, by EMIT-85, and each has its target's own type by the table below.
 * **EMIT-98** `hlsl-vulkan` states an image's format as `[[vk::image_format]]`, in DXC's spelling, which DXC makes a typed image of.
   `hlsl-dx12` states none, since dx12 takes the format from the view, and neither does `bgra8_unorm` on vulkan, which SPIR-V has no name for.
+  SGL's own SPIR-V writes that one's format `Unknown`, with `StorageImageWriteWithoutFormat` where the entry point stores to it and `StorageImageReadWithoutFormat` where it reads it.
+  Its own DXIL writes it as it writes any other float format, a UAV of `F32`.
 * **EMIT-280** HLSL's texel of a 16-bit normalized image says its normalization, `RWTexture2D<unorm float2>` and `RWTexture2D<snorm float4>`, on both HLSL targets ([why](why/emitting.md#emit-280)).
   SGL's own DXIL states the view's component type as DXC does of that text, `UNormF32` or `SNormF32`, and its own SPIR-V names the format as `[[vk::image_format]]` does.
   Every other format's texel is its plain type.
@@ -339,6 +352,7 @@ A binding that is not `@inline` is a group.
 * **EMIT-133** A file-scope sampler the entry point's code reaches is one global named as the sampler is, and one the code does not reach is not declared.
   Its index i is its position among every file-scope sampler the program and the modules it uses declare, in declaration order with the modules' files first.
   So every entry point and every stage states the same one, and a module's is described to the host beside the program's, by its qualified name.
+  Under a link, the group's numbering ([LINK-6](linking.md#the-numbering)) replaces the program's.
   It stands where sg binds a pipeline layout's static sampler of index i: `register(s<i>, space10)` in `hlsl-dx12`, and `[[vk::binding(i + 1, 3)]]` in `hlsl-vulkan`.
   WGSL writes it as `@group(3) @binding(i + 1)`, since binding 0 of sg's own group is the inline constants', and MSL as the entry point's parameter `sampler name [[sampler(i)]]`.
   A ray-tracing stage's is a `constexpr sampler` of its settings in MSL instead, since a visible or an intersection function has no sampler slot to read.
@@ -395,7 +409,11 @@ binding affine:
   Only where the read stands outside every loop, and the argument is stable: literals, immutable locals and pure operations over them, which nothing the body writes can change.
   So `max(v, 0.0)` of a generic reads as the vector call it inlines to, `max(a * b, float3(0.0))`, rather than binding `a * b` first.
 * **EMIT-49** A float literal is the shortest decimal text that reads back as its value, always with a decimal point, and without a suffix.
-* **EMIT-50** A literal that is infinite or not a number is `non-finite-literal`.
+* **EMIT-50** A literal is finite, since CHK-312 refuses a constant that arithmetic makes non-finite, and a non-finite value is a named constant, which EMIT-287 writes.
+* **EMIT-287** A non-finite constant (CHK-563) is written through its bits on every target, at each use, a module `const` holding one included ([why](why/emitting.md#emit-287)).
+  HLSL writes `asfloat(0x7fc00000u)`, `asfloat16(uint16_t(0x7e00u))` and `asdouble(0x00000000u, 0x7ff80000u)`, and MSL `as_type<float>(0x7fc00000u)` and `as_type<half>(ushort(0x7e00))`.
+  WGSL calls a helper EMIT-102 declares once per bit pattern, which holds the bits in a `let` and returns their `bitcast`, `bitcast<f32>(bits)` or a half's `bitcast<vec2<f16>>(bits).x`.
+  SGL's own DXIL and SPIR-V write a constant of the bits, which both take in any pattern.
 * **EMIT-51** An `@operator` builtin is its operator: `+`, `-`, `*`, `/`, `%`, the six comparisons, and the prefix `-`; the products of a matrix are EMIT-43.
   Parentheses follow the tree, and an operand of equal precedence on the right keeps them.
 * **EMIT-125** An operand of `&`, `|`, `^`, `<<` or `>>` is parenthesized unless it is a name, a call, a literal or a prefix expression, since WGSL takes nothing else there.
@@ -438,6 +456,8 @@ binding affine:
   On dx12 a pixel stage writing `.greater_equal` or `.less_equal` takes its `@position` as `noperspective centroid`, which DXIL requires of one.
 * **EMIT-117** A `discard` is `discard;` in HLSL and WGSL, and `discard_fragment();` in MSL.
   HLSL's goes on as a helper rather than ending the function, so an entry point with a value whose path may end in one ends in `return (T)0;`, which only such a path reaches, past all its work.
+* **EMIT-289** `@early_depth_test` (CHK-564) is `[earlydepthstencil]` in HLSL and `[[early_fragment_tests]]` on MSL's fragment function, and WGSL writes nothing (CHK-567).
+  A native route states it as DXC compiles the attribute: the `ForceEarlyDepthStencil` shader flag on DXIL, and `OpExecutionMode EarlyFragmentTests` on SPIR-V.
 * **EMIT-124** A float `%` is `fmod(a, b)` in MSL, which has no `%` of floats; HLSL's and WGSL's `%` of floats already mean EVAL-83's remainder.
 * **EMIT-263** A signed integer `%` is `a - (a / b) * b` wherever it becomes SPIR-V, since Vulkan leaves `OpSRem` undefined for a negative operand and defines `OpSDiv`.
   The native route writes those three operations, and HLSL for vulkan calls the helper `sgl_srem<T>`; every other target's `%` already means EVAL-83's remainder.
@@ -578,6 +598,12 @@ fn main_ps(p: pixel_input) -> target_ {
   An `affine3` is a value of three rows, and GPU memory holds one as EMIT-259 writes it.
   A query of an entry point that states opacity micromaps is EMIT-184's.
   What is undefined on one way into a merge takes the other way's value, since DXIL's validator refuses `undef` in a `select`.
+* **EMIT-288** A native route lowers `|` and `&` of `ray_flags` as an `int`'s `bit_or` and `bit_and`, whether their operands are constant or not ([why](why/emitting.md#emit-288)).
+  It lowers `flags.has(f)` as `(flags & f) == f`.
+  A trace hands its flags to the target as the value, a run-time operand on every target.
+  Those are `dx.op.traceRay`'s and `OpTraceRayKHR`'s for a pipeline trace, and `rayQuery_TraceRayInline`'s and `OpRayQueryInitializeKHR`'s for an inline one.
+  A query whose flags are no constant is allocated with none, as EMIT-159's template is `RAY_FLAG_NONE`: `dx.op.allocateRayQuery` with 0.
+  What EMIT-184 says of such a query holds on both routes: on vulkan it states the micromap capability, and under dx12's `nvapi` fill it is `unsupported`.
 * **EMIT-244** A ray-tracing stage of a native route is one entry point of its target's own, so a pipeline may take each stage from either route.
   A payload, a callable's parameter and a hit's attributes are each one variable of the stage, and a trace or a call copies into a variable of the caller's, one per type, and back.
   An any hit's decision ends the stage: `OpIgnoreIntersectionKHR` or `OpTerminateRayKHR`, `dx.op.ignoreHit` or `dx.op.acceptHitAndEndSearch`.
@@ -599,6 +625,17 @@ fn main_ps(p: pixel_input) -> target_ {
   On DXIL it is a value of `%dx.types.HitObject`, from `hitObject_TraceRay`, at Shader Model 6.9.
   A trace with `reorder` is that, `maybeReorderThread` and `hitObject_Invoke`, and `maybe_reorder` regroups a `hitObject_MakeNop`.
   A regrouping with no hint states an undefined hint of 0 bits, as DXC's does.
+* **EMIT-292** After each call point, a native route computes again a value it would keep across it that reads nothing a call can change ([why](why/emitting.md#emit-292)).
+  A call point is a trace, a callable call, a reported hit, a hit object's trace or invocation, and a regrouping.
+  Such a value reads only constant blocks, the launch's index and size, and constants, through arithmetic, comparisons, conversions, `select`s, composites and addresses into memory.
+  A use the walk from the value can reach past a call point reads a copy of the value's whole chain, at the start of its block's stretch between two call points; one copy serves that stretch.
+  What the shader or a called shader can write is read where the source reads it, never again: a writable buffer, a payload, a callable's parameter.
+  A phi and a resource handle stay as they are, and so does a read of a buffer the shader cannot write, as DXC's DXIL keeps them.
+  On DXIL a copy reads its constants with a `cbufferLoadLegacy` of its own and the launch with a `dispatchRaysIndex` or `dispatchRaysDimensions` of its own.
+  On SPIR-V it reads each with an `OpLoad` of its own.
+  The DXIL writer's own sharing joins no read ahead of a call point with one after it, but what one stretch reads twice it reads once.
+  Asked for `full`, a copy states again each variable that names its value, at the copy, as EMIT-267 has a variable follow its value.
+  It does so only where the variable holds that value on every way from its debug value to the copy; one given another value on any way between keeps that one.
 * **EMIT-247** A native route's atomic on a 64-bit integer is its target's own, as an `i32` one is.
   On DXIL it is the `i64` form of `dx.op.atomicBinOp` and `dx.op.atomicCompareExchange` on a buffer, and an `atomicrmw` or `cmpxchg` of `i64` in workgroup memory.
   A resource it reaches carries Atomic64Use in its metadata, and `PSV0` flags it `UsedByAtomic64`, since the validator compares the two.
@@ -609,6 +646,17 @@ fn main_ps(p: pixel_input) -> target_ {
   A shuffle by an offset reads `waveReadLaneAt` at the lane it computes from `waveGetLaneIndex`, as EMIT-146's text does.
   An inclusive sum or product is `wavePrefixOp` and then this invocation's own value folded in, since DXIL's prefix is exclusive alone.
   A ballot is `waveActiveBallot`'s four words, a quad swap `quadOp` of its axis, and a quad broadcast `quadReadLaneAt`.
+* **EMIT-291** A loop written `@unroll(false)` (CHK-414) reaches both native routes, as HLSL's `[loop]` reaches DXC's ([why](why/emitting.md#emit-291)).
+  DXIL attaches `!llvm.loop` to every branch that goes back to the loop's header, a distinct node of the loop's own naming `llvm.loop.unroll.disable`, as DXC's compile of `[loop]` does.
+  SPIR-V states `DontUnroll` as the loop control of the loop's `OpLoopMerge`, which SPIR-V 1.0 has.
+* **EMIT-293** DXIL holds a variable, workgroup memory or a table holding an array of structs, vectors or matrices as DXC does ([why](why/emitting.md#emit-293)).
+  That is one array per scalar field and lane.
+  Each such array holds that leaf of every element, in order, so an index known at run time alone steps it by one element's share of it.
+  A member that is an array is a dimension of its leaves' arrays, and so is a vector or a matrix that one of the variable's indices picks a lane of at run time.
+  Anything else is one array per scalar type it holds, laid out as the value is.
+  SPIR-V keeps the variable's own type, as DXC's SPIR-V does, and the driver splits it.
+  A loop nested in it, or around it, asks nothing unless it is written so too.
+  A loop that asks nothing carries no metadata on DXIL and `None` on SPIR-V, an unrolled one past CHK-389's limit among them.
 * **EMIT-285** DXIL branches on what a `not` negates, with the branch's two ways swapped, as DXC writes it.
   AMD's D3D12 driver takes the compared value on the wrong side of a branch on a negated equality.
   [amd-d3d12-negated-equality-branch-substitutes-constant](../../../../../../docs/bugs-external/amd-d3d12-negated-equality-branch-substitutes-constant/readme.md) reproduces it.
@@ -1171,7 +1219,7 @@ The C++ struct a package generates is that layout byte for byte, padding include
 | `layout-mismatch` | none: retired by EMIT-41 |
 | `layout-conflict` | EMIT-114 |
 | `padding-forbidden` | EMIT-115 |
-| `non-finite-literal` | EMIT-50 |
+| `non-finite-literal` | none: retired by EMIT-287 |
 | `malformed-tree` | a flat tree the check pass does not produce |
 | `not-core` | EMIT-66 |
 | `too-many-groups` | EMIT-105 |
@@ -1179,6 +1227,7 @@ The C++ struct a package generates is that layout byte for byte, padding include
 | `too-many-acceleration-structures` | EMIT-135 |
 | `ray-data-conflict` | EMIT-139 |
 | `flattened-for-another-target` | EMIT-283 |
+| `unnumbered` | [LINK-6](linking.md#the-numbering) |
 | `target-lacks-feature` | EMIT-109, EMIT-122, EMIT-206, EMIT-261 |
 
 ## Open

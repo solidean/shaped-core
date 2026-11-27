@@ -1453,6 +1453,7 @@ cc::demangle_symbol(symbol)                        // cc::string — human-reada
 #include <clean-core/platform/file_path.hh>       // where scratch files go, and how to unmake one
 cc::temp_directory_path();                          // cc::string — no trailing separator; "." where none is named
 cc::temp_file_path(prefix, suffix = "");            // "<temp>/<prefix>-<pid>-<counter><suffix>" — CREATES NOTHING
+cc::user_config_directory_path();                   // optional<string> — %APPDATA%, ~/Library/Application Support, $XDG_CONFIG_HOME or ~/.config
 cc::remove_file(path);                              // true == gone, which includes never having been there
                                                     // NOT a filesystem layer: no mkdir, no iteration, no metadata,
                                                     // no path arithmetic. Reading and writing are the file streams'.
@@ -1624,7 +1625,7 @@ cc::span_read_stream_adapter(bytes);  cc::span_write_stream_adapter(buf);  cc::s
 
 #include <clean-core/streams/growing_stream.hh> // owning, GROWING in-memory sinks (seekable; unbounded)
 cc::vector_write_stream_adapter(initial = {});  cc::string_write_stream_adapter(initial = {});
-adapter.take();                           // -> the cc::vector<byte> / cc::string; flush (or destroy) the stream FIRST
+adapter.take();                           // -> the cc::vector<byte> / cc::string; flush the stream FIRST
 // The window IS the container's spare capacity, so a flush copies nothing and take() hands back the bytes in place.
 // Neither movable nor copyable: the adapter is the stream's context.
 
@@ -1635,6 +1636,8 @@ cc::file_write_stream_adapter::open(path);       // -> result<...>  keep content
 cc::file_write_stream_adapter::append(path);     // -> result<...>  window starts at EOF; writing grows the file
 cc::file_read_write_stream_adapter::open(path);  // -> result<...>  existing file, read + overwrite + grow-while-writing
 adapter.stream();                         // -> the natural seekable_* stream (or implicit conversion, incl. non-seekable)
+s.flush();                                // BEFORE the stream or adapter dies: NOTHING flushes on destruction,
+                                          // and an unflushed file ends short, on a buffer boundary
 // Growth: create/open/append differentiate write intent; a read_write stream grows too (write past EOF,
 // including a fresh seek-to-end + write) — it tracks the read boundary and write capacity as separate ends.
 

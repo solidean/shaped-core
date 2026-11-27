@@ -100,7 +100,7 @@ cc::shared_async<cc::unit> nrd_denoise_routine::init(sg::routine_init_scope scop
     auto const* const resolve_compiled = resolve_shader->try_value();
     if (repack_compiled == nullptr || resolve_compiled == nullptr)
     {
-        fail_init();
+        fail_init(scope);
         co_return;
     }
 
@@ -113,7 +113,7 @@ cc::shared_async<cc::unit> nrd_denoise_routine::init(sg::routine_init_scope scop
     }();
     if (repack_constants == nullptr)
     {
-        fail_init(); // a shader that reflects no constants block cannot be driven
+        fail_init(scope); // a shader that reflects no constants block cannot be driven
         co_return;
     }
 
@@ -134,7 +134,7 @@ cc::shared_async<cc::unit> nrd_denoise_routine::init(sg::routine_init_scope scop
     auto const* const resolve_built = resolve_pipeline->try_value();
     if (repack_built == nullptr || resolve_built == nullptr)
     {
-        fail_init();
+        fail_init(scope);
         co_return;
     }
 

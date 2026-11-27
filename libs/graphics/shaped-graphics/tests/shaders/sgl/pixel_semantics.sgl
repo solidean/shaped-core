@@ -361,3 +361,77 @@ pipeline lod_query:
     pixel = lod_ps
     cull = .none
     format = .rgba32_float
+
+// The depth test before a stage that writes memory: with `@early_depth_test` a pixel that fails it runs none of the
+// stage, and without it the stage runs, writes, and the test then drops its color (CHK-564, CHK-567).
+binding early_counts:
+    counted: mut buffer[atomic[uint]]
+
+@early_depth_test
+@pixel fun counted_early_ps(p: tagged){early_counts} -> tag_target:
+    require early_depth_test
+    early_counts.counted[0].add(1u)
+    return {value = float4(p.tag as float, 0.0, 0.0, 1.0)}
+
+@pixel fun counted_late_ps(p: tagged){early_counts} -> tag_target:
+    early_counts.counted[1].add(1u)
+    return {value = float4(p.tag as float, 0.0, 0.0, 1.0)}
+
+pipeline counted_early:
+    vertex = tagged_vs
+    pixel = counted_early_ps
+    cull = .none
+    format = .rgba32_float
+    depth_test = true
+    depth_compare = .less
+    depth_stencil_format = .depth32_float
+
+pipeline counted_late:
+    vertex = tagged_vs
+    pixel = counted_late_ps
+    cull = .none
+    format = .rgba32_float
+    depth_test = true
+    depth_compare = .less
+    depth_stencil_format = .depth32_float
+
+// Clip distances (CHK-571, EMIT-290): six lanes, the last of which is the vertex's x in clip space, so the rasterizer
+// keeps the right half of what is drawn; the other five are 1 and keep everything.
+struct clipped:
+    @position position: hpos4
+    @clip_distances planes: float[6]
+
+@vertex fun clipped_vs(v: tagged_corner) -> clipped:
+    require clip_distances
+    // the tag is 0 here, and read so the vertex attribute it is in is consumed
+    let mut planes = float[6].filled(1.0 + (v.tag as float))
+    planes[5] = v.position.x
+    return {position = hpos4(v.position.x, v.position.y, v.depth, 1.0), planes = planes}
+
+@pixel fun clipped_ps(p: clipped) -> tag_target:
+    return {value = float4(1.0, 0.0, 0.0, 1.0)}
+
+pipeline clipped_draw:
+    vertex = clipped_vs
+    pixel = clipped_ps
+    cull = .none
+    format = .rgba32_float
+
+// A member after the clip distances, which the pixel stage reads although its link leaves the distances out.
+struct clipped_tagged:
+    @position position: hpos4
+    @clip_distances planes: float[2]
+    @interpolate(.flat) tag: int
+
+@vertex fun clipped_tagged_vs(v: tagged_corner) -> clipped_tagged:
+    require clip_distances
+    return {position = hpos4(v.position.x, v.position.y, v.depth, 1.0), planes = float[2].filled(1.0), tag = v.tag}
+
+@pixel fun clipped_tagged_ps(p: clipped_tagged) -> tag_target:
+    return {value = float4(p.tag as float, 0.0, 0.0, 1.0)}
+
+pipeline clipped_tagged_draw:
+    vertex = clipped_tagged_vs
+    pixel = clipped_tagged_ps
+    cull = .none
+    format = .rgba32_float

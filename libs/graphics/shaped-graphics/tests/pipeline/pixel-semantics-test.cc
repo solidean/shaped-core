@@ -864,3 +864,127 @@ ASYNC_INVOCABLE_TEST("sg - one draw of two views renders each into its own layer
     CHECK(texel(view_0, 1, 1) == tg::vec4f(7, 0, 0, 1));
     CHECK(texel(view_1, 1, 1) == tg::vec4f(17, 1, 0, 1));
 }
+
+ASYNC_INVOCABLE_TEST("sg - an SGL pixel stage with @early_depth_test runs for no pixel that fails the depth test",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::early_depth_test))
+        SKIP("this context runs no depth test before a pixel stage that writes memory");
+
+    // A 4 x 4 target whose depth is cleared to 0.5, and a rect over it at 0.75, which the `less` test fails everywhere.
+    // The early stage counts no pixel; the late one runs for all 16, since a stage that writes memory is tested after.
+    constexpr int side = 4;
+    auto vertices = cc::vector<corner>();
+    push_rect(vertices, tg::vec4f(-1, -1, 1, 1), 0.75f, 1);
+    auto const buffer = ctx->persistent.create_buffer_from_data(cc::move(vertices), sg::buffer_usage::vertex_buffer);
+    auto const early = co_await ctx->cached.acquire_raster_pipeline(shaders::pixel_semantics::counted_early);
+    auto const late = co_await ctx->cached.acquire_raster_pipeline(shaders::pixel_semantics::counted_late);
+    // a buffer each, so the second draw waits on no barrier for the first's writes
+    auto const make_counts = [&]
+    {
+        return ctx->persistent.create_buffer_from_data(cc::vector<u32>::create_defaulted(2),
+                                                       sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
+    };
+    auto const early_counts = make_counts();
+    auto const late_counts = make_counts();
+    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::pixel_semantics::early_counts>();
+    auto const early_group = ctx->persistent.create_binding_group(
+        layout, shaders::pixel_semantics::early_counts{.counted = early_counts.as_readwrite_buffer()});
+    auto const late_group = ctx->persistent.create_binding_group(
+        layout, shaders::pixel_semantics::early_counts{.counted = late_counts.as_readwrite_buffer()});
+
+    auto const pixels = co_await sg_test::draw_offscreen(*ctx,
+                                                         {.width = side,
+                                                          .height = side,
+                                                          .colors = {sg::pixel_format::rgba32_float},
+                                                          .depth_stencil = sg::pixel_format::depth32_float,
+                                                          .target_set = shaders::pixel_semantics::tag_target::name,
+                                                          .clear_depth = 0.5f},
+                                                         [&](sg::rendering_scope& scope)
+                                                         {
+                                                             scope.bind_pipeline(*early);
+                                                             scope.bind_group(0, *early_group);
+                                                             scope.bind_vertex_buffer(buffer.as_vertex_buffer());
+                                                             scope.draw({.vertex_range = {.offset = 0, .size = 6}});
+                                                             scope.bind_pipeline(*late);
+                                                             scope.bind_group(0, *late_group);
+                                                             scope.bind_vertex_buffer(buffer.as_vertex_buffer());
+                                                             scope.draw({.vertex_range = {.offset = 0, .size = 6}});
+                                                         });
+    auto cmd = ctx->create_command_list();
+    auto const early_back = cmd->download.data_from_buffer(early_counts);
+    auto const late_back = cmd->download.data_from_buffer(late_counts);
+    ctx->submit_command_list(cc::move(cmd));
+    auto const early_got = co_await early_back.data();
+    auto const late_got = co_await late_back.data();
+    REQUIRE(early_got.size() == 2);
+    REQUIRE(late_got.size() == 2);
+    CHECK(early_got[0] == 0u);
+    CHECK(late_got[1] == u32(side * side));
+    // neither draw passed the test, so no color reached the target
+    CHECK(pixels[0].rgba_float(1, 1) == tg::vec4f(0, 0, 0, 0));
+}
+
+ASYNC_INVOCABLE_TEST("sg - an SGL vertex stage's clip distances cut what the rasterizer draws",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::clip_distances))
+        SKIP("this context clips by no distance a vertex stage writes");
+
+    // a rect over a 4 x 1 target, whose sixth clip distance is x: the two pixels left of the centre are cut away
+    auto vertices = cc::vector<corner>();
+    push_rect(vertices, tg::vec4f(-1, -1, 1, 1), 0.5f, 0);
+    auto const buffer = ctx->persistent.create_buffer_from_data(cc::move(vertices), sg::buffer_usage::vertex_buffer);
+    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::pixel_semantics::clipped_draw);
+    auto const pixels = co_await sg_test::draw_offscreen(*ctx,
+                                                         {.width = 4,
+                                                          .height = 1,
+                                                          .colors = {sg::pixel_format::rgba32_float},
+                                                          .target_set = shaders::pixel_semantics::tag_target::name,
+                                                          .clear_color = tg::vec4f(-1, -1, -1, -1)},
+                                                         [&](sg::rendering_scope& scope)
+                                                         {
+                                                             scope.bind_pipeline(*pipeline);
+                                                             scope.bind_vertex_buffer(buffer.as_vertex_buffer());
+                                                             scope.draw({.vertex_range = {.offset = 0, .size = 6}});
+                                                         });
+    for (auto x = 0; x < 4; ++x)
+        CHECK(pixels[0].rgba_float(x, 0) == (x < 2 ? tg::vec4f(-1, -1, -1, -1) : tg::vec4f(1, 0, 0, 1)))
+            .context(cc::format("pixel {}", x));
+}
+
+ASYNC_INVOCABLE_TEST("sg - an SGL pixel stage reads the link member after the vertex stage's clip distances",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::clip_distances))
+        SKIP("this context clips by no distance a vertex stage writes");
+
+    auto vertices = cc::vector<corner>();
+    push_rect(vertices, tg::vec4f(-1, -1, 1, 1), 0.5f, 7);
+    auto const buffer = ctx->persistent.create_buffer_from_data(cc::move(vertices), sg::buffer_usage::vertex_buffer);
+    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::pixel_semantics::clipped_tagged_draw);
+    REQUIRE(pipeline != nullptr);
+    auto const pixels = co_await sg_test::draw_offscreen(*ctx,
+                                                         {.width = 4,
+                                                          .height = 1,
+                                                          .colors = {sg::pixel_format::rgba32_float},
+                                                          .target_set = shaders::pixel_semantics::tag_target::name,
+                                                          .clear_color = tg::vec4f(-1, -1, -1, -1)},
+                                                         [&](sg::rendering_scope& scope)
+                                                         {
+                                                             scope.bind_pipeline(*pipeline);
+                                                             scope.bind_vertex_buffer(buffer.as_vertex_buffer());
+                                                             scope.draw({.vertex_range = {.offset = 0, .size = 6}});
+                                                         });
+    for (auto x = 0; x < 4; ++x)
+        CHECK(pixels[0].rgba_float(x, 0) == tg::vec4f(7, 0, 0, 1)).context(cc::format("pixel {}", x));
+}

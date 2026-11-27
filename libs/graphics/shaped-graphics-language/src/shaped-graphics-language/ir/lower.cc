@@ -70,6 +70,13 @@ void lowering::set_merge(merge_kind kind, block_ref merge, block_ref continue_to
     b.merges = kind;
     b.merge = merge;
     b.continue_to = continue_to;
+    b.hint = kind == merge_kind::loop ? loop_hint::plain : loop_hint::none;
+}
+
+void lowering::hint_loop(check::label_id label)
+{
+    if (check::is_valid(label) && _e.labels[index_of(label)].is_rolled)
+        _out.blocks[isize(_open)].hint = loop_hint::rolled;
 }
 
 value_ref lowering::add(op code, type_ref type, cc::span<u32 const> operands, u8 sub, u8 aux)
@@ -302,6 +309,7 @@ void lowering::run()
     _out.reorders_through_nvapi = _plan.reorders_through_nvapi;
     _out.draw_start_in_root_constants = _plan.draw_start_in_root_constants;
     _out.maximally_reconverges = _e.maximally_reconverges;
+    _out.early_depth_test = _e.entry_stage == check::stage::pixel && _e.is_early_depth_test;
 
     open_block(new_block());
     if (is_raster)
@@ -437,6 +445,7 @@ void lowering::loop_(flat_loop const& s)
 
     open_block(header);
     set_merge(merge_kind::loop, merge, next);
+    hint_loop(s.label);
     branch(body);
 
     _breaks.push_back(merge);
@@ -463,6 +472,7 @@ void lowering::while_(flat_while const& s)
 
     open_block(header);
     set_merge(merge_kind::loop, merge, next);
+    hint_loop(s.label);
     branch(test);
 
     open_block(test);
@@ -499,6 +509,7 @@ void lowering::for_(flat_for const& s)
 
     open_block(header);
     set_merge(merge_kind::loop, merge, next);
+    hint_loop(s.label);
     branch(test);
 
     open_block(test);
@@ -531,6 +542,8 @@ void lowering::once_(flat_once const& s)
 
     open_block(header);
     set_merge(merge_kind::loop, merge, next);
+    // it runs one time, so it asks nothing of unrolling, and a header of none never keeps another loop's header apart
+    _out.blocks[isize(_open)].hint = loop_hint::none;
     branch(body);
 
     // a `continue` never crosses it in a core tree, so only a `break` reaches it

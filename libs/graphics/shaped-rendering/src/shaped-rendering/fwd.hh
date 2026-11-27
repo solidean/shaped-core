@@ -131,11 +131,32 @@ struct mouse_wheel_event;
 struct file_drop_event;
 enum class gamepad_button : u8;
 enum class gamepad_axis : u8;
+enum class gamepad_kind : u8;
+enum class gamepad_face : u8;
+enum class gamepad_button_label : u8;
 struct gamepad_connection_event;
 struct gamepad_button_event;
 struct gamepad_axis_event;
 struct gamepad_state;
 struct input_event;
+
+// Semantic actions bound to real inputs (see input_map.hh).
+class input_map;
+struct input_map_config;
+struct input_action;
+enum class input_action_kind : u8;
+struct input_binding;
+struct key_binding;
+struct mouse_button_binding;
+struct mouse_wheel_binding;
+struct mouse_motion_binding;
+struct gamepad_button_binding;
+struct gamepad_axis_binding;
+struct gamepad_stick_binding;
+enum class wheel_direction : u8;
+enum class gamepad_stick : u8;
+enum class input_device_kind : u8;
+struct input_device;
 
 // Dear ImGui, drawn through sg.
 // imgui_context owns the ImGui context and the frame bracket;

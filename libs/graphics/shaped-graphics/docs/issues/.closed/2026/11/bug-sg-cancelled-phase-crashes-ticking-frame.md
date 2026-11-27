@@ -4,6 +4,8 @@ tags: [routine, async]
 refs:
   - file: libs/graphics/shaped-graphics/src/shaped-graphics/routine/routine_registry.cc
   - test: "sg - a routine cancelled at its own generation is not restarted"
+closed: 2026-11-27
+resolution: obsolete
 ---
 
 # A routine phase that ends cancelled crashes the process when the tick runs in a test's own frame
@@ -25,5 +27,8 @@ The test above ticks inside its own node as a workaround; ticking from its body 
   Alone it passed ten runs in a row.
 - **2026-11-13: that flake was another test's routine, not this one's.**
   A routine a test left pending had its phase started by the next test's first tick, and billed to it.
-  [bug-sg-routine-tests-leave-async-work](.closed/2026/11/bug-sg-routine-tests-leave-async-work.md) has the fix.
+  [bug-sg-routine-tests-leave-async-work](bug-sg-routine-tests-leave-async-work.md) has the fix.
   The crash this issue is about is untouched by it.
+- **2026-11-27: no longer reproduces.**
+  With the test ticking from its own body, as this issue says reproduces it, 40 repeats and five runs of the routine file passed on every backend of an Arc B580.
+  The change that fixed it was not found; the test now ticks from its own frame, as `sv::viewer::begin_frame` does, so a return of the crash fails it.

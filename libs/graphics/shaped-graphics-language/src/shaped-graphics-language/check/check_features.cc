@@ -110,6 +110,22 @@ void checker::judge_entry_features(symbol_id id)
     };
     if (info.entry_stage == stage::vertex && has_viewport(info.result))
         needed.set(feature::multi_viewport);
+    // CHK-575: the stage that writes clip distances needs the device to clip by them: a vertex or an evaluation stage
+    // in what it returns, a geometry stage in what it appends, a mesh stage in what it writes
+    auto const set_clip = [&](type_id type)
+    {
+        if (!is_valid(type) || out.at(type).kind != type_kind::structure)
+            return;
+        for (auto const& m : out.at(out.at(type).members))
+            if (m.is_clip_distances)
+                needed.set(feature::clip_distances);
+    };
+    if (info.entry_stage == stage::vertex || info.entry_stage == stage::tessellation_evaluation)
+        set_clip(info.result);
+    if (info.entry_stage == stage::geometry || info.entry_stage == stage::mesh)
+        for (auto const& parameter : out.at(info.parameters))
+            if (out.at(parameter.type).kind == type_kind::stream)
+                set_clip(out.at(parameter.type).element);
     if (info.entry_stage == stage::pixel)
         for (auto const& parameter : out.at(info.parameters))
             if (parameter.input == stage_input::none && has_viewport(parameter.type))

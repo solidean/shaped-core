@@ -240,7 +240,8 @@ binding material:
 
 * **`sampler name:` at file scope** is a static sampler of the pipeline layout, an `sg::bound_sampler`.
   Nobody binds it, so it is not listed anywhere: it joins the layout of every entry point whose inlined body uses it, and no other.
-  Its index in that layout is its position among the file's samplers, so every stage and every entry point states the same one.
+  Its index in that layout is its position among the file's samplers, so every stage and every entry point of the file states the same one.
+  A pipeline whose stages come from several files links them, and the link numbers their samplers once, for the pipeline ([LINK-3](semantics/linking.md#the-numbering)).
   A stage holds 16, so an entry point reaching one of index 16 or more is `too-many-samplers`, however few it reaches ([EMIT-133](semantics/emitting.md#bindings)).
 * **`sampler name:` inside a binding** is a static sampler of that group's layout, an `sg::named_sampler`.
   It is part of the group, and the host binds nothing for it.
@@ -353,7 +354,7 @@ An entry point must declare each of those itself: by its file, by a binding it l
 | a ray-tracing stage, a trace of a ray type, a callable's call | `sg::feature::raytracing_pipeline`, which WebGPU lacks |
 | a value of `half` or of its vectors | `sg::feature::shader_f16`, WebGPU's `shader-f16`; counted where the entry point holds one |
 | a value of `short`, `ushort` or their vectors | `sg::feature::shader_int16`, which WebGPU lacks |
-| a subgroup operation, `@subgroup_size`, `@subgroup_invocation_id` | `sg::feature::subgroups`, WebGPU's `subgroups` |
+| a subgroup operation, `@subgroup_size`, `@subgroup_invocation_id` | `sg::feature::subgroups`, WebGPU's `subgroups`; the operations but the quad ones also take the raygen, closest-hit, miss and callable stages, and a device has it only with them in every stage it runs (CHK-568) |
 | `@coherent` on a member ([Coherent memory](#coherent-memory)) | `sg::feature::device_coherence`, which WebGPU lacks |
 | `@atomic` on an image member ([Atomics](#atomics)) | `sg::feature::image_atomics`, which core WebGPU lacks |
 | `compare_exchange_strong` in a pixel stage ([Atomics](#atomics)) | `sg::feature::helper_lane_query`, which WebGPU lacks |
@@ -362,6 +363,8 @@ An entry point must declare each of those itself: by its file, by a binding it l
 | `@view_index` in a vertex or pixel stage ([CHK-437](semantics/checking.md#entry-points)) | `sg::feature::view_instancing`, which WebGPU lacks |
 | `quad_any` or `quad_all` ([CHK-533](semantics/checking.md#subgroups)) | `sg::feature::quad_control`, which WebGPU lacks |
 | a `@viewport_index` field of a vertex stage's result ([CHK-534](semantics/checking.md#entry-points)) | `sg::feature::multi_viewport`, which WebGPU lacks |
+| `@early_depth_test` on a stage that writes memory or discards ([CHK-567](semantics/checking.md#entry-points)) | `sg::feature::early_depth_test`, which WebGPU lacks |
+| a `@clip_distances` field of what the last stage before the rasterizer hands it ([CHK-575](semantics/checking.md#entry-points)) | `sg::feature::clip_distances`, WebGPU's `clip-distances` |
 
 `ray_query` and `raytracing_pipeline` are the two halves of ray tracing, and [raytracing.md](raytracing.md) says what each grants.
 A device may have either without the other, which is why they are two features.

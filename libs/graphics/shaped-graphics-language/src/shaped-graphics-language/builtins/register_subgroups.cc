@@ -362,9 +362,15 @@ void sgl::builtins::register_subgroups(registry& r)
             auto const has_helper = info.op == subgroup_op::inclusive_add || info.op == subgroup_op::inclusive_mul
                                  || info.op == subgroup_op::ballot || info.op == subgroup_op::quad_any
                                  || info.op == subgroup_op::quad_all;
+            // CHK-376: the quad operations stand in pixel and compute stages alone, since only those form quads; every
+            // other operation also takes the ray-tracing stages a pipeline's invocations run together in
+            auto const stages = is_quad_vote ? cc::string_view(".pixel")
+                              : info.name.starts_with("quad_")
+                                  ? cc::string_view(".pixel, .compute")
+                                  : cc::string_view(".pixel, .compute, .raygen, .closest_hit, "
+                                                    ".miss, .callable");
             r.add(function_record{
-                .signature = cc::format("@stages({}) fun {}({}) -> {}", is_quad_vote ? ".pixel" : ".pixel, .compute",
-                                        info.name, parameters, result),
+                .signature = cc::format("@stages({}) fun {}({}) -> {}", stages, info.name, parameters, result),
                 .doc = info.doc,
                 .evaluate = no_subgroup,
                 .write = {.kind = spelling_kind::custom,

@@ -4,6 +4,8 @@ priority: next
 refs:
   - file: libs/graphics/shaped-rendering/tests/mix-test.cc:110
   - test: sr - a mix reaches both of its endpoints exactly
+closed: 2026-11-27
+resolution: fixed
 ---
 
 # A mix at weight 1 writes the image it replaces, not the source
@@ -19,3 +21,12 @@ uv run dev.py test "sr - a mix reaches both of its endpoints exactly" --no-serve
 ```
 
 The full run that found it used seed 3942882140505140765; the single test above fails without it.
+
+## Resolution
+
+The shader was right; the test's source sat on a rounding tie.
+Format 34 is `rgb10a2_unorm`, and the source's alpha of 0.5 is 1.5 steps of its 2 bits.
+The RTX 5080 stores that tie as 1 (0.333), and `sr_test::quantized` rounds it to 2 (0.667); D3D and Vulkan leave a tie's direction to the implementation.
+The weight-1 select did write the source: 0.333 is not the destination's alpha of 1.0, it is the source's rounded down.
+Before e874302ba the check allowed a step, which hid the tie; the source's alpha is now 0.625, on no tie at any width the sweep holds.
+Not re-run on an NVIDIA GPU; the Arc B580 passes as before.

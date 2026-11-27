@@ -32,7 +32,7 @@ public:
     /// Set for a view-instanced pipeline, and for a mesh-shaded one on an Intel GPU or whose stage declares no triangles,
     /// which neither restores from a cached blob nor hands one out.
     /// D3D12 refuses a mesh-shaded pipeline's own blob unless its stream states the stage's topology, which dx12 does for triangles alone.
-    /// Once the Arc B580 restored mesh-shaded blobs, later mesh-shaded pipelines drew nothing now and then, blob or none.
+    /// On an Intel GPU a mesh pipeline built after one was restored draws nothing: docs/bugs-external/intel-d3d12-mesh-pipeline-built-after-a-restore-draws-nothing.
     /// A view-instanced blob crashes Intel's driver on a restore in another process: docs/bugs-external/intel-d3d12-view-instanced-cached-blob-crashes.
     bool skips_cached_blob = false;
     D3D12_PRIMITIVE_TOPOLOGY topology; // set on the IA at bind_pipeline (the PSO records only the family)

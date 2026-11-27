@@ -40,6 +40,12 @@ namespace sr::impl
 /// The button an SDL gamepad button names, or none for the paddles and touchpads sr does not model.
 [[nodiscard]] cc::optional<sr::gamepad_button> gamepad_button_from_sdl(u8 sdl_button);
 
+/// The make an SDL gamepad type names.
+[[nodiscard]] sr::gamepad_kind gamepad_kind_from_sdl(SDL_GamepadType type);
+
+/// The face whose south and east buttons carry the legends SDL reports for them; abxy for legends it does not know.
+[[nodiscard]] sr::gamepad_face gamepad_face_from_sdl(SDL_GamepadButtonLabel south, SDL_GamepadButtonLabel east);
+
 /// The axis an SDL gamepad axis names, or none for an invalid one.
 [[nodiscard]] cc::optional<sr::gamepad_axis> gamepad_axis_from_sdl(u8 sdl_axis);
 

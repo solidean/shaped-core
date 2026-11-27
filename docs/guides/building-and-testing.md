@@ -384,6 +384,7 @@ It is never required: where it is not installed, everything builds and tests the
   ```
 
   A project that builds on this one reads its own `dev.toml` the same way, through `dev.build_server_from_dev_toml`.
+  Its `speculative_tests` and `ship_proof` keywords are the project's defaults, and a `true` or `false` in the table overrides either for one checkout.
 - **Only the build step and the test runs move**: configure stays cmake's, and the server runs in the same developer environment dev.py builds in, which it passes to every command.
 - **When it cannot serve**, dev.py prints one warning naming the cause and how to install it, then builds as without it.
   That covers a missing client, a server that cannot be started, another protocol version, a server restarting, and a server failing on its own.
@@ -394,7 +395,7 @@ It is never required: where it is not installed, everything builds and tests the
   A failing test is a failure, never rerun without the server; `--repeat` has every binary run, whatever is stored.
 - **Background test runs are the project's choice**: with `BuildServer.speculative_tests` set, dev.py asks the server (`test --speculate`)
   to rerun the binaries it tested once the server has rebuilt them on its own after an edit, with the same arguments and environment,
-  so the next `test` finds their results stored; off by default, and a request without it withdraws it.
+  so the next `test` finds their results stored; off unless the project or the checkout turns it on, and a request without it withdraws it.
 - **Test runs writing what the server does not keep run without it**: `--sample`, `--rec`, `--profile`, `--no-xml-reports`, and cross-compiled presets.
 - **`check` and `ship` build and test through it too**, under the same rule; `check --no-server` and `ship --no-server` keep the whole gate off it.
   The gate's two single-test steps, `shader-grammar` and `ccrec-reader`, always run the plain way, the latter because it writes a fixture the gate reads next.

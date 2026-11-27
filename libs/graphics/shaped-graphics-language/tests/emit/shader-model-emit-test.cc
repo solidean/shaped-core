@@ -769,6 +769,48 @@ TEST("sgl emit - the nvapi fill of opacity micromaps refuses a trace that forces
     REQUIRE(plain.has_value()).dump("error", plain.has_error() ? plain.error() : cc::string());
 }
 
+TEST("sgl emit - a ray query's flags combined from constants are a constant, and ones combined at run time are "
+     "lowered on both routes (EMIT-184, EMIT-288)")
+{
+    auto const source = [](cc::string_view flags)
+    {
+        return cc::format("require ray_query\n"
+                          "\n"
+                          "binding work:\n"
+                          "    world: acceleration_structure[.triangles]\n"
+                          "    values: mut buffer[float]\n"
+                          "\n"
+                          "@compute(64) fun cs(@thread_id id: int3){{work}}:\n"
+                          "    let r = ray(origin = pos3(0.0, 0.0, 0.0), direction = vec3(0.0, 0.0, 1.0))\n"
+                          "    let picked = if id.x > 3 => ray_flags.cull_opaque else ray_flags.none\n"
+                          "    let flags = {}\n"
+                          "    work.values[id.x] = work.world.trace(r, c => hit_decision.ignore, flags = flags).t\n",
+                          flags);
+    };
+    // `|` of two constants folds before the nvapi fill asks whether they force 2 states
+    auto const folded = source("ray_flags.force_non_opaque | ray_flags.skip_procedural");
+    for (auto const route : k_routes)
+    {
+        auto const e = filled(folded, "cs", feature::opacity_micromap, fill::nvapi, route);
+        REQUIRE(e.has_value()).dump("error", e.has_error() ? e.error() : cc::string());
+    }
+    // flags combined at run time lower on SGL's own DXIL and SPIR-V as an int's `or`, `and` and comparison
+    auto const runtime = source("if (picked | ray_flags.force_non_opaque).has(ray_flags.cull_opaque) => picked & "
+                                "ray_flags.cull_opaque else ray_flags.force_non_opaque");
+    for (auto const t : {target::hlsl_dx12, target::hlsl_vulkan})
+    {
+        auto const e = sgl::compile_to_text(
+            {.source = runtime, .entry_point = "cs", .target = t, .native = native_route::require});
+        REQUIRE(e.has_value()).dump("target", sgl::emit::to_string(t)).dump("error", e.has_error() ? e.error() : "");
+        CHECK(e.value().text.contains("bit_or")).dump("text", e.value().text);
+        CHECK(e.value().text.contains("bit_and")).dump("text", e.value().text);
+    }
+    // under the nvapi fill such flags may force 2 states, so it still refuses them
+    auto const refused = filled(runtime, "cs", feature::opacity_micromap, fill::nvapi, native_route::text);
+    REQUIRE(refused.has_error());
+    CHECK(refused.error().contains("flags that are no constant")).dump("error", refused.error());
+}
+
 TEST("sgl emit - the nvapi fill of reordering writes NVAPI's hit objects through nvHLSLExtns.h at 6.6 (EMIT-265)")
 {
     auto const e = filled(k_reordering, "shoot", feature::shader_execution_reordering, fill::nvapi, native_route::text);
@@ -1143,5 +1185,44 @@ TEST("sgl emit - the nvapi fill of opacity micromaps writes nothing, at 6.6 (EMI
             CHECK(container_model(nvapi.value().dxil) == k_six_six);
             CHECK(container_model(native.value().dxil) == dxil_shader_model{.minor = 9});
         }
+    }
+}
+
+TEST("sgl emit - HLSL drops a name's, a member's or a construction's value as a void cast too")
+{
+    // DXC refuses an expression statement with no effect under -Werror, a bare name and a member access as well
+    constexpr auto program = "binding work:\n"
+                             "    values: mut buffer[float]\n"
+                             "@compute(64) fun cs(@thread_id id: int3){work}:\n"
+                             "    let n = work.values[id.x]\n"
+                             "    let v = float2(n, 2.0 * n)\n"
+                             "    let _ = n\n"
+                             "    let _ = v.y\n"
+                             "    let _ = float2(n, n)\n"
+                             "    work.values[id.x] = n + v.x\n";
+    for (auto const t : {target::hlsl_dx12, target::hlsl_vulkan})
+    {
+        auto const e = emit_source(program, 0, t);
+        REQUIRE(sgl::emit::dump_errors(e) == "");
+        auto const& text = e.text;
+        auto bare = false;
+        auto at = isize(0);
+        while (at < text.size())
+        {
+            auto end = at;
+            while (end < text.size() && text[end] != '\n')
+                ++end;
+            auto line = text.subview({.offset = at, .size = end - at});
+            at = end + 1;
+            while (!line.empty() && line[0] == ' ')
+                line = line.subview({.offset = 1, .size = line.size() - 1});
+            // a statement that is a value alone: no assignment, no declaration, no call of a function with an effect
+            if (line.ends_with(";") && !line.contains("=") && !line.starts_with("(void)") && !line.starts_with("return")
+                && !line.contains("(") && !line.starts_with("struct") && !line.contains(" "))
+                bare = true;
+            if (line == "float2(n, n);" || line.starts_with("float2(") && line.ends_with(");"))
+                bare = true;
+        }
+        CHECK(!bare).dump("text", text);
     }
 }

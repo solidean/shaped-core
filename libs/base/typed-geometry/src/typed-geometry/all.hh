@@ -7,5 +7,6 @@
 #include <typed-geometry/geometry/all.hh>
 #include <typed-geometry/linalg/all.hh>
 #include <typed-geometry/scalar/all.hh>
+#include <typed-geometry/spatial/all.hh>
 #include <typed-geometry/symbolic/all.hh>
 #include <typed-geometry/transform/all.hh>

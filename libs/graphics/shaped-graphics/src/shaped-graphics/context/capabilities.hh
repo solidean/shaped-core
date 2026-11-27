@@ -137,7 +137,9 @@ enum class sg::feature
     shader_int16,
 
     /// A compute or pixel shader may use subgroup operations: vote, ballot, reductions, prefix sums, shuffles and quads.
+    /// A raygen, closest-hit, miss or callable shader may use them too, but the quad ones.
     /// D3D12 grants them with `WaveOps`, Vulkan when its subgroup properties cover those stages and operations.
+    /// A Vulkan device with ray-tracing pipelines must cover the four ray-tracing stages too, or it has none.
     /// Vulkan also needs linear compute derivatives, the groups DXC writes a compute stage's quad operations in.
     /// WebGPU grants them with the optional `subgroups` feature, and Metal always.
     subgroups,
@@ -322,6 +324,16 @@ enum class sg::feature
     /// Vulkan gives it only with the `independentBlend` device feature; D3D12, Metal and WebGPU always.
     /// Without it, a pipeline whose targets differ in `blend` or `write_mask` is refused.
     independent_blend,
+
+    /// A pixel stage may run its depth and stencil tests, and their writes, before it, whatever it writes to memory or
+    /// whether it discards: SGL's `@early_depth_test` on a stage where the order changes a result.
+    /// D3D12, Vulkan and Metal grant it on every device; WebGPU has no such attribute, so it never grants it.
+    early_depth_test,
+
+    /// The last shader before the rasterizer, vertex, domain, geometry or mesh, may hand it clip distances, which cut
+    /// each primitive where one is below 0: SGL's `@clip_distances` field.
+    /// D3D12 and Metal grant it on every device, Vulkan with `shaderClipDistance`, and WebGPU with `clip-distances`.
+    clip_distances,
 };
 
 CC_FLAG_ENUM_INDEXED(sg, feature, cc::u64);
@@ -385,8 +397,10 @@ inline constexpr feature k_all_features[] = {
     feature::readwrite_norm16_image_formats,
     feature::norm16_filtering,
     feature::independent_blend,
+    feature::early_depth_test,
+    feature::clip_distances,
 };
-static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize(feature::independent_blend) + 1,
+static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize(feature::clip_distances) + 1,
               "k_all_features lists every feature");
 
 /// The enumerator's name, `ray_query`, which is also what SGL's `require` spells it as.
@@ -498,6 +512,10 @@ static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize
         return "norm16_filtering";
     case feature::independent_blend:
         return "independent_blend";
+    case feature::early_depth_test:
+        return "early_depth_test";
+    case feature::clip_distances:
+        return "clip_distances";
     }
     return "";
 }

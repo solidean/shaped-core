@@ -24,7 +24,7 @@ cc::shared_async<cc::unit> exposure_meter_routine::init(sg::routine_init_scope s
         auto const* const why = pipeline->try_error();
         CC_LOG_ERROR("exposure_meter: the pipeline did not build{}{}", why != nullptr ? ": " : "",
                      why != nullptr ? why->underlying().to_string() : cc::string());
-        fail_init();
+        fail_init(scope);
         co_return;
     }
 

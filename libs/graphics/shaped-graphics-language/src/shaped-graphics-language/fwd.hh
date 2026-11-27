@@ -30,6 +30,11 @@ struct all_text_request;
 struct entry_text;
 struct tested_source;
 struct emitted_source;
+struct link_entry;
+struct link_request;
+struct link_map;
+struct link_emit_options;
+class link_result;
 struct variant_axis;
 class variant_key;
 enum class reserved_slot : u8;
@@ -314,6 +319,7 @@ struct flat_switch;
 struct flat_local_ref;
 struct flat_binding_member;
 struct flat_file_sampler;
+struct flat_callable_base;
 struct flat_member;
 struct flat_buffer_element;
 struct flat_written_word;
@@ -431,6 +437,7 @@ using check::debug_value;
 using check::line_origin;
 using check::source_line;
 struct options;
+struct numbering;
 } // namespace sgl::emit
 
 namespace sgl::ir
@@ -450,6 +457,7 @@ enum class derivative : u8;
 enum class barrier : u8;
 struct instruction;
 enum class merge_kind : u8;
+enum class loop_hint : u8;
 struct block;
 struct constant;
 enum class global_kind : u8;
@@ -472,6 +480,7 @@ enum class block_ref : u32;
 enum class operand : u8;
 enum class control_flow : u8;
 class dominance;
+class marked_walks;
 } // namespace sgl::ir
 
 namespace sgl::ir::dxil

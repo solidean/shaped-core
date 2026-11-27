@@ -826,8 +826,7 @@ cc::shared_async<raster_pipeline_handle> context_uncached_scope::create_raster_p
         return cc::make_async_from_error<raster_pipeline_handle>(
             cc::async_error::make_error(cc::any_error(cc::move(refusal.value()))));
 
-    // The compute half through the cache, which deduplicates it and starts it now, beside the raster half; the uncached
-    // async build hands vulkan an empty shader here (bug-sg-uncached-async-compute-pipeline-empty-shader).
+    // The compute half through the cache, which deduplicates it and starts it now, beside the raster half.
     auto compute = cc::shared_async<compute_pipeline_handle>();
     auto task = cc::shared_async<compute_pipeline_handle>();
     auto launched = cc::shared_async<compute_pipeline_handle>();

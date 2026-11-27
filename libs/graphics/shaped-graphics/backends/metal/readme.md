@@ -280,7 +280,7 @@ Each of these is a fact about Metal rather than a gap in the backend.
 - **Metal orders the async tier against in-flight streams, where dx12 does not.**
   The per-resource streaming timeline is what makes it cheap: an async transfer waits on the same value a command list would.
   `promote_to_async` is then purely the statement of intent it is documented to be — it suppresses the warning, and adds no wait, because the wait is already there.
-  [bug-sg-dx12-async-transfer-ignores-stream](../../docs/issues/bug-sg-dx12-async-transfer-ignores-stream.md) records the gap on the backend that still has it.
+  [bug-sg-dx12-async-transfer-ignores-stream](../../docs/issues/.closed/2026/11/bug-sg-dx12-async-transfer-ignores-stream.md) records the gap on the backend that still has it.
 - **An acceleration structure is not a buffer.**
   DXR names one by the GPU virtual address of the buffer the driver built it into, and Vulkan wraps an object around such a buffer.
   `MTL::AccelerationStructure` derives from `MTL::Resource` and there is no `MTLBuffer` in the caller's hands at any point.

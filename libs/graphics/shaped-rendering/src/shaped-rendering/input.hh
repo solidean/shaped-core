@@ -182,6 +182,48 @@ enum class sr::gamepad_axis : sr::u8
     right_trigger,
 };
 
+/// The make of a gamepad as far as the platform can tell, which is what a prompt draws it as.
+/// `standard` is a pad of the common layout whose make is not known, and `unknown` one the platform cannot place at all.
+enum class sr::gamepad_kind : sr::u8
+{
+    unknown,
+    standard,
+    xbox_360,
+    xbox_one,
+    playstation_3,
+    playstation_4,
+    playstation_5,
+    switch_pro,
+    switch_joycon_left,
+    switch_joycon_right,
+    switch_joycon_pair,
+    gamecube,
+};
+
+/// The legends of a pad's four face buttons, named south, east, west, north.
+/// The platform decides it per pad, and not by kind alone: a Switch pad can be set to Xbox legends.
+enum class sr::gamepad_face : sr::u8
+{
+    abxy,   ///< Xbox, and the default
+    axby,   ///< GameCube
+    bayx,   ///< Nintendo Switch
+    shapes, ///< PlayStation: cross, circle, square, triangle
+};
+
+/// The legend printed on a gamepad button; `none` for a button that is not a face button.
+enum class sr::gamepad_button_label : sr::u8
+{
+    none,
+    a,
+    b,
+    x,
+    y,
+    cross,
+    circle,
+    square,
+    triangle,
+};
+
 /// Modifier keys held when an event was produced, as a bit set.
 /// Each covers both instances — shift is set for either shift key.
 enum class sr::key_modifiers : sr::u8
@@ -200,6 +242,18 @@ namespace sr
 [[nodiscard]] constexpr u32 gamepad_button_bit(gamepad_button b)
 {
     return 1u << u8(b);
+}
+
+/// The legend `b` carries on a pad with face `face`.
+[[nodiscard]] constexpr gamepad_button_label label_of(gamepad_face face, gamepad_button button)
+{
+    using l = gamepad_button_label;
+    // south, east, west, north, per face
+    constexpr l labels[4][4] = {{l::a, l::b, l::x, l::y},
+                                {l::a, l::x, l::b, l::y},
+                                {l::b, l::a, l::y, l::x},
+                                {l::cross, l::circle, l::square, l::triangle}};
+    return u8(button) <= u8(gamepad_button::north) ? labels[u8(face)][u8(button)] : l::none;
 }
 
 /// The bit `mouse_move_event::held_buttons` sets for `b`.
@@ -341,6 +395,8 @@ struct sr::gamepad_connection_event
     /// Which pad, stable while it stays connected and never reused within a run.
     u32 gamepad = 0;
     cc::string name;
+    sr::gamepad_kind kind = gamepad_kind::unknown;
+    sr::gamepad_face face = gamepad_face::abxy;
     bool is_connected = false;
 };
 
@@ -367,6 +423,8 @@ struct sr::gamepad_state
 {
     u32 gamepad = 0;
     cc::string name;
+    sr::gamepad_kind kind = gamepad_kind::unknown;
+    sr::gamepad_face face = gamepad_face::abxy;
     /// The buttons held, one `gamepad_button_bit` each.
     u32 held_buttons = 0;
     /// Up and right positive, -1 to 1, with no dead zone applied.

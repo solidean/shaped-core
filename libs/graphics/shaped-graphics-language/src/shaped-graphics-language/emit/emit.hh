@@ -59,7 +59,8 @@ enum class sgl::emit::error_kind : sgl::u8
     system_value_semantic,
     /// Unused since every target is made to follow SGL's own layout; kept so the ids of the kinds after it do not move.
     layout_mismatch,
-    /// A literal that is infinite or not a number, which no target can spell.
+    /// Unused since every target writes a non-finite value through its bits (EMIT-287); kept so the ids of the kinds
+    /// after it do not move.
     non_finite_literal,
     /// A flat tree the check pass does not produce: an unfilled node, or a call of something that is no builtin function.
     malformed_tree,
@@ -83,6 +84,8 @@ enum class sgl::emit::error_kind : sgl::u8
     /// An entry point whose tree decided something by another target than the one asked for, which the detail names
     /// (EMIT-283).
     flattened_for_another_target,
+    /// A file-scope sampler or a callables table the entry point reaches that the link's numbering leaves out (LINK-6).
+    unnumbered,
 };
 
 struct sgl::emit::error
@@ -156,9 +159,30 @@ enum class sgl::emit::debug_info : sgl::u8
     full,
 };
 
+/// A link group's numbers for one checked module (LINK-6): the slot of each file-scope sampler and the first record of
+/// each callables table the group numbers, by the module's own symbols.
+/// `sgl::link` makes one per file it checked; a writer reads it through `sampler_slot` and `callable_record` alone.
+struct sgl::emit::numbering
+{
+    struct number
+    {
+        check::symbol_id symbol = check::symbol_id::none;
+        i32 value = 0;
+
+        bool operator==(number const&) const = default;
+    };
+    /// Each file-scope sampler the group numbers, with its slot.
+    cc::vector<number> samplers;
+    /// Each callables table the group numbers, with its first record.
+    cc::vector<number> tables;
+};
+
 /// What an emit writes beside the text itself; the default writes no line table, no `#line` and no diagnostics.
 struct sgl::emit::options
 {
+    /// A link group's numbering of the module's samplers and callables tables (LINK-6); null writes the module's own,
+    /// EMIT-133's slots and CHK-562's section.
+    emit::numbering const* numbering = nullptr;
     /// Parallel to `checked_module::files`, as the check pass took them.
     cc::span<check::module_file const> files;
     /// Parallel to `files`: what a `#line` calls each one.
@@ -315,6 +339,25 @@ namespace sgl::emit
                                             check::flat_entry_point const& e,
                                             target t,
                                             options const& sources = {});
+
+/// The slot file-scope sampler `symbol` takes: `n`'s, else its position among the module's samplers (EMIT-133).
+/// -1 where `n` numbers no such sampler, which no link leaves for a sampler an entry it emits reaches.
+[[nodiscard]] i32 sampler_slot(check::checked_module const& m, numbering const* n, check::symbol_id symbol);
+
+/// The first record callables table `table` takes: `n`'s, else its place in the program's callable section (CHK-562).
+/// -1 where neither has the table.
+[[nodiscard]] i32 callable_record(check::checked_module const& m, numbering const* n, check::symbol_id table);
+
+/// `e` with each callable base resolved to the constant `callable_record` gives, a base of 0 adding nothing.
+/// A structured tree is resolved before it is legalized, so an unlinked compile writes what it wrote before callable
+/// bases were symbolic (LINK-5).
+/// A table neither numbers stays symbolic, and the writer refuses it.
+/// `with_callable_bases` in place, for a caller that holds a copy already.
+void resolve_callable_bases(check::checked_module const& m, check::flat_entry_point& e, numbering const* n);
+
+[[nodiscard]] check::flat_entry_point with_callable_bases(check::checked_module const& m,
+                                                          check::flat_entry_point const& e,
+                                                          numbering const* n);
 
 /// One line per error, for tests and for reading by eye: `unsupported a print, which no target writes yet`.
 [[nodiscard]] cc::string dump_errors(emitted_text const& e);

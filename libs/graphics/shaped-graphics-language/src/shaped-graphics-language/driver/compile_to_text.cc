@@ -4,6 +4,7 @@
 #include <shaped-graphics-language/check/reserved_bindings.hh>
 #include <shaped-graphics-language/check/resources.hh>
 #include <shaped-graphics-language/driver/impl/describe_binding.hh>
+#include <shaped-graphics-language/driver/impl/emit_text.hh>
 #include <shaped-graphics-language/driver/impl/front_end.hh>
 #include <shaped-graphics-language/emit/impl/dialect.hh>
 #include <shaped-graphics-language/emit/impl/plan.hh>
@@ -36,7 +37,8 @@ bool is_reached(check::checked_module const& m, check::flat_entry_point const& l
 /// Every slot the entry point's text declares, as `sgl describe` numbers and names them.
 cc::vector<interface_binding> interface_of(check::checked_module const& m,
                                            check::flat_entry_point const& legal,
-                                           cc::span<emit::bound_name const> bound_names)
+                                           cc::span<emit::bound_name const> bound_names,
+                                           emit::numbering const* numbering)
 {
     auto const emitted_of = [&](cc::string_view host) -> cc::string
     {
@@ -107,7 +109,7 @@ cc::vector<interface_binding> interface_of(check::checked_module const& m,
                           .kind = described_member_kind::sampler,
                           .is_file_sampler = true,
                           .group = -1,
-                          .slot = described.index,
+                          .slot = emit::sampler_slot(m, numbering, id),
                           .is_used = true,
                           .sampler_type = described.sampler_type});
     }
@@ -173,25 +175,27 @@ check::float_level kept_float_level(emit::target target)
     return "native";
 }
 
-/// The back half of `compile_to_text`: one entry point of a checked module, written for one target.
-cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& front,
-                                                 check::flat_entry_point const& e,
-                                                 emit::target target,
-                                                 bool line_directives,
-                                                 bool diagnostics,
-                                                 check::undefined_guard guards_undefined,
-                                                 bool asks_software_trace,
-                                                 bool weakens_float,
-                                                 check::float_level float_floor,
-                                                 check::feature_set device_features,
-                                                 cc::span<check::feature_fill const> fills,
-                                                 check::core_fills core,
-                                                 emit::native_route native = emit::native_route::text,
-                                                 emit::debug_info native_debug_info = emit::debug_info::none,
-                                                 emit::mesh_form mesh = emit::mesh_form::native,
-                                                 check::flat_entry_point const* polyfill_vertex = nullptr,
-                                                 check::flat_entry_point const* polyfill_task = nullptr,
-                                                 check::flat_entry_point const* polyfill_control = nullptr)
+} // namespace
+
+cc::result<sgl::emitted_source, cc::string> sgl::driver::impl::emit_text(front_end const& front,
+                                                                         check::flat_entry_point const& e,
+                                                                         emit::target target,
+                                                                         bool line_directives,
+                                                                         bool diagnostics,
+                                                                         check::undefined_guard guards_undefined,
+                                                                         bool asks_software_trace,
+                                                                         bool weakens_float,
+                                                                         check::float_level float_floor,
+                                                                         check::feature_set device_features,
+                                                                         cc::span<check::feature_fill const> fills,
+                                                                         check::core_fills core,
+                                                                         emit::native_route native,
+                                                                         emit::debug_info native_debug_info,
+                                                                         emit::mesh_form mesh,
+                                                                         check::flat_entry_point const* polyfill_vertex,
+                                                                         check::flat_entry_point const* polyfill_task,
+                                                                         check::flat_entry_point const* polyfill_control,
+                                                                         emit::numbering const* numbering)
 {
     // EMIT-128: a polyfill form is sg's to draw, its vertex half counting from a draw sg makes, indirectly too, which no
     // host of the root-constant fill makes (EMIT-271)
@@ -282,6 +286,11 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
         // the evaluation stage's vertex half reads its points back alone, and needs no control stage
         if (control == nullptr && mesh == emit::mesh_form::vertex_fetch)
         {
+            // CHK-571: the vertex half would write them, which no polyfill does yet
+            if (check::impl::holds_clip_distances(m, e.result))
+                return cc::error(cc::format("{}: error: unsupported: {}'s result holds clip distances, which the "
+                                            "polyfill does not carry yet\n",
+                                            source_name, e.name));
             auto const leaves = check::impl::leaves_of(m, e.result);
             if (leaves.has_error())
                 return cc::error(cc::format("{}: error: unsupported: {}'s result holds a '{}', which no word holds\n",
@@ -374,6 +383,8 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
     auto const writes_records = diagnostics
                              && check::reaches_reserved(*check::reserved_binding_named("sg_debug"), target,
                                                         entry.entry_stage, device_features);
+    // LINK-5: each callable base resolved to the section written for, before anything folds the index
+    emit::resolve_callable_bases(m, entry, numbering);
     auto const legal = check::legalize(m, entry,
                                        {.is_emulated = target == emit::target::wgsl || software_trace,
                                         .erases_prints = !writes_records,
@@ -424,7 +435,8 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
     if (mesh == emit::mesh_form::vertex_fetch && legal.entry_stage == check::stage::pixel && check::is_valid(corner))
         form = check::pixel_after_mesh_polyfill(m, legal, corner);
     auto emitted = emit::emit_entry_point(m, form, target,
-                                          {.files = files,
+                                          {.numbering = numbering,
+                                           .files = files,
                                            .names = names,
                                            .write_directives = line_directives,
                                            .diagnostics = diagnostics,
@@ -450,7 +462,7 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
         .signature = cc::move(emitted.signature),
         .stage = form.entry_stage,
         .entry_point = cc::move(emitted.entry_point),
-        .bindings = interface_of(m, form, emitted.bound_names),
+        .bindings = interface_of(m, form, emitted.bound_names, numbering),
         .color_targets = emitted.color_targets,
         .target_struct = cc::move(emitted.target_struct),
         .features = mesh_layout.has_value() || task_layout.has_value() || tessellation_layout.has_value()
@@ -570,11 +582,9 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
     return result;
 }
 
-/// What `front` says of the text of entry point `e`: the library files the source reached, and the warnings of the
-/// program and of `e` (CHK-402).
-void add_source_facts(cc::result<emitted_source, cc::string>& text,
-                      driver::impl::front_end const& front,
-                      check::flat_entry_point const& e)
+void sgl::driver::impl::add_source_facts(cc::result<emitted_source, cc::string>& text,
+                                         front_end const& front,
+                                         check::flat_entry_point const& e)
 {
     if (!text.has_value())
         return;
@@ -586,7 +596,6 @@ void add_source_facts(cc::result<emitted_source, cc::string>& text,
         warnings.push_back(cc::move(w));
     text.value().warnings = cc::move(warnings);
 }
-} // namespace
 
 cc::result<sgl::emitted_source, cc::string> sgl::compile_to_text(text_request const& request)
 {
@@ -680,11 +689,20 @@ cc::result<sgl::emitted_source, cc::string> sgl::compile_to_text(text_request co
             return cc::error(cc::format("{}: error: no tessellation control entry point named '{}'\n",
                                         request.source_name, request.polyfill_control));
     }
-    auto result = emit_text(front, e, request.target, request.line_directives, request.diagnostics,
-                            request.guards_undefined, request.software_trace, request.weakens_float,
-                            request.float_floor, request.device_features, request.fills, request.core, request.native,
-                            request.native_debug_info, request.mesh, polyfill_vertex, polyfill_task, polyfill_control);
-    add_source_facts(result, front, e);
+    auto result = driver::impl::emit_text(front, e, request.target, request.line_directives, request.diagnostics,
+                                          request.guards_undefined, request.software_trace, request.weakens_float,
+                                          request.float_floor, request.device_features, request.fills, request.core,
+                                          request.native, request.native_debug_info, request.mesh, polyfill_vertex,
+                                          polyfill_task, polyfill_control);
+    driver::impl::add_source_facts(result, front, e);
+    driver::impl::finish_warnings(result, request.source_name, e);
+    return result;
+}
+
+void sgl::driver::impl::finish_warnings(cc::result<emitted_source, cc::string>& result,
+                                        cc::string_view source_name,
+                                        check::flat_entry_point const& e)
+{
     // CHK-436 warns of code at `fast`, which a floor above it compiles none of, unless WebGPU weakened it back
     if (result.has_value() && result.value().is_float_raised_by_floor)
     {
@@ -698,8 +716,7 @@ cc::result<sgl::emitted_source, cc::string> sgl::compile_to_text(text_request co
         result.value().warnings.push_back(cc::format(
             "{}: warning: workgroup-unshadowed: entry point '{}' holds {} bytes of workgroup memory, past what its "
             "shadow fits beside in 16384, so no read of it is tested for a store before it (LEGAL-69)",
-            request.source_name, e.name, result.value().unshadowed_bytes));
-    return result;
+            source_name, e.name, result.value().unshadowed_bytes));
 }
 
 cc::result<cc::vector<sgl::entry_text>, cc::string> sgl::compile_all_to_text(all_text_request const& request)
@@ -780,11 +797,12 @@ cc::result<cc::vector<sgl::entry_text>, cc::string> sgl::compile_all_to_text(all
             // CHK-402: an entry point's own errors are that element's, and leave the others built
             auto own = front.errors_of(e.function);
             auto const fills = fills_on(request.targets[k]);
-            auto text = own.empty() ? emit_text(front, e, request.targets[k], false, false,
-                                                check::undefined_guard::none, false, false, check::float_level::fast,
-                                                request.device_features, fills, core_on(request.targets[k]))
-                                    : cc::result<emitted_source, cc::string>(cc::error(own));
-            add_source_facts(text, front, e);
+            auto text = own.empty()
+                          ? driver::impl::emit_text(front, e, request.targets[k], false, false,
+                                                    check::undefined_guard::none, false, false, check::float_level::fast,
+                                                    request.device_features, fills, core_on(request.targets[k]))
+                          : cc::result<emitted_source, cc::string>(cc::error(own));
+            driver::impl::add_source_facts(text, front, e);
             result.push_back({.entry_point = e.name, .target = request.targets[k], .text = cc::move(text)});
         }
     return result;

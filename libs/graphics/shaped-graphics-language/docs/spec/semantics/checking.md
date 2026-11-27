@@ -289,6 +289,7 @@ fun f(x: float) -> float:
 * **CHK-222** `true` and `false` are `@shadowable(false)` consts of `core.sgl`, whose values are the cases of `bool` (CHK-218).
 * **CHK-405** `pi` is a `float` const of `core.sgl`, and a program's own `pi` hides it, as any shadowable name of the prelude is (CHK-220).
   `radians(d)` and `degrees(r)` of a `float` or a plain float vector convert an angle by it.
+  `log10(x)` of a `float`, a `half` or a vector of either is `log2(x)` times the value of its type nearest log10(2), on every target ([why](why/checking.md#chk-405)).
   `mod(a, b)` is the remainder that floors, `a - b * floor(a / b)`, as GLSL's does, with `b` a scalar or of `a`'s type.
   The float `%` truncates instead, as HLSL's and MSL's `fmod` do (CHK-313).
 * **CHK-353** `@option` on a file-scope `const` makes it an **option**: a value the host sets for each compile, whose written value is its default ([why](why/checking.md#chk-353)).
@@ -871,8 +872,18 @@ fun shade(k: float) -> float:
   One that stands in a prelude body is reported at the program's call that reached it, since a program cannot fix the prelude.
 * **CHK-312** A call of constants whose value its type cannot hold is the normal error `constant-not-representable`, which WGSL folds exactly and refuses.
   That is an `int` sum, difference, product, negation, absolute value or left shift outside the `int`s, and a `uint` shifted left past its top bit.
-  It is also a negative `int` converted to `uint`, and a `float` result that is infinite or NaN.
+  It is also a negative `int` converted to `uint`, and a `float` result that is infinite or NaN that arithmetic or a conversion makes from finite operands: an overflow, `0.0 / 0.0`.
+  A call of constants with `T.nan`, `T.infinity` or one made of them among its operands stands (CHK-563), such as `T.infinity * 2.0` and `min(c, T.infinity)`, and EMIT-287 writes it.
+  `T.from_bits` of a constant whose result is non-finite stays refused, so a NaN or an infinity is written by its name.
   A `uint` sum, difference and product wrap, as WGSL folds them.
+* **CHK-563** `T.nan` and `T.infinity` are constants of `T` for `half`, `float` and `double` ([why](why/checking.md#chk-563)).
+  `T.nan` is a NaN, whose bits are `0x7E00`, `0x7FC00000` and `0x7FF8000000000000`; a program that needs other bits, a payload, writes `from_bits` of a `let`.
+  `T.infinity` is positive infinity, and `-T.infinity` negative.
+  One that stands where the float guarantee is `.fast` (CHK-435) is `non-finite-at-fast`, whose detail says to state `@float(.specials)` on the function that uses it.
+  That guarantee is the strictest `@float` of the entry point and of each function the expression was inlined through, so a `.specials` function elsewhere in the entry point keeps none of it.
+  A const that holds one is judged where it is named.
+  A compile's floor counts for nothing here, since the check pass judges the source, and a test, which runs on the abstract machine alone, names them freely.
+  Where the guarantee is `.specials` or stricter, a copy, a store, a construction, `select` and `.bits` keep their bits, and arithmetic, a comparison or a conversion on them is IEEE's.
 * **CHK-313** A `/` or a `%` whose operands are all integer literals is the normal error `literal-needs-type`, although `int` has both ([why](why/checking.md#chk-313)).
   So `1 / 3` is an error, and `1.0 / 3`, `(1 as int) / 3` and a division of two `int` locals are not.
 * **CHK-394** A prelude operator whose operands are all number literals is a **folded literal**, a number literal of the value it gives ([why](why/checking.md#chk-394)).
@@ -1045,6 +1056,15 @@ fun f() -> float:
   A member without one reads the format its type has at full width: `float3` is `vec3f`, `uint` is `u32`.
 * **CHK-277** An entry point whose inlined body reaches a `discard` is a `@pixel fun`, or it is `stage-not-allowed` at the `discard` ([why](why/checking.md#chk-277)).
   A path that ends in a `discard` needs no value, as one that ends in `return` does.
+* **CHK-564** `@early_depth_test` stands on a `@pixel fun` and takes no argument; anywhere else, or with one, it is `invalid-attribute-arguments` ([why](why/checking.md#chk-564)).
+  The depth test, the stencil test and their writes run before the stage, and a pixel that fails either runs none of the stage, its writes through a binding included.
+* **CHK-565** A pixel stage with it whose result has a `@depth` or a `@sample_mask` member (CHK-276) is `invalid-entry-point`, since the tests and their writes are decided before the stage runs.
+* **CHK-566** A `discard` in such a stage keeps the pixel's depth and stencil, which the tests have written already.
+  A pixel stage whose inlined body reaches one warns `early-depth-keeps-discarded` at the `discard`.
+  Where that is meant, the entry point says so with `@expect(warning = "early-depth-keeps-discarded")` (CHK-403).
+* **CHK-567** It needs `early_depth_test` where it changes a result: where the inlined body writes through a binding (CHK-404's writes) or reaches a `discard`.
+  Elsewhere it needs no feature, and a target without the attribute may leave it out, since a stage that writes no memory, no depth and never discards is tested early or late with one result.
+  sg grants `early_depth_test` on dx12, vulkan and metal on every device, and webgpu on none, so a `wgsl` compile of a stage that needs it is `target-lacks-feature` (EMIT-109).
 * **CHK-276** A member of a `@pixel struct` marked `@depth` is the pixel's depth, a `float`, and one marked `@sample_mask` the samples it writes, a `uint` ([why](why/checking.md#chk-276)).
   Neither is a color target, so neither takes a location or a `color_targets` entry, and a struct holds one of each at most.
   `@depth(.greater_equal)` and `@depth(.less_equal)` promise that the written depth only moves that way from the rasterized one.
@@ -1064,6 +1084,26 @@ fun f() -> float:
   Each stage whose struct holds one needs `multi_viewport`, which WebGPU has on no device, so its WGSL is `target-lacks-feature`.
   A host sets the viewports with `set_viewports`; an index past the last one set is the API's to define, and SGL does not.
   The struct that reaches the rasterizer carries exactly one, which CHK-307 asks of the pipeline.
+* **CHK-571** A field of the struct the last stage before the rasterizer hands it may carry `@clip_distances`, at most one, of type `float[N]` with `N` from 1 to 8 ([why](why/checking.md#chk-571)).
+  That struct is what a vertex or a tessellation evaluation stage returns, what a geometry stage appends to its stream, or what a mesh stage writes per vertex.
+  The rasterizer reads it, so it takes no location, no `@interpolate` and no `@per_draw` (CHK-393).
+  A second such field, another type, `N` outside 1 to 8, or one of those attributes beside it, is `invalid-entry-point`, and the attribute with an argument is `invalid-attribute-arguments`.
+  On a struct that reaches no rasterizer it is `invalid-entry-point` too: a vertex stage's input, a control stage's factors, a task stage's payload, and what a mesh stage writes per triangle.
+  So is one in what a geometry or tessellation stage takes from the stage before it, which CHK-573 makes no last stage.
+  A polyfilled geometry, tessellation or mesh stage that writes one (CHK-524, CHK-525, CHK-527) is `unsupported-yet`: no polyfill carries clip distances yet.
+* **CHK-572** Each lane is a distance from one plane: the rasterizer keeps the points of a primitive where every lane, interpolated linearly across it, is 0 or more.
+  It cuts the primitive at the lanes' zeros.
+  So what it hands the pixel stage, and the depth test, covers the kept part alone.
+  A lane that is a NaN or an infinity clips as the target clips it, which SGL does not specify.
+* **CHK-573** Only the struct that reaches the rasterizer clips ([why](why/checking.md#chk-573)).
+  A stage another stage follows hands on no clip distance, as an ordinary link member or otherwise.
+  A pipeline whose vertex stage hands one to a tessellation or a geometry stage, or whose evaluation stage hands one to a geometry stage, is `invalid-pipeline` (CHK-307).
+* **CHK-574** A pixel stage that takes the struct reads no `@clip_distances` field: a read of it is `unsupported-yet` there, since WGSL has no such input ([why](why/checking.md#chk-574)).
+  A link matched by location leaves the field out of the pixel stage, so the pixel stage needs nothing of it.
+  dx12 matches its stages by register, so there the pixel stage declares the lanes, unread, where the stage before it writes them, whichever of CHK-571's stages that is.
+* **CHK-575** The stage that writes one needs `clip_distances` ([why](why/checking.md#chk-575)).
+  That is a vertex or an evaluation stage whose result holds one, a geometry stage whose stream does, or a mesh stage whose output does.
+  sg's dx12 and metal backends grant it on every device, vulkan with `shaderClipDistance`, and webgpu with the feature `clip-distances`, so WGSL writes it where the device has the feature.
 * **CHK-437** `@view_index` is which view of a draw of several the invocation renders, from 0, and the pipeline's `view_count` says how many.
   View `i` renders into layer `i` of every target, so a stereo frame is one draw into a two-layer array, and the shader picks each eye's camera by it.
   The count is the host's, so one shader serves one view and two alike: a pipeline of one view reads 0.
@@ -1107,7 +1147,11 @@ fun f() -> float:
   `n` is a power of two from 4 to 128, written as an `int` literal or as an `int` `const`.
   Any other `n`, and the attribute on any other function, is `invalid-attribute-arguments`.
 * **CHK-435** `@float(.specials)` on a function states the least float guarantee its body needs: `.fast`, `.specials`, `.precise` or `.ieee`, each stricter than the one before.
-  An entry point keeps the strictest guarantee of every function it inlines, itself included, and a function that states none is at `.fast`.
+  It guarantees that level for every operation in its body, and in the functions it inlines that state none stricter, and a function that states none is at `.fast`.
+  An operation's guarantee is the strictest of the functions it stands in, the entry point and the compile's floor included.
+  How a target keeps a scope's guarantee is the target's own (EMIT-185): it may keep it per operation, or raise the whole entry point.
+  Every route raises it today, to the strictest guarantee of every function the entry point inlines.
+  Raising is a quality of implementation, never a change of meaning.
   A compile may ask for a floor, a level every entry point is raised to as if it stated it, which then names no function; one that reaches a stricter level keeps its own.
   What each level lets a target do to a float is EVAL-6's, and what a target keeps is EMIT-185's.
   Any other argument is `invalid-attribute-arguments`.
@@ -1138,6 +1182,8 @@ A feature is what a device may lack, so using one makes a shader non-portable on
   The stages and stage inputs a device may lack add `primitive_index`, `sample_rate_shading`, `geometry_shader` and `tessellation_shader`.
   A write through a binding in a vertex, geometry or tessellation stage adds `vertex_pipeline_stores` (CHK-531).
   A `mut` image of a 16-bit normalized format adds `readwrite_norm16_image_formats` (CHK-201).
+  `@early_depth_test` on a pixel stage that writes memory or discards adds `early_depth_test` (CHK-567).
+  A `@clip_distances` field of what the last stage before the rasterizer hands it adds `clip_distances` (CHK-575).
   Any other name is the normal error `unknown-feature`, and its detail lists the names.
 * **CHK-259** A `require` at file scope grants its features to everything in the file ([why](why/checking.md#chk-259)).
 * **CHK-260** A `require` in a binding grants its features to that binding's members.
@@ -1413,6 +1459,7 @@ A `require` in a test's body that nothing in it uses is `unused-require`, and a 
 * **CHK-404** A traversal's decision writes no memory through a binding ([why](why/checking.md#chk-404)).
   Each such write it reaches is `stage-not-allowed`, whose detail says how often the decision runs.
   A write is an atomic, an image store, a `mut bytes` store, and an assignment to an element of a `mut buffer` or to a part of one, through a binding or a resource parameter.
+  So is an assignment to a member of a `@workgroup` binding or to a part of one, since the group's other invocations see it as they see a buffer.
   The payload, the decision's result and its locals it writes freely, since they are how it answers.
   A decision is an `@any_hit` or an `@intersection` entry point, and a function an inline trace calls as one: a parameter that takes a candidate or a box makes it so, in any stage.
   The other ray-tracing stages take every atomic of a `mut buffer` and of an `@atomic` image; none of them lists workgroup memory (CHK-294).
@@ -1453,6 +1500,8 @@ Tint's verdict on a barrier cannot be silenced, so a barrier keeps WGSL's rules 
 
 * **CHK-282** A barrier, and a builtin that takes derivatives implicitly, in **non-uniform control flow** is `non-uniform-control-flow`, at the call.
   A note names the branch or the exit that made the flow so, and what the branch tested.
+  In a candidate loop's body the note names the program's `for c in q.candidates`, and says each invocation meets its own candidates (CHK-555).
+  In a trace's decision it names the program's `world.trace` call that runs the decision; neither names the prelude's own loop.
   A branch of the prelude is no line of the program, so the note names the program's call that reached it instead.
   `sample` without a `level` or gradients, `sample_compare` without a `level`, `ddx`, `ddy`, their `_coarse` and `_fine` forms and `fwidth` take derivatives.
   A subgroup operation (CHK-377) and `workgroup_uniform_load` (CHK-374) stand where a barrier does.
@@ -1472,6 +1521,8 @@ Tint's verdict on a barrier cannot be silenced, so a barrier keeps WGSL's rules 
   So is the result of every atomic and of every subgroup operation (CHK-377), a compare-exchange's `old` and `exchanged` included.
   Every other value is uniform: a literal, a `const`, a member of a constant block, and an element of a read-only buffer at a uniform index.
 * **CHK-284** Control flow is non-uniform inside an `if`, a `case` or a loop whose condition is non-uniform, and the right side of an `and` or an `or` whose left side is.
+  It is non-uniform in a candidate loop's body (CHK-555) and in a trace's decision, whatever the ray, since each invocation meets its own candidates ([why](why/checking.md#chk-284)).
+  A decision is CHK-404's, and what it returns keeps its own uniformity: a barrier after the trace is judged by the ray and by the values the trace was handed.
   It stays so after an `if` or a `case` one of whose sides leaves in non-uniform control flow, and for the rest of the entry point after such a `return`.
   A loop some invocations leave early, by a `break`, a `continue` or a `return` in non-uniform control flow, is non-uniform throughout.
   A `while` condition is tested again before every iteration, so such a loop's condition runs in non-uniform control flow too.
@@ -1523,9 +1574,20 @@ A **subgroup** is the invocations the hardware runs in lockstep: a wave on AMD, 
 A **quad** is four of them: in a pixel stage the 2x2 pixels a derivative compares, and in a compute stage four consecutive invocations of a subgroup.
 The stage inputs `@subgroup_size` and `@subgroup_invocation_id` (CHK-271) are its size and this invocation's index in it.
 
-* **CHK-376** The **subgroup operations** are the builtins of the table below; each needs `subgroups` (CHK-322) and is `@stages(.pixel, .compute)` ([why](why/checking.md#chk-376)).
+* **CHK-376** The **subgroup operations** are the builtins of the table below; each needs `subgroups` (CHK-322) ([why](why/checking.md#chk-376)).
+  Each is `@stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable)`, but the quad operations, which are `@stages(.pixel, .compute)`.
   A number is a numeric scalar of the prelude, and every operation that takes a number takes a vector of numbers too, componentwise.
   A lane that names no invocation of the subgroup, at run time, gives a value the language does not specify, whichever operation names it.
+* **CHK-568** `subgroups` grants the raygen, closest-hit, miss and callable stages wherever it grants ray-tracing stages at all ([why](why/checking.md#chk-568)).
+  A device has `subgroups` only if it has the operations in every stage it runs, which sg's `feature::subgroups` says.
+  dx12's `WaveOps` covers DXR's stages already, and metal runs those stages as its raygen kernel and the visible functions it calls.
+  A vulkan device with ray-tracing pipelines has it only where its `supportedStages` holds the four stages' bits too.
+* **CHK-569** In a ray-tracing stage, the subgroup is the invocations the device runs together at the call ([why](why/checking.md#chk-569)).
+  A trace, a callable's call (CHK-344) and a reorder (CHK-433) may regroup them.
+  Uniform control flow is judged as anywhere else, so an operation at a stage's top level, or after a trace that every invocation reached, stands.
+  Its result is a value like any other, but what it says of lanes names the subgroup it was taken in: a ballot's bits, an elect's answer, and a lane a shuffle computed.
+  A regroup between it and its use may have changed that subgroup, and the lane then names another invocation or none, which CHK-376 leaves unspecified.
+* **CHK-570** `@subgroup_size` and `@subgroup_invocation_id` stay pixel and compute inputs (CHK-271), since EMIT-147 reads them at the top of the entry point, which a regroup would leave stale.
 * **CHK-377** A subgroup operation stands only in uniform control flow, judged as CHK-282 judges a barrier, and its result is non-uniform ([why](why/checking.md#chk-377)).
   Control flow that differs between subgroups alone is uniform enough for it (CHK-537).
 * **CHK-378** The lane of `subgroup_broadcast` is a constant `int` from 0 to 127, and the lane of `quad_broadcast` a constant from 0 to 3, or each is `invalid-constant-argument`.
@@ -1748,6 +1810,7 @@ HLSL writes it on dx12 and vulkan; WebGPU has none, and sg's metal backend does 
   A module's tables follow those of every module it uses, and of the modules that may come next, the one whose name sorts first by its bytes comes first, so the program's own module comes last.
   Within a module, its tables stand in declaration order: its library files in the library's order (CHK-346), then the program's file.
   A table's place is the number of callables the tables before it list, and the host's callables follow the last table's.
+  Under a link, the group's numbering ([LINK-5](linking.md#the-numbering)) replaces the program's.
   How the program is checked, and the modules of the library it does not reach, change no place.
 
 ### Queries
@@ -1945,7 +2008,7 @@ hit_group textured for path_rays:
   On any statement but a `for` the attribute is `unsupported-yet`, by CHK-39.
   So are arguments, such as the count of `@unroll(4)`, which would unroll the loop in part.
 * **CHK-414** `@unroll(false)` on a `for` asks the target to keep it a loop, and changes nothing of what it means: a hint, never a promise.
-  HLSL writes `[loop]` ahead of it, and MSL and WGSL have no spelling for it, so there it is nothing.
+  HLSL writes `[loop]` ahead of it, SGL's own DXIL and SPIR-V state it as EMIT-291 says, and MSL and WGSL have no spelling for it, so there it is nothing.
   Every other argument of `@unroll` is `unsupported-yet`, a count among them.
 * **CHK-415** A `for` runs over an int range, or over a walk of one ([EVAL-102](evaluation.md#from-the-source)): `.reversed` and `.by(step)` after the range, in any number and order.
   A step is an int constant of at least 1, a literal or a `const`, and anything else is `invalid-constant-argument`.
@@ -2157,12 +2220,12 @@ fun make_mvp(model: mat4){frame} => frame.proj * frame.view * model
 
 Every kind below is a normal error by [DIAG-4](../syntax/diagnostics.md#rules), except some warnings.
 They are `unreachable-code`, `no-effect`, `unused-require`, `pixel-stage-ignores-view`, `needless-nonuniform` and `unroll-too-long`.
-`generic-not-instantiated`, `nan-test-at-fast` and `workgroup-wastes-lanes` are warnings too.
+`generic-not-instantiated`, `nan-test-at-fast`, `workgroup-wastes-lanes` and `early-depth-keeps-discarded` are warnings too.
 A diagnostic of this pass has a kind, a file, a byte span in that file, and a detail.
 
 | kind | reported by |
 |---|---|
-| `unsupported-yet` | CHK-540, CHK-541, CHK-543, CHK-549, CHK-8, CHK-61, CHK-134, CHK-213, CHK-237, CHK-291, CHK-299, CHK-307, CHK-314, CHK-321, CHK-329, CHK-333, CHK-338, CHK-339, CHK-344, CHK-346, CHK-347, CHK-350, CHK-352, CHK-353, CHK-357, CHK-366, CHK-374, CHK-381, CHK-383, CHK-387, CHK-389, CHK-397, CHK-431, CHK-432, CHK-434, CHK-516, CHK-522, CHK-523, CHK-526, CHK-524, CHK-525, CHK-450, CHK-453, CHK-454, CHK-538, CHK-555 |
+| `unsupported-yet` | CHK-540, CHK-541, CHK-543, CHK-549, CHK-8, CHK-61, CHK-134, CHK-213, CHK-237, CHK-291, CHK-299, CHK-307, CHK-314, CHK-321, CHK-329, CHK-333, CHK-338, CHK-339, CHK-344, CHK-346, CHK-347, CHK-350, CHK-352, CHK-353, CHK-357, CHK-366, CHK-374, CHK-381, CHK-383, CHK-387, CHK-389, CHK-397, CHK-431, CHK-432, CHK-434, CHK-516, CHK-522, CHK-523, CHK-526, CHK-524, CHK-525, CHK-450, CHK-453, CHK-454, CHK-538, CHK-555, CHK-571, CHK-574 |
 | `member-not-allowed-here` | CHK-490 |
 | `duplicate-declaration` | CHK-552, CHK-540, CHK-543, CHK-12, CHK-28, CHK-241, CHK-347, CHK-351, CHK-530 |
 | `dependency-cycle` | CHK-18, CHK-136 |
@@ -2178,7 +2241,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `unknown-builtin` | CHK-31 |
 | `expected-body` | CHK-32, CHK-236 |
 | `opaque-struct-needs-builtin` | CHK-34 |
-| `invalid-attribute-arguments` | CHK-546, CHK-547, CHK-548, CHK-36, CHK-39, CHK-204, CHK-208, CHK-211, CHK-212, CHK-220, CHK-231, CHK-267, CHK-403, CHK-292, CHK-293, CHK-301, CHK-304, CHK-384, CHK-369, CHK-370, CHK-371, CHK-431, CHK-435, CHK-480, CHK-522, CHK-526, CHK-538 |
+| `invalid-attribute-arguments` | CHK-546, CHK-547, CHK-548, CHK-36, CHK-39, CHK-204, CHK-208, CHK-211, CHK-212, CHK-220, CHK-231, CHK-267, CHK-403, CHK-292, CHK-293, CHK-301, CHK-304, CHK-384, CHK-369, CHK-370, CHK-371, CHK-431, CHK-435, CHK-480, CHK-522, CHK-526, CHK-538, CHK-564, CHK-571 |
 | `binding-not-listed` | CHK-45, CHK-131, CHK-228 |
 | `as-precedence` | CHK-411 |
 | `type-mismatch` | CHK-552, CHK-541, CHK-542, CHK-52, CHK-56, CHK-77, CHK-112 to CHK-118, CHK-121, CHK-167, CHK-210, CHK-214, CHK-219, CHK-236, CHK-243, CHK-275, CHK-276, CHK-279, CHK-281, CHK-287, CHK-329, CHK-344, CHK-362, CHK-375, CHK-392, CHK-429, CHK-433, CHK-434, CHK-558 |
@@ -2188,6 +2251,8 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `unreachable-code` | CHK-126, CHK-162, CHK-430, CHK-551 |
 | `no-effect` | CHK-225 |
 | `nan-test-at-fast` | CHK-436 |
+| `non-finite-at-fast` | CHK-563 |
+| `early-depth-keeps-discarded` | CHK-566 |
 | `workgroup-wastes-lanes` | CHK-521 |
 | `recursive-call` | CHK-130 |
 | `recursive-trace` | CHK-332 |
@@ -2209,9 +2274,9 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `stage-not-allowed` | CHK-193, CHK-277, CHK-329, CHK-344, CHK-512, CHK-556 |
 | `ambiguous-overload` | CHK-72 |
 | `missing-field`, `unknown-field`, `duplicate-field` | CHK-178 |
-| `invalid-entry-point` | CHK-87, CHK-88, CHK-89, CHK-93, CHK-271, CHK-273, CHK-276, CHK-294, CHK-301 to CHK-306, CHK-326 to CHK-328, CHK-342, CHK-380, CHK-481, CHK-484, CHK-485, CHK-520 |
+| `invalid-entry-point` | CHK-87, CHK-88, CHK-89, CHK-93, CHK-271, CHK-273, CHK-276, CHK-294, CHK-301 to CHK-306, CHK-326 to CHK-328, CHK-342, CHK-380, CHK-481, CHK-484, CHK-485, CHK-520, CHK-565, CHK-571 |
 | `nesting-too-deep` | CHK-268 |
-| `invalid-pipeline` | CHK-175 to CHK-185, CHK-187, CHK-276, CHK-307, CHK-308, CHK-328, CHK-330, CHK-331, CHK-332, CHK-343, CHK-403 |
+| `invalid-pipeline` | CHK-175 to CHK-185, CHK-187, CHK-276, CHK-307, CHK-308, CHK-328, CHK-330, CHK-331, CHK-332, CHK-343, CHK-403, CHK-573 |
 | `shadows-unshadowable` | CHK-220, CHK-266 |
 | `test-captures-runtime-value` | CHK-228 |
 | `test-must-end-in-check` | CHK-226 |

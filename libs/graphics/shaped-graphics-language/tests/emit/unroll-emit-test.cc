@@ -1,5 +1,12 @@
 #include "emit-test-support.hh"
 
+#include <clean-core/common/macros.hh>
+#include <clean-core/platform/file_path.hh>
+#include <clean-core/streams/file_stream.hh>
+#include <shaped-graphics-language/driver/compile_to_text.hh>
+
+#include <cstdlib>
+
 using namespace sgl_test;
 using sgl::emit::target;
 
@@ -229,4 +236,280 @@ TEST("sgl emit - @unroll(false) keeps a loop and writes HLSL's [loop], a hint no
         CHECK(!text.contains("[loop]")).dump("text", text);
         CHECK(text.contains("for")).dump("text", text);
     }
+}
+
+namespace
+{
+/// One entry point per form of `@unroll` a loop may carry, alone and nested, with the exits a loop may take.
+constexpr cc::string_view k_hinted = "binding io:\n"
+                                     "    source: buffer[float]\n"
+                                     "    target: mut buffer[float]\n"
+                                     "\n"
+                                     "@compute(64) fun kept(@thread_id id: int3){io}:\n"
+                                     "    let mut total = 0.0\n"
+                                     "    @unroll(false)\n"
+                                     "    for i in 0 ..< id.x:\n"
+                                     "        total += io.source[i]\n"
+                                     "    for k in 0 ..< id.y:\n"
+                                     "        total += io.source[k] * 2.0\n"
+                                     "    io.target[id.x] = total\n"
+                                     "\n"
+                                     "@compute(64) fun inclusive(@thread_id id: int3){io}:\n"
+                                     "    let mut total = 0.0\n"
+                                     "    @unroll(false)\n"
+                                     "    for i in 0 ..= id.x:\n"
+                                     "        total += io.source[i]\n"
+                                     "    io.target[id.x] = total\n"
+                                     "\n"
+                                     "@compute(64) fun outer(@thread_id id: int3){io}:\n"
+                                     "    let mut total = 0.0\n"
+                                     "    @unroll(false)\n"
+                                     "    for i in 0 ..< id.x:\n"
+                                     "        for j in 0 ..< id.y:\n"
+                                     "            if io.source[j] > 4.0 => break\n"
+                                     "            if io.source[j] < 0.0 => continue\n"
+                                     "            total += io.source[i * 8 + j]\n"
+                                     "        if total > 100.0 => break\n"
+                                     "    io.target[id.x] = total\n"
+                                     "\n"
+                                     "@compute(64) fun inner(@thread_id id: int3){io}:\n"
+                                     "    let mut total = 0.0\n"
+                                     "    for a in 0 ..< id.y:\n"
+                                     "        @unroll(false)\n"
+                                     "        for b in 0 ..< id.z:\n"
+                                     "            if io.source[b] < 0.0 => continue\n"
+                                     "            if io.source[b] > 9.0 => break\n"
+                                     "            total += io.source[a + b]\n"
+                                     "    io.target[id.x] = total\n"
+                                     "\n"
+                                     "@compute(64) fun cased(@thread_id id: int3){io}:\n"
+                                     "    let mut total = 0.0\n"
+                                     "    @unroll(false)\n"
+                                     "    for i in 0 ..< id.x:\n"
+                                     "        case i & 3:\n"
+                                     "            0 => continue\n"
+                                     "            1 => break\n"
+                                     "            _ => total += io.source[i]\n"
+                                     "    io.target[id.x] = total\n"
+                                     "\n"
+                                     "@compute(64) fun unrolled(@thread_id id: int3){io}:\n"
+                                     "    let mut total = 0.0\n"
+                                     "    @unroll\n"
+                                     "    for i in 0 ..< 4:\n"
+                                     "        total += io.source[id.x + i]\n"
+                                     "    io.target[id.x] = total\n";
+
+/// Each entry point of `k_hinted`, and the loop control of each `OpLoopMerge` SGL's own SPIR-V writes for it, in order.
+struct hinted_entry
+{
+    cc::string_view name;
+    cc::span<u32 const> controls;
+};
+constexpr u32 k_none = 0;
+constexpr u32 k_dont_unroll = 2;
+constexpr u32 k_kept_controls[] = {k_dont_unroll, k_none};
+constexpr u32 k_inclusive_controls[] = {k_dont_unroll};
+constexpr u32 k_outer_controls[] = {k_dont_unroll, k_none};
+constexpr u32 k_inner_controls[] = {k_none, k_dont_unroll};
+constexpr u32 k_cased_controls[] = {k_dont_unroll};
+constexpr hinted_entry k_hinted_entries[] = {
+    {"kept", k_kept_controls},   {"inclusive", k_inclusive_controls}, {"outer", k_outer_controls},
+    {"inner", k_inner_controls}, {"cased", k_cased_controls},         {"unrolled", {}},
+};
+
+[[nodiscard]] cc::result<sgl::emitted_source, cc::string> native_of(cc::string_view source,
+                                                                    cc::string_view entry,
+                                                                    sgl::emit::target t)
+{
+    return sgl::compile_to_text(
+        {.source = source, .entry_point = entry, .target = t, .native = sgl::emit::native_route::require});
+}
+
+/// The loop control of every `OpLoopMerge` in `words`, in the order the module holds them.
+[[nodiscard]] cc::vector<u32> loop_controls(cc::span<u32 const> words)
+{
+    auto controls = cc::vector<u32>();
+    for (auto at = isize(5); at < words.size(); at += isize(words[at] >> 16))
+        if ((words[at] & 0xffffu) == 246) // OpLoopMerge
+            controls.push_back(words[at + 3]);
+    return controls;
+}
+
+[[nodiscard]] bool has_spirv_val()
+{
+#if defined(CC_OS_EMSCRIPTEN) || defined(CC_OS_IOS) || defined(CC_OS_TVOS)
+    return false;
+#elif defined(CC_OS_WINDOWS)
+    return std::system("spirv-val --version > NUL 2>&1") == 0;
+#else
+    return std::system("spirv-val --version > /dev/null 2>&1") == 0;
+#endif
+}
+
+/// Whether spirv-val takes `words`, written to a temporary file of their own; only where `has_spirv_val`.
+[[nodiscard]] bool spirv_val_takes(cc::span<u32 const> words, cc::string_view name)
+{
+#if defined(CC_OS_EMSCRIPTEN) || defined(CC_OS_IOS) || defined(CC_OS_TVOS)
+    (void)words;
+    (void)name;
+    return true;
+#else
+    auto const path = cc::temp_file_path(cc::format("sgl-unroll-{}", name), ".spv");
+    {
+        auto adapter = cc::file_write_stream_adapter::create(path);
+        REQUIRE(adapter.has_value());
+        auto stream = adapter.value().stream();
+        REQUIRE(stream.write(words.as_bytes()).has_value());
+        REQUIRE(stream.flush().has_value());
+    }
+    auto command = cc::format("spirv-val --target-env vulkan1.3 --scalar-block-layout \"{}\"", path);
+    auto const takes = std::system(command.c_str_materialize()) == 0;
+    (void)cc::remove_file(path);
+    return takes;
+#endif
+}
+} // namespace
+
+TEST("sgl emit - @unroll(false) is DontUnroll on SGL's own SPIR-V, on its loop alone, past every exit (EMIT-291)")
+{
+    auto const validates = has_spirv_val();
+    for (auto const& entry : k_hinted_entries)
+    {
+        auto const e = native_of(k_hinted, entry.name, sgl::emit::target::hlsl_vulkan);
+        REQUIRE(e.has_value()).dump("entry", entry.name).dump("error", e.has_error() ? e.error() : cc::string());
+        auto const controls = loop_controls(e.value().spirv);
+        REQUIRE(controls.size() == entry.controls.size()).dump("entry", entry.name);
+        for (auto k = isize(0); k < controls.size(); ++k)
+            CHECK(controls[k] == entry.controls[k]).dump("entry", entry.name).dump("loop", k);
+        if (validates)
+            CHECK(spirv_val_takes(e.value().spirv, entry.name)).dump("entry", entry.name);
+    }
+    if (!validates)
+        SKIP("no spirv-val on the path");
+}
+
+TEST("sgl emit - @unroll(false) heads its loop through SGL's DXIL passes, which drop the loop's structure (EMIT-291)")
+{
+    // the program a reader of the native route sees is the one the writer wrote from, its headers' hints among it;
+    // slib's tests read the `llvm.loop` metadata of the DXIL itself, through DXC
+    for (auto const& entry : k_hinted_entries)
+    {
+        auto const e = native_of(k_hinted, entry.name, sgl::emit::target::hlsl_dx12);
+        REQUIRE(e.has_value()).dump("entry", entry.name).dump("error", e.has_error() ? e.error() : cc::string());
+        REQUIRE(!e.value().dxil.empty());
+        auto rolled = isize(0);
+        for (auto const c : entry.controls)
+            rolled += c == k_dont_unroll ? 1 : 0;
+        CHECK(occurrences(e.value().text, " rolled\n") == rolled).dump("entry", entry.name).dump("program", e.value().text);
+    }
+}
+
+TEST("sgl emit - an unrolled for past 256 copies is a loop that asks nothing of the target's unrolling")
+{
+    // CHK-389 writes it as an ordinary loop, so no route spells a hint: HLSL no [unroll], SPIR-V `None`
+    auto const source = row_source(257);
+    auto const spirv = native_of(source, "row", sgl::emit::target::hlsl_vulkan);
+    REQUIRE(spirv.has_value()).dump("error", spirv.has_error() ? spirv.error() : cc::string());
+    auto const controls = loop_controls(spirv.value().spirv);
+    REQUIRE(controls.size() == 1);
+    CHECK(controls[0] == k_none);
+    auto const dxil = native_of(source, "row", sgl::emit::target::hlsl_dx12);
+    REQUIRE(dxil.has_value()).dump("error", dxil.has_error() ? dxil.error() : cc::string());
+    CHECK(!dxil.value().text.contains(" rolled\n"));
+}
+
+namespace
+{
+/// More shapes a hinted loop may take: nested in the inclusive range's own loop, walked, bounded, and with a subgroup
+/// operation, which keeps DXIL's passes structured.
+constexpr cc::string_view k_shapes = "require subgroups\n"
+                                     "\n"
+                                     "binding io:\n"
+                                     "    source: buffer[float]\n"
+                                     "    target: mut buffer[float]\n"
+                                     "    n: int\n"
+                                     "    limit: float\n"
+                                     "\n"
+                                     "@compute(64) fun rolled_around_plain(@thread_id id: int3){io}:\n"
+                                     "    let mut total = 0.0\n"
+                                     "    @unroll(false)\n"
+                                     "    for k in 0 ..= id.y:\n"
+                                     "        for i in 0 ..= id.x:\n"
+                                     "            total += io.source[i + k]\n"
+                                     "    io.target[id.x] = total\n"
+                                     "\n"
+                                     "@compute(64) fun plain_around_rolled(@thread_id id: int3){io}:\n"
+                                     "    let mut total = 0.0\n"
+                                     "    for k in 0 ..= id.y:\n"
+                                     "        @unroll(false)\n"
+                                     "        for i in 0 ..= id.x:\n"
+                                     "            total += io.source[i + k]\n"
+                                     "    io.target[id.x] = total\n"
+                                     "\n"
+                                     "@compute(64) fun walked(@thread_id id: int3){io}:\n"
+                                     "    let mut total = 0.0\n"
+                                     "    @unroll(false)\n"
+                                     "    for i in (0 ..< 64).by(3).reversed:\n"
+                                     "        total += io.source[i + id.x]\n"
+                                     "    io.target[id.x] = total\n"
+                                     "\n"
+                                     "@compute(64) fun bounded(@thread_id id: int3){io}:\n"
+                                     "    let mut total = 0.0\n"
+                                     "    @unroll(false)\n"
+                                     "    @max_iterations(16)\n"
+                                     "    for i in 0 ..< id.x:\n"
+                                     "        total += io.source[i]\n"
+                                     "    io.target[id.x] = total\n"
+                                     "\n"
+                                     "@compute(64) fun waved(@thread_id id: int3){io}:\n"
+                                     "    let mut total = 0.0\n"
+                                     "    for k in 0 ..< io.n:\n"
+                                     "        @unroll(false)\n"
+                                     "        for i in 0 ..< io.n:\n"
+                                     "            total += subgroup_add(io.source[i + k])\n"
+                                     "            if total > io.limit => break\n"
+                                     "            if io.source[i] < 0.0 => continue\n"
+                                     "            total += 1.0\n"
+                                     "    io.target[id.x] = total\n";
+
+constexpr u32 k_rolled_around_plain_controls[] = {k_dont_unroll, k_none};
+constexpr u32 k_plain_around_rolled_controls[] = {k_none, k_dont_unroll};
+constexpr u32 k_walked_controls[] = {k_dont_unroll};
+constexpr u32 k_bounded_controls[] = {k_dont_unroll};
+constexpr u32 k_waved_controls[] = {k_none, k_dont_unroll};
+constexpr hinted_entry k_shape_entries[] = {
+    {"rolled_around_plain", k_rolled_around_plain_controls},
+    {"plain_around_rolled", k_plain_around_rolled_controls},
+    {"walked", k_walked_controls},
+    {"bounded", k_bounded_controls},
+    {"waved", k_waved_controls},
+};
+} // namespace
+
+TEST("sgl emit - @unroll(false) on an inclusive range's loop, a walk, a bounded loop and a subgroup's loop is "
+     "DontUnroll "
+     "on its loop alone (EMIT-291)")
+{
+    auto const validates = has_spirv_val();
+    for (auto const& entry : k_shape_entries)
+    {
+        auto const e = native_of(k_shapes, entry.name, sgl::emit::target::hlsl_vulkan);
+        REQUIRE(e.has_value()).dump("entry", entry.name).dump("error", e.has_error() ? e.error() : cc::string());
+        auto const controls = loop_controls(e.value().spirv);
+        REQUIRE(controls.size() == entry.controls.size()).dump("entry", entry.name);
+        for (auto k = isize(0); k < controls.size(); ++k)
+            CHECK(controls[k] == entry.controls[k]).dump("entry", entry.name).dump("loop", k);
+        if (validates)
+            CHECK(spirv_val_takes(e.value().spirv, entry.name)).dump("entry", entry.name);
+
+        // DXIL's passes keep the hint on the header of the loop it was written on alone
+        auto const d = native_of(k_shapes, entry.name, sgl::emit::target::hlsl_dx12);
+        REQUIRE(d.has_value()).dump("entry", entry.name).dump("error", d.has_error() ? d.error() : cc::string());
+        auto rolled = isize(0);
+        for (auto const c : entry.controls)
+            rolled += c == k_dont_unroll ? 1 : 0;
+        CHECK(occurrences(d.value().text, " rolled\n") == rolled).dump("entry", entry.name).dump("program", d.value().text);
+    }
+    if (!validates)
+        SKIP("no spirv-val on the path");
 }

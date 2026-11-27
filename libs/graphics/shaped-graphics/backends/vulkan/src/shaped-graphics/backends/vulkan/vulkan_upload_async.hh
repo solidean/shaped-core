@@ -195,16 +195,18 @@ public:
     /// Empty data is a no-op.
     void upload_buffer(sg::raw_buffer_handle const& buffer, cc::pinned_data<byte const> data, isize offset);
 
-    /// The streaming twin: same staging, but it stamps only the lifetime value, so a later command list waits on
-    /// nothing.
+    /// The streaming twin: same staging, but it stamps the streaming value, which a later list waits on and warns about.
+    /// A `region` scope stamps only the lifetime value, so a list touching the rest of the buffer waits on nothing.
     [[nodiscard]] sg::stream_upload_handle stream_buffer(sg::raw_buffer_handle const& buffer,
                                                          cc::pinned_data<byte const> data,
-                                                         isize offset);
+                                                         isize offset,
+                                                         sg::stream_scope scope);
 
     /// A streaming upload whose payload is produced chunk by chunk as windows open.
     [[nodiscard]] sg::stream_upload_handle stream_source_buffer(sg::raw_buffer_handle const& buffer,
                                                                 std::unique_ptr<sg::stream_source> source,
-                                                                isize offset);
+                                                                isize offset,
+                                                                sg::stream_scope scope);
 
     /// The texture forms of all three.
     /// A chunk must fall on row boundaries, a row being the smallest unit a texture copy can place.

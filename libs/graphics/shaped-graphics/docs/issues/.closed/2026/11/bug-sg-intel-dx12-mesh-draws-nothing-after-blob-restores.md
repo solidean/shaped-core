@@ -3,6 +3,8 @@ created: 2026-11-26
 refs:
   - file: libs/graphics/shaped-graphics/backends/dx12/src/shaped-graphics/backends/dx12/dx12_bind.cc
   - test: "sg - a mesh-shaded pipeline of triangles built from its own cached blob takes it, and draws as before"
+closed: 2026-11-26
+resolution: fixed
 ---
 
 # On the Arc, a mesh pipeline draws nothing now and then once mesh-shaded blobs were restored
@@ -14,4 +16,13 @@ The same seeds draw every pipeline with mesh blobs skipped, whether the stream s
 So `dx12_bind.cc` restores no mesh-shaded blob on an Intel GPU.
 Not known: what the restore leaves behind in the driver, and whether a standalone repro can show it.
 Possibly the driver cache bug of known issue `intel-d3d12-cached-pso-draws-nothing`, met within one process: a restore that draws nothing, no call failing.
-[intel-d3d12-cached-pso-draws-nothing](../../../../../docs/bugs-external/intel-d3d12-cached-pso-draws-nothing/readme.md) reproduces that one.
+[intel-d3d12-cached-pso-draws-nothing](../../../../../../../../docs/bugs-external/intel-d3d12-cached-pso-draws-nothing/readme.md) reproduces that one.
+
+## Log
+
+**2026-11-26: reproduced standalone, and the gate is exactly as wide as the bug.**
+Its entry reproduces it with a trivial mesh stage:
+[intel-d3d12-mesh-pipeline-built-after-a-restore-draws-nothing](../../../../../../../../docs/bugs-external/intel-d3d12-mesh-pipeline-built-after-a-restore-draws-nothing/readme.md).
+A mesh pipeline restored from another process's blob draws, and every one built fresh after it in that process draws nothing.
+A vertex pipeline in the same order draws, so `dx12_bind.cc`'s `mesh_blobs`, false on an Intel GPU, is the workaround and stays.
+Not the cached-PSO bug of intel-d3d12-cached-pso-draws-nothing, which needs a large pixel stage and no blob of the application's.

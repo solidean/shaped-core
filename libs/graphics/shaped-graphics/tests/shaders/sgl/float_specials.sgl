@@ -32,3 +32,13 @@ binding float_specials:
     float_specials.results[8] = denormal * big
     float_specials.results[9] = denormal
     float_specials.comparisons[4] = if denormal > zero => 1u else 0u
+
+binding named_specials:
+    values: mut buffer[float]
+
+// the named constants, which every target writes through their bits (CHK-563, EMIT-287)
+@float(.specials) @compute(1) fun named(){named_specials}:
+    named_specials.values[0] = float.nan
+    named_specials.values[1] = float.infinity
+    named_specials.values[2] = -float.infinity
+    named_specials.values[3] = min(7.0, float.infinity)

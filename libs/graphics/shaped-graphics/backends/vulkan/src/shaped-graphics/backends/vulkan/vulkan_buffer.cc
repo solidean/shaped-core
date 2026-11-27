@@ -48,9 +48,11 @@ void vulkan_buffer::release_storage() const
     // Both directions share one entry, so the gate takes whichever timeline actually has something pending — they
     // are different groups, and a value from one means nothing on the other.
     auto const upload_pending = _pending_async_upload_value.load(cc::memory_order_acquire);
-    auto const stream_pending = _pending_stream_copy_value.load(cc::memory_order_acquire);
+    auto const stream_pending = cc::max(_pending_stream_copy_value.load(cc::memory_order_acquire),
+                                        _pending_region_stream_copy_value.load(cc::memory_order_acquire));
     auto const download_pending = _pending_async_download_value.load(cc::memory_order_acquire);
-    auto const stream_download_pending = _pending_stream_download_value.load(cc::memory_order_acquire);
+    auto const stream_download_pending = cc::max(_pending_stream_download_value.load(cc::memory_order_acquire),
+                                                 _pending_region_stream_download_value.load(cc::memory_order_acquire));
     auto const highest_upload = upload_pending > stream_pending ? upload_pending : stream_pending;
     auto const highest_download = download_pending > stream_download_pending ? download_pending : stream_download_pending;
     if (highest_upload != 0 && _upload_group != nullptr)

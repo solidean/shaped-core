@@ -286,6 +286,11 @@ struct sgl::described_entry_point
     cc::vector<check::slot_footprint> footprint;
     /// The file-scope samplers its code reaches, which its pipeline layout carries, in index order.
     cc::vector<cc::string> samplers;
+    /// The callables tables its code calls, `m.name` for another module's, in the order of the callable section
+    /// (CHK-562): what a link numbers for it beside its samplers (LINK-3).
+    cc::vector<cc::string> callables_tables;
+    /// The ray set it traces, `m.name` for another module's; empty for one that traces none (LINK-8).
+    cc::string ray_set;
     /// A vertex entry point's `@vertex struct`, which `structs` describes; `m.name` for another module's (EMIT-268).
     /// Empty for every other stage and for a vertex entry point that draws from no vertex buffer.
     cc::string vertex_input;

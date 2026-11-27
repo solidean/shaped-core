@@ -43,7 +43,7 @@ cc::shared_async<cc::unit> oidn_denoise_routine::init(sg::routine_init_scope sco
     // Lazily is not an option: a caller advancing an epoch every frame — which is every real frame loop — drives
     // nothing the compile could finish on, so a network built on first use can stay pending forever.
     if (!co_await impl::oidn_prewarm_pipelines(ctx, params()))
-        fail_init();
+        fail_init(scope);
     co_return;
 }
 

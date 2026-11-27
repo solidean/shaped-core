@@ -95,6 +95,8 @@ cc::string_view sgl::emit::to_string(error_kind kind)
     {
     case error_kind::module_has_errors:
         return "module-has-errors";
+    case error_kind::unnumbered:
+        return "unnumbered";
     case error_kind::flattened_for_another_target:
         return "flattened-for-another-target";
     case error_kind::unknown_entry_point:
@@ -148,6 +150,75 @@ sgl::emit::impl::dialect const& sgl::emit::impl::dialect_of(target t)
     return hlsl_dx12_dialect();
 }
 
+sgl::i32 sgl::emit::sampler_slot(check::checked_module const& m, numbering const* n, check::symbol_id symbol)
+{
+    if (n == nullptr)
+        return impl::file_sampler_index(m, symbol);
+    for (auto const& s : n->samplers)
+        if (s.symbol == symbol)
+            return s.value;
+    return -1;
+}
+
+sgl::i32 sgl::emit::callable_record(check::checked_module const& m, numbering const* n, check::symbol_id table)
+{
+    if (n == nullptr)
+        return m.callable_offset_of(table);
+    for (auto const& t : n->tables)
+        if (t.symbol == table)
+            return t.value;
+    return -1;
+}
+
+void sgl::emit::resolve_callable_bases(check::checked_module const& m, check::flat_entry_point& e, numbering const* n)
+{
+    auto const record_of = [&](check::flat_expr_id id) -> i32
+    {
+        if (!check::impl::is_known(e, id))
+            return -1;
+        auto const* const base = e.at(id).node.try_as<check::flat_callable_base>();
+        return base == nullptr ? -1 : callable_record(m, n, base->table);
+    };
+    auto is_symbolic = false;
+    for (auto const& x : e.exprs)
+        is_symbolic = is_symbolic || x.node.is<check::flat_callable_base>();
+    if (!is_symbolic)
+        return;
+    // A callable's index is `i + base` (CHK-344); where the base is 0, the call takes `i` itself, as it did before the
+    // base was symbolic, and the sum is left unreachable for legalization to drop.
+    for (auto const& x : e.exprs)
+    {
+        auto const* const call = x.node.try_as<check::flat_call>();
+        if (call == nullptr || !check::impl::is_known(e, call->arguments))
+            continue;
+        for (auto k = u32(0); k < call->arguments.count; ++k)
+        {
+            auto const argument = e.expr_lists[call->arguments.first + k];
+            if (!check::impl::is_known(e, argument))
+                continue;
+            auto const* const sum = e.at(argument).node.try_as<check::flat_call>();
+            if (sum == nullptr || sum->arguments.count != 2 || !check::impl::is_known(e, sum->arguments))
+                continue;
+            auto const operands = e.at(sum->arguments);
+            if (record_of(operands[1]) == 0)
+                e.expr_lists[call->arguments.first + k] = operands[0];
+        }
+    }
+    for (auto& x : e.exprs)
+        if (auto const* const base = x.node.try_as<check::flat_callable_base>())
+            if (auto const record = callable_record(m, n, base->table); record >= 0)
+                x.node = check::flat_int_literal{.value = record};
+}
+
+sgl::check::flat_entry_point sgl::emit::with_callable_bases(check::checked_module const& m,
+                                                            check::flat_entry_point const& e,
+                                                            numbering const* n)
+{
+    auto result = e;
+    resolve_callable_bases(m, result, n);
+    return result;
+}
+
 sgl::emit::emitted_text sgl::emit::emit(check::checked_module const& m,
                                         sgl::isize entry_point,
                                         target t,
@@ -172,9 +243,10 @@ sgl::emit::emitted_text sgl::emit::emit(check::checked_module const& m,
     }
 
     // WebGPU traces through the emulated form of a trace, and every other target through its native query
-    return emit_entry_point(
-        m, check::legalize(m, m.entry_points[entry_point], {.is_emulated = t == target::wgsl, .erases_prints = true}),
-        t, sources);
+    return emit_entry_point(m,
+                            check::legalize(m, with_callable_bases(m, m.entry_points[entry_point], sources.numbering),
+                                            {.is_emulated = t == target::wgsl, .erases_prints = true}),
+                            t, sources);
 }
 
 namespace sgl::emit
@@ -401,7 +473,7 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
     }
 
     auto result = emitted_text();
-    impl::validate(m, e, result.errors, sources.diagnostics);
+    impl::validate(m, e, result.errors, sources.diagnostics, sources.numbering);
     if (!result.errors.empty())
         return result;
 
@@ -418,7 +490,7 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
             | check::feature::shader_int64_atomics | check::feature::shader_shared_int64_atomics
             | check::feature::shader_int64_min_max_atomics | check::feature::vertex_pipeline_stores
             | check::feature::quad_control | check::feature::multi_viewport
-            | check::feature::readwrite_norm16_image_formats;
+            | check::feature::readwrite_norm16_image_formats | check::feature::early_depth_test;
         for (auto i = isize(0); i < check::k_feature_count; ++i)
             if (e.features.has(check::feature(i)) && never.has(check::feature(i)))
                 result.errors.push_back({.kind = error_kind::target_lacks_feature,
@@ -547,7 +619,8 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
             }
     }
 
-    auto plan = impl::make_plan(m, e, t, sources.device_features.has(check::feature::float_atomic_add));
+    auto plan
+        = impl::make_plan(m, e, t, sources.device_features.has(check::feature::float_atomic_add), sources.numbering);
     plan.diagnostics = sources.diagnostics;
     plan.sees_motion = sources.software_trace;
     plan.compiled_for = compile_target_of(t, sources.device_features);

@@ -450,6 +450,8 @@ struct sgl::check::member_info
     bool is_layer = false;
     /// Carries `@viewport_index`: the viewport the vertex stage sends its primitive to (CHK-534).
     bool is_viewport_index = false;
+    /// `@clip_distances` on a `float[N]` field of what reaches the rasterizer: its clip distances (CHK-571).
+    bool is_clip_distances = false;
     /// `@interpolate(…)`, or the default: perspective at the pixel centre.
     interpolation interpolate;
     /// Carries `@interpolate` at all, which a member that is no stage link must not.
@@ -743,6 +745,8 @@ struct sgl::check::function_info
     bool is_auto_workgroup = false;
     /// The subgroup size a `@compute` entry point asks for by `@preferred_subgroup_size(n)`; 0 where it asks none.
     i32 preferred_subgroup_size = 0;
+    /// `@early_depth_test` on a pixel entry point: the depth and stencil tests, and their writes, run before it (CHK-564).
+    bool is_early_depth_test = false;
     /// Carries `@pure`: a call of it has no effect, so nobody can tell whether or when it ran.
     /// A `@builtin` without it is assumed to have one.
     bool is_pure = false;
@@ -959,6 +963,8 @@ enum class sgl::check::target_kind : sgl::u8
     struct_cases,
     /// On a `member` or a call: member `index` of a query or a candidate, a `query_member` (CHK-557 to CHK-559).
     query_member,
+    /// On a `member`: `T.nan` (`index` 0) or `T.infinity` (`index` 1) of the float type `symbol` (CHK-563).
+    non_finite_constant,
 };
 
 /// What an expression refers to, for an editor: go to definition, hover, rename.

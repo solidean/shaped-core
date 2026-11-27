@@ -86,7 +86,9 @@ ASYNC_INVOCABLE_TEST("sr - a mix reaches both of its endpoints exactly",
     (void)sr_test::shader_fixtures(); // sr's one library, alive for the whole binary
 
     auto const a = tg::vec4f(0.25f, 0.5f, 0.75f, 1.0f);
-    auto const b = tg::vec4f(0.9f, 0.1f, 0.4f, 0.5f);
+    // The GPU converts only the source, so no channel of it may land halfway between two steps of rgb10a2's grid, a tie a GPU may round either way.
+    // An alpha of 0.5 is 1.5 steps of its 2 bits, which an RTX 5080 stores as 1 where `quantized` gives 2.
+    auto const b = tg::vec4f(0.9f, 0.1f, 0.4f, 0.625f);
 
     for (auto const format : sr_test::k_swept_formats)
     {

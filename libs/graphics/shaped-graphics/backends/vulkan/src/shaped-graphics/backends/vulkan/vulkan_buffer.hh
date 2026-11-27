@@ -179,6 +179,11 @@ public:
     mutable cc::atomic<u64> _pending_stream_copy_value = {0};
     mutable cc::atomic<u64> _pending_stream_download_value = {0};
 
+    // The same, for a stream that claims a region alone: only deferred deletion reads them.
+    // The caller keeps lists off the region, so the rest of the buffer may be used meanwhile without a wait.
+    mutable cc::atomic<u64> _pending_region_stream_copy_value = {0};
+    mutable cc::atomic<u64> _pending_region_stream_download_value = {0};
+
     // Guarded because concurrent command lists may record against the same buffer.
     // Mutable so a const handle can still track access: tracking is bookkeeping about the buffer, not a change to it.
     mutable cc::mutex<vulkan_buffer_access> _access;

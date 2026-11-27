@@ -94,6 +94,8 @@ ctx.supports(sg::feature::ray_query)               // bool — THE capability qu
                                                    //   | float32_filtering (filter r32/rg32/rgba32_float) | extended_image_formats (storage beyond is_portable_image_format)
                                                    //   | readwrite_norm16_image_formats (read_write r16..rgba16 _unorm/_snorm; never webgpu/metal)
                                                    //   | norm16_filtering (filter r16..rgba16 _unorm/_snorm; never webgpu)
+                                                   //   | early_depth_test (SGL's @early_depth_test on a pixel stage that writes memory or discards; never webgpu)
+                                                   //   | clip_distances (SGL's @clip_distances field; vulkan with shaderClipDistance; not webgpu yet)
                                                    //   | unaligned_block_compression (false on webgpu and metal: a BC texture needs whole 4x4 blocks,
                                                    //     and create_texture THROWS on one that has not; desc.unaligned_block_error(supports) asks first)
                                                    //   | texture_compression_bc (BC1-BC7 textures; vulkan enables textureCompressionBC, metal on Apple-silicon Macs, webgpu with the adapter's feature)
@@ -1147,7 +1149,7 @@ co_await scope.with_cmd([&](sg::command_list& cmd) { ... })  // record GPU init 
 //   `f` is not a coroutine, which is what keeps a list from being held across an await.
 co_await scope.yield()                     // a budget boundary inside one phase, and a cancellation check
 co_await cc::async_settled(node)           // await WITHOUT short-circuiting — a bad shader is the routine's verdict
-fail_init()                                // void — "will not come good until a reload"; readiness reports `failed`
+fail_init(scope)                           // void — "will not come good until a reload"; this run reports `failed`
 // static entry points the CRTP adds (all reach the per-context instance by type — no handle, no registration):
 my_routine::try_acquire_exclusive(cmd[, params])  // -> sg::routine_guard<my_routine>  HOLDS the routine's lock; self-> is mutable
 my_routine::try_acquire(cmd[, params])           // -> sg::routine_scope<my_routine>  NO lock held; read-only

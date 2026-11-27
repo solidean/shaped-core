@@ -108,6 +108,30 @@ hit_group spheres for path_rays:
     miss.occlusion = open_sky
     hit_groups = (textured, spheres)
 
+// ---- the same rays, their flags combined at run time (EMIT-288): `id.z` is 0 in every invocation, which no compiler
+// knows, so `skip_procedural` alone reaches the trace, and the scene holds no procedural geometry to skip
+
+@raygen fun flagged_primary(@launch_id id: int3){traced}:
+    let chosen = if id.z == 0 => ray_flags.skip_procedural else ray_flags.force_opaque
+    let combined = chosen | ray_flags.cull_opaque
+    let flags = if combined.has(ray_flags.skip_procedural) => combined & chosen else ray_flags.force_opaque
+    let mut p = radiance(0.0, 0.0, 0.0, 0, 0, 0, 0)
+    let r = ray(
+        origin = pos3((id.x as float) + 0.25, (id.y as float) + 0.5, -1.0)
+        direction = vec3(0.0, 0.0, 1.0)
+    )
+    trace(traced.world, r, path_rays.surface, mut p, flags = flags)
+    let at = id.x + id.y * 8
+    traced.hits[at] = float4(p.t, p.u, p.v, 0.0)
+    traced.ids[at] = int4(p.is_hit, p.instance_id, p.primitive, p.is_lit)
+
+@raytracing pipeline flagged_path:
+    rays = path_rays
+    raygen = flagged_primary
+    miss.surface = sky
+    miss.occlusion = open_sky
+    hit_groups = (textured, spheres)
+
 // ---- the same rays, regrouped first: a device with shader execution reordering runs the alike ones together
 
 @raygen fun reordered_primary(@launch_id id: int3){traced}:

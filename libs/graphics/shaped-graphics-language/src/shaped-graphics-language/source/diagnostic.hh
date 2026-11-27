@@ -257,6 +257,10 @@ enum class sgl::diagnostic_kind : sgl::u8
     /// A float compared with itself in code an entry point compiles at `@float(.fast)`, a NaN test it may fold (CHK-436);
     /// a warning.
     nan_test_at_fast,
+    /// A `discard` in a pixel stage with `@early_depth_test`, which keeps the depth the tests wrote (CHK-566); a warning.
+    early_depth_keeps_discarded,
+    /// `T.nan` or `T.infinity` where the float guarantee is `@float(.fast)`, which may assume neither arises (CHK-563).
+    non_finite_at_fast,
     /// A stated workgroup size that leaves lanes of a wave idle, that no webgpu device runs, or that is shaped against
     /// the body's indexing (CHK-521); a warning.
     workgroup_wastes_lanes,

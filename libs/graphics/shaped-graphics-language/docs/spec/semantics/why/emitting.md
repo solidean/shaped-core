@@ -8,6 +8,51 @@ Nothing here is normative.
 The emitters follow the [compilation model](../../incubator/compilation-model.md): SGL compiles to shader text, and the text's own compiler optimizes it.
 So an emitter is a printer with opinions about names and addresses, and it transforms nothing.
 
+## EMIT-293
+
+SGL's DXIL held every variable as one array of scalars, so a local `Vertex[8]` of sixteen floats was one `[128 x float]`.
+AMD's compiler for RDNA 3 and 4 crashes on that shape, filled, rewritten under a branch and then written by the field.
+[The bug's entry](../../../../../../../docs/bugs-external/amd-dxil-flat-local-array-crashes-compiler/readme.md) reduces it to DXC's compile of plain HLSL.
+DXC's scalar replacement never writes the shape for an array of structs: it splits one into an array per field and lane, which is what the driver meets from HLSL.
+Matching DXC's layout is the narrowest fix that keeps SGL's DXIL where the driver has been, and it took the repository's shaders 1 KB smaller in all.
+A lane picked at run time needs the lanes in one array, so that variable keeps its vectors whole, as DXC keeps an array it cannot split.
+A value with no such array keeps one array per scalar type, which leaves its debug declaration and its size as they were.
+
+## EMIT-292
+
+A driver that inlines a trace or a callable call saves every value live across it and restores it after, and its compile time follows that state.
+DXC reads a constant buffer again after each `TraceRay`, since the call may write memory, and what it computes from it is computed again from that read.
+SGL's sharing read each field once and kept it, and what it fed, across every later trace.
+On Quest3D's hybrid trace that state made the cold creation of SGL's pipeline 1.4 to 1.5 times DXC's, and the same recomputation done by hand on SGL's DXIL took it to 0.95 to 1.0.
+A constant block cannot change during a dispatch, and neither can the launch, so a copy computes what the original did; what a call can write is never copied.
+DXC keeps a read of the launch's index across a call, since it takes it as a pure value; SGL copies it too, as the measured transform did.
+A copy is a few operations a lane where keeping the value costs a register the driver saves around every call, so no chain is too long to copy.
+
+## EMIT-291
+
+The attribute is in the source, and the text route already honoured it, so the native routes ignoring it made the three routes compile one program three ways.
+Around a trace an unrolled loop multiplies what a driver compiles when the pipeline is created, since the driver inlines every `TraceRay` and callable call site.
+DXIL's passes fold a loop's structure away, so the hint stands on the loop's header in SGL's IR and moves with it.
+Where threading an empty header would make two loops of different hints one, the header stays: a back edge names one loop's node, and LLVM reads a loop's hint off its back edges.
+
+## EMIT-290
+
+DXC refuses an array under `SV_ClipDistance` in a DXIL signature, since each element would take a row, and takes a float per lane, which it packs as it would a `float4` and the rest.
+A lane each is also what the existing pieces of an array on a link already are, so the HLSL text needs no form of its own, and SGL's own DXIL matches DXC's compile of that text element for element.
+
+## EMIT-288
+
+A native route lowers what its target's text compiles to, and DXC compiles HLSL's `|` of two `uint`s to an `or`.
+The flags are an `int` on every target already, since the registry gives `ray_flags` an `int`'s layout, so the operators are rows of the lowering's family table.
+Every use before was folded first, which is why no route met the gap until a trace took flags chosen at run time.
+MSL sets its intersector's parameters from the value, and WGSL's emulated walk reads the word, so neither changed.
+
+## EMIT-287
+
+WGSL refuses a const-expression that is non-finite when it creates the shader, and a `bitcast` of a literal is one.
+A `let` is no const-expression, so a value read from one is a run-time value WGSL takes, whatever bits it holds.
+The other targets fold nothing they would refuse, so a cast of the bits stands where the constant does.
+
 ## EMIT-2
 
 One HLSL text could carry both APIs' addresses, `register` and `[[vk::binding]]` side by side, since each compiler reads only its own.

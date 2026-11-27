@@ -8,6 +8,7 @@
 #include <clean-core/container/variant.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/optional.hh>
+#include <clean-core/math/bit.hh>
 #include <clean-core/memory/shared_ptr.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
@@ -231,8 +232,8 @@ struct sgl::check::flat_local
 struct sgl::check::flat_label
 {
     cc::string name;
-    /// A loop written `@unroll(false)`, which the target is asked to keep a loop; a hint, which HLSL writes as `[loop]`
-    /// and the other targets cannot spell (CHK-414).
+    /// A loop written `@unroll(false)`, which the target is asked to keep a loop; a hint, which HLSL writes as `[loop]`,
+    /// the native routes as EMIT-291 says, and MSL and WGSL cannot spell (CHK-414).
     bool is_rolled = false;
 
     bool operator==(flat_label const&) const = default;
@@ -244,12 +245,16 @@ struct sgl::check::flat_invalid
     constexpr bool operator==(flat_invalid const&) const = default;
 };
 
-/// A float literal; the origin has its spelling.
+/// A float literal; the origin has its spelling, or it is a named NaN or infinity (CHK-563).
 struct sgl::check::flat_literal
 {
     f64 value = 0;
 
-    constexpr bool operator==(flat_literal const&) const = default;
+    /// By the bits, so a NaN equals itself and 0.0 differs from -0.0.
+    constexpr bool operator==(flat_literal const& rhs) const
+    {
+        return cc::bit_cast<u64>(value) == cc::bit_cast<u64>(rhs.value);
+    }
 };
 
 /// Of the prelude's type `int`, or of `uint` where an integer literal converted to it (CHK-253); a `uint` keeps its
@@ -316,6 +321,16 @@ struct sgl::check::flat_file_sampler
     symbol_id sampler = symbol_id::none;
 
     constexpr bool operator==(flat_file_sampler const&) const = default;
+};
+
+/// Where callables table `table` starts in the callable section a compile writes for (CHK-344, CHK-562): an `int`.
+/// The program's section unlinked, a link group's under a link (LINK-5); a target writes it as the constant it resolves to.
+struct sgl::check::flat_callable_base
+{
+    /// Of kind `pipeline`, a `callables` table.
+    symbol_id table = symbol_id::none;
+
+    constexpr bool operator==(flat_callable_base const&) const = default;
 };
 
 /// `v.normal`, one field of a struct; or `v.zyx`, a swizzle of a prelude vector, whose value is the plain vector of
@@ -479,7 +494,8 @@ struct sgl::check::flat_expr
                 flat_and,
                 flat_or,
                 flat_block,
-                flat_by_target>
+                flat_by_target,
+                flat_callable_base>
         node;
 
     bool operator==(flat_expr const&) const = default;
@@ -880,6 +896,8 @@ struct sgl::check::flat_entry_point
     bool is_auto_workgroup = false;
     /// `function_info::preferred_subgroup_size`, which the host asks the device for and no text but dx12's states.
     i32 preferred_subgroup_size = 0;
+    /// `function_info::is_early_depth_test`, which every target but WGSL states on the stage (EMIT-289).
+    bool is_early_depth_test = false;
     /// What a device needs to run it, `function_info::features`.
     feature_set features;
     /// Every feature whose grant the compile consulted, granted or not: a `has(.f)` it reached, a trace's `reorder`
@@ -970,10 +988,11 @@ struct sgl::check::flat_entry_point
             && result == rhs.result && is_equal(bindings, rhs.bindings) && workgroup[0] == rhs.workgroup[0]
             && workgroup[1] == rhs.workgroup[1] && workgroup[2] == rhs.workgroup[2]
             && is_auto_workgroup == rhs.is_auto_workgroup && preferred_subgroup_size == rhs.preferred_subgroup_size
-            && consulted == rhs.consulted && is_equal(stage_inputs, rhs.stage_inputs) && is_equal(locals, rhs.locals)
-            && is_equal(labels, rhs.labels) && root == rhs.root && is_equal(exprs, rhs.exprs)
-            && is_equal(stmts, rhs.stmts) && is_equal(expr_lists, rhs.expr_lists) && is_equal(stmt_lists, rhs.stmt_lists)
-            && is_equal(arms, rhs.arms) && is_equal(call_sites, rhs.call_sites) && is_equal(check_sites, rhs.check_sites)
+            && is_early_depth_test == rhs.is_early_depth_test && consulted == rhs.consulted
+            && is_equal(stage_inputs, rhs.stage_inputs) && is_equal(locals, rhs.locals) && is_equal(labels, rhs.labels)
+            && root == rhs.root && is_equal(exprs, rhs.exprs) && is_equal(stmts, rhs.stmts)
+            && is_equal(expr_lists, rhs.expr_lists) && is_equal(stmt_lists, rhs.stmt_lists) && is_equal(arms, rhs.arms)
+            && is_equal(call_sites, rhs.call_sites) && is_equal(check_sites, rhs.check_sites)
             && is_equal(check_nodes, rhs.check_nodes) && is_equal(messages, rhs.messages) && body == rhs.body
             && names == rhs.names && is_equal(traced_rays, rhs.traced_rays) && is_equal(text_types, rhs.text_types)
             && attributes == rhs.attributes && is_equal(options, rhs.options) && float_guarantee == rhs.float_guarantee

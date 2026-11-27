@@ -452,12 +452,14 @@ if(SC_BUILD_TESTS)
             tests/compute/compute-diagnostic-routes-test.cc
             tests/compute/compute-diagnostics-test.cc
             tests/compute/compute-assert-billing-test.cc
+            tests/compute/compute-bgra8-test.cc
             tests/compute/compute-norm16-test.cc
             tests/compute/compute-sixteen-bit-test.cc
             tests/compute/compute-sixty-four-bit-test.cc
             tests/compute/compute-double-maths-test.cc
             tests/compute/compute-pack-routes-test.cc
             tests/compute/compute-array-equality-test.cc
+            tests/compute/compute-struct-arrays-test.cc
             tests/compute/compute-native-dxil-test.cc
             tests/compute/compute-native-spirv-test.cc
             tests/compute/compute-matrix-arithmetic-test.cc
@@ -530,6 +532,7 @@ if(SC_BUILD_TESTS)
                 raytracing.sgl:*
                 ptlas_records.sgl:*
                 raytracing_pipeline.sgl:*
+                raytracing_subgroups.sgl:*
                 raytracing_scenes.sgl:*
                 raytracing_transforms.sgl:*
                 raytracing_end_search.sgl:*
@@ -555,12 +558,14 @@ if(SC_BUILD_TESTS)
                 sixty_four_bit_min_max.sgl:*
                 double_maths.sgl:*
                 array_equality.sgl:*
+                struct_arrays.sgl:*
                 matrix_arithmetic.sgl:*
                 float_atomics.sgl:*
                 differentiable_buffers.sgl:*
                 splat_fitting.sgl:*
                 option_formats.sgl:*
                 norm16_images.sgl:*
+                bgra8_image.sgl:*
         )
         sc_add_shader_package(
             TARGET     shaped-graphics-test

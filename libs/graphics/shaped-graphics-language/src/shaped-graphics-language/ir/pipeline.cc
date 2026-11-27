@@ -64,6 +64,10 @@ cc::optional<cc::string> sgl::ir::compile_spirv(emit::impl::plan const& plan, pr
     assert_whole(p, control_flow::structured, "flatten_branches");
     chain_sums(p);
     assert_whole(p, control_flow::structured, "chain_sums");
+    recompute_after_calls(p);
+    assert_whole(p, control_flow::structured, "recompute_after_calls");
+    remove_unused(p);
+    assert_whole(p, control_flow::structured, "remove_unused after recompute_after_calls");
     out = write_spirv(p);
     return {};
 }
@@ -89,5 +93,9 @@ cc::optional<cc::string> sgl::ir::compile_dxil(emit::impl::plan const& plan, pro
     assert_whole(p, flow, "flatten_branches");
     chain_sums(p);
     assert_whole(p, flow, "chain_sums");
+    recompute_after_calls(p);
+    assert_whole(p, flow, "recompute_after_calls");
+    remove_unused(p);
+    assert_whole(p, flow, "remove_unused after recompute_after_calls");
     return write_dxil(p, out);
 }

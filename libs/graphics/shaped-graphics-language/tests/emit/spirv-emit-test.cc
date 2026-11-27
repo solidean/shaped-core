@@ -293,6 +293,63 @@ TEST("sgl spirv - a 16-bit normalized image is a storage image of its format, an
 #endif
 }
 
+TEST("sgl spirv - a bgra8_unorm image, which SPIR-V names no format for, is Unknown, and DXIL compiles it too")
+{
+    // EMIT-98: a write states StorageImageWriteWithoutFormat and a read StorageImageReadWithoutFormat, as DXC's text
+    // without `[[vk::image_format]]` does; once the lowering refused it and handed on no type, which aborted
+    auto modules = spirv_batch();
+    for (auto const access : {"out", "mut"})
+    {
+        auto const is_mut = cc::string_view(access) == "mut";
+        auto const source = cc::format("require extended_image_formats{}\n"
+                                       "\n"
+                                       "binding work:\n"
+                                       "    img: {} image_2d[.bgra8_unorm]\n"
+                                       "\n"
+                                       "@compute(4, 4) fun cs(@thread_id id: int3){{work}}:\n"
+                                       "    work.img[id.xy] = float4(1.0)\n"
+                                       "{}",
+                                       is_mut ? ", readwrite_image_formats" : "", access,
+                                       is_mut ? "    work.img[id.xy] += work.img[id.xy]\n" : "");
+        auto const e = written(source, "cs", sgl::emit::native_route::require);
+        REQUIRE(e.has_value()).dump("error", e.has_error() ? e.error() : cc::string());
+        auto const& words = e.value().spirv;
+        auto format = u32(99);
+        auto reads = false;
+        auto writes = false;
+        for (auto at = isize(5); at < words.size(); at += isize(words[at] >> 16))
+        {
+            if ((words[at] & 0xffffu) == 25) // OpTypeImage
+                format = words[at + 8];
+            if ((words[at] & 0xffffu) == 17) // OpCapability
+            {
+                reads = reads || words[at + 1] == 55;
+                writes = writes || words[at + 1] == 56;
+            }
+        }
+        CHECK(format == 0).dump("access", access);
+        CHECK(writes).dump("access", access);
+        CHECK(reads == is_mut).dump("access", access);
+        modules.add(words, "bgra8_unorm", "cs", access);
+
+        auto const dxil = sgl::compile_to_text({.source = source,
+                                                .entry_point = "cs",
+                                                .target = sgl::emit::target::hlsl_dx12,
+                                                .native = sgl::emit::native_route::require});
+        REQUIRE(dxil.has_value()).dump("error", dxil.has_error() ? dxil.error() : cc::string());
+        CHECK(!dxil.value().dxil.empty()).dump("access", access);
+    }
+#if !defined(CC_OS_EMSCRIPTEN) && !defined(CC_OS_IOS) && !defined(CC_OS_TVOS)
+#if defined(CC_OS_WINDOWS)
+    if (std::system("spirv-val --version > NUL 2>&1") != 0)
+#else
+    if (std::system("spirv-val --version > /dev/null 2>&1") != 0)
+#endif
+        SKIP("no spirv-val on the path");
+    modules.validate();
+#endif
+}
+
 TEST("sgl spirv - a module is SPIR-V 1.6, and states its workgroup")
 {
     auto const e = written(k_doubled, "run", sgl::emit::native_route::require);

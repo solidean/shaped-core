@@ -16,6 +16,44 @@ using namespace sgl::emit::impl;
 using level = builtins::precedence;
 using rendered = builtins::written;
 
+/// The bits of a non-finite `value` of `kind`, a float's, a half's or a double's (EMIT-287).
+u64 non_finite_bits(f64 value, value_kind kind)
+{
+    if (kind == value_kind::scalar_double)
+        return cc::bit_cast<u64>(value);
+    auto const bits = cc::bit_cast<u32>(f32(value));
+    if (kind != value_kind::scalar_half)
+        return bits;
+    return ((bits >> 16) & 0x8000u) | 0x7c00u | ((bits & 0x7fffffu) != 0 ? 0x200u : 0u);
+}
+
+/// WGSL's helper that gives a non-finite value through a `let`, which is no const-expression, so creating the shader
+/// folds nothing it would refuse (EMIT-287).
+cc::string wgsl_non_finite_name(u64 bits, value_kind kind)
+{
+    return cc::format("sgl_non_finite_{}_{:x}", kind == value_kind::scalar_half ? "f16" : "f32", bits);
+}
+
+/// A NaN or an infinity, written through its bits, since no target has a literal of one (EMIT-287).
+cc::string non_finite_text(f64 value, value_kind kind, builtins::language language)
+{
+    auto const bits = non_finite_bits(value, kind);
+    auto const is_half = kind == value_kind::scalar_half;
+    switch (language)
+    {
+    case builtins::language::hlsl:
+        if (kind == value_kind::scalar_double)
+            return cc::format("asdouble({:#010x}u, {:#010x}u)", u32(bits), u32(bits >> 32));
+        return is_half ? cc::format("asfloat16(uint16_t({:#06x}u))", bits) : cc::format("asfloat({:#010x}u)", bits);
+    case builtins::language::msl:
+        return is_half ? cc::format("as_type<half>(ushort({:#06x}))", bits)
+                       : cc::format("as_type<float>({:#010x}u)", bits);
+    case builtins::language::wgsl:
+        return cc::format("{}()", wgsl_non_finite_name(bits, kind));
+    }
+    return {};
+}
+
 /// Shortest text that reads back as `value`, always with a decimal point: `1.0`, `0.45`, `1.0e+20`.
 /// `value` must be finite.
 cc::string literal_text(f64 value)
@@ -707,6 +745,26 @@ struct writer
                 widen_array_into(cc::format("{}.{}", name, planned.members[planned.member_of[i]].name),
                                  p.e.at(arguments[i]).type, expr(arguments[i]).text,
                                  mat3_cell_field(p, p.e.at(arguments[i]).type));
+            // EMIT-290: MSL's clip distances are a C array, which takes no `array`, so it is filled a lane at a time
+            else if (planned.member_of[i] >= 0 && planned.members[planned.member_of[i]].is_clip_distances
+                     && d.language() == builtins::language::msl && is_array(p.e.at(arguments[i]).type))
+            {
+                auto value = expr(arguments[i]).text;
+                if (!is_name(value))
+                {
+                    auto const held = p.names.mint("clipped");
+                    auto declaration = cc::string();
+                    d.write_local(declaration, {.name = held,
+                                                .type = type_text(p, d, p.e.at(arguments[i]).type),
+                                                .value = value,
+                                                .dimensions = array_dimensions(p, p.e.at(arguments[i]).type)});
+                    line(declaration);
+                    value = held;
+                }
+                for (auto lane = isize(0); lane < isize(p.m.at(p.e.at(arguments[i]).type).count); ++lane)
+                    line(cc::format("{}.{}[{}] = {}[{}];", name, planned.members[planned.member_of[i]].name, lane,
+                                    value, lane));
+            }
             else if (planned.member_of[i] >= 0)
                 line(cc::format("{}.{} = {};", name, planned.members[planned.member_of[i]].name,
                                 holds_widened_mat3(p, x.type, i)
@@ -1432,8 +1490,17 @@ struct writer
             return rendered{.text = cc::format("{}({})", literal_type->spelled_in(d.language()), r.text)};
         };
         x.node.visit(
-            [&](flat_invalid const&) {}, [&](flat_literal const& l)
-            { result = narrow({.text = literal_text(l.value), .binds = l.value < 0 ? level::unary : level::primary}); },
+            [&](flat_invalid const&) {},
+            [&](flat_literal const& l)
+            {
+                if (!(l.value - l.value == 0))
+                    result = {.text = non_finite_text(
+                                  l.value, literal_type != nullptr ? literal_type->leaf_kind : value_kind::scalar_float,
+                                  d.language())};
+                else
+                    result
+                        = narrow({.text = literal_text(l.value), .binds = l.value < 0 ? level::unary : level::primary});
+            },
             [&](flat_int_literal const& l)
             {
                 auto const is_wrapped = l.value == -2147483647 - 1;
@@ -1477,6 +1544,9 @@ struct writer
                 result = read_as_value(id, result);
             },
             [&](flat_file_sampler const& smp) { result = {.text = p.samplers[sampler_of(p, smp.sampler)].name}; },
+            // a tree legalized without its bases resolved; `validate` refused a table with no record
+            [&](flat_callable_base const& b)
+            { result = {.text = int_literal_text(callable_record(p.m, p.numbering, b.table))}; },
             [&](flat_buffer_length const& b)
             {
                 auto const is_bytes = p.m.at(p.e.at(b.buffer).type).kind == check::type_kind::bytes;
@@ -1772,6 +1842,13 @@ struct writer
                 auto text = cc::string();
                 if (p.e.at(v.value).type == checked_module::void_type)
                     text = cc::format("{};", value.text);
+                // a dropped value with no effect, `let _ = n * 2` or a pure call's, which DXC refuses as unused; a call
+                // with an effect stays a statement, since DXC drops a void cast of what it takes as pure
+                else if (d.language() == builtins::language::hlsl
+                         && (evaluated == nullptr || evaluated->callee == symbol_id::none
+                             || p.m.at(evaluated->callee).info < 0
+                             || p.m.functions[p.m.at(evaluated->callee).info].is_pure))
+                    text = cc::format("(void)({});", value.text);
                 else
                     d.write_eval(text, value.text);
                 line(text);
@@ -2027,6 +2104,26 @@ void sgl::emit::impl::write_helpers(cc::string& out, plan const& p, dialect cons
         if (!is_known)
             written.push_back(cc::move(text));
     }
+    // EMIT-287: WGSL gives a non-finite value through a `let`, once per bit pattern
+    if (d.language() == builtins::language::wgsl)
+        for (auto const& x : p.e.exprs)
+            if (auto const* const literal = x.node.try_as<check::flat_literal>();
+                literal != nullptr && !(literal->value - literal->value == 0))
+            {
+                auto const* const type = p.m.builtin_type_of(x.type);
+                auto const kind = type != nullptr ? type->leaf_kind : value_kind::scalar_float;
+                auto const bits = non_finite_bits(literal->value, kind);
+                auto const is_half = kind == value_kind::scalar_half;
+                auto text
+                    = cc::format("fn {}() -> {} {{\n    let bits = {:#x}u;\n    return bitcast<{}>(bits){};\n}}\n",
+                                 wgsl_non_finite_name(bits, kind), is_half ? "f16" : "f32", bits,
+                                 is_half ? "vec2<f16>" : "f32", is_half ? ".x" : "");
+                auto is_known = false;
+                for (auto const& w : written)
+                    is_known = is_known || w == text;
+                if (!is_known)
+                    written.push_back(cc::move(text));
+            }
     // CHK-460: a length the target reads through a helper, once per buffer
     for (auto const& x : p.e.exprs)
     {

@@ -533,6 +533,9 @@ struct optional_shader_features
     VkBool32 compute_derivative_group_linear = VK_FALSE;
     VkBool32 compute_derivative_group_quads = VK_FALSE;
     bool subgroups = false;
+    /// The operations in the raygen, closest-hit, miss and callable stages too, which a device with ray-tracing pipelines
+    /// needs for `subgroups` (SGL's CHK-568).
+    bool subgroups_in_ray_stages = false;
     /// A binding array indexed `nonuniform` (HLSL's `NonUniformResourceIndex`, SGL's `t[nonuniform i]`) declares the capability
     /// of its descriptor kind, which is invalid unless the matching bit is enabled.
     VkBool32 sampled_image_array_non_uniform_indexing = VK_FALSE;
@@ -580,8 +583,10 @@ optional_shader_features query_optional_shader_features(VkPhysicalDevice dev)
         = VkPhysicalDeviceProperties2{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, .pNext = &subgroup};
     vkGetPhysicalDeviceProperties2(dev, &properties);
 
-    // SGL's subgroup family is one feature, so the device must have every operation of it in both stages it allows.
+    // SGL's subgroup family is one feature, so the device must have every operation of it in every stage it allows.
     constexpr auto stages = VkShaderStageFlags(VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
+    constexpr auto ray_stages = VkShaderStageFlags(VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR
+                                                   | VK_SHADER_STAGE_MISS_BIT_KHR | VK_SHADER_STAGE_CALLABLE_BIT_KHR);
     constexpr auto operations = VkSubgroupFeatureFlags(
         VK_SUBGROUP_FEATURE_BASIC_BIT | VK_SUBGROUP_FEATURE_VOTE_BIT | VK_SUBGROUP_FEATURE_ARITHMETIC_BIT
         | VK_SUBGROUP_FEATURE_BALLOT_BIT | VK_SUBGROUP_FEATURE_SHUFFLE_BIT | VK_SUBGROUP_FEATURE_SHUFFLE_RELATIVE_BIT
@@ -610,6 +615,7 @@ optional_shader_features query_optional_shader_features(VkPhysicalDevice dev)
         // a quad operation of a compute stage is the one DXC writes in a linear derivative group
         .subgroups = (subgroup.supportedStages & stages) == stages
                   && (subgroup.supportedOperations & operations) == operations && linear == VK_TRUE,
+        .subgroups_in_ray_stages = (subgroup.supportedStages & ray_stages) == ray_stages,
         .sampled_image_array_non_uniform_indexing = vk12.shaderSampledImageArrayNonUniformIndexing,
         .storage_buffer_array_non_uniform_indexing = vk12.shaderStorageBufferArrayNonUniformIndexing,
         .storage_image_array_non_uniform_indexing = vk12.shaderStorageImageArrayNonUniformIndexing,
@@ -1189,6 +1195,7 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     // a pipeline that uses one without the device feature enabled fails validation, whatever the device has.
     // `samplerAnisotropy` is enabled wherever the device has it too, and a sampler asking for anisotropy without it is created with it off.
     // `drawIndirectFirstInstance` too, without which an indirect record's `first_instance` must be 0.
+    // `shaderClipDistance` too, which sg::feature::clip_distances reports.
     // `independentBlend` too, without which every color target of a pipeline must blend alike, as dx12, metal and webgpu never ask.
     auto supported = VkPhysicalDeviceFeatures{};
     vkGetPhysicalDeviceFeatures(best_device, &supported);
@@ -1208,6 +1215,7 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
                      .vertexPipelineStoresAndAtomics = supported.vertexPipelineStoresAndAtomics,
                      .fragmentStoresAndAtomics = VK_TRUE,
                      .shaderStorageImageExtendedFormats = supported.shaderStorageImageExtendedFormats,
+                     .shaderClipDistance = supported.shaderClipDistance,
                      .shaderFloat64 = shader_features.shader_float64,
                      .shaderInt64 = shader_features.shader_int64,
                      .shaderInt16 = shader_features.shader_int16},
@@ -1413,11 +1421,13 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     ctx->_shader_int64_atomics = shader_features.has_int64_atomics();
     ctx->_shader_shared_int64_atomics = shader_features.has_shared_int64_atomics();
     ctx->_unbounded_binding_arrays = shader_features.variable_descriptor_count == VK_TRUE;
-    ctx->_subgroups = shader_features.subgroups;
+    // a device that runs ray-tracing pipelines has the operations in their stages, or SGL has no subgroups on it
+    ctx->_subgroups = shader_features.subgroups && (!raytracing_supported || shader_features.subgroups_in_ray_stages);
     ctx->_vertex_layer_output = shader_features.shader_output_layer == VK_TRUE;
     ctx->_multi_viewport = supported.multiViewport == VK_TRUE && shader_features.shader_output_viewport_index == VK_TRUE;
     ctx->_view_instancing = shader_features.multiview == VK_TRUE;
     ctx->_vertex_pipeline_stores = supported.vertexPipelineStoresAndAtomics == VK_TRUE;
+    ctx->_clip_distances = supported.shaderClipDistance == VK_TRUE;
     ctx->_float_atomic_add = float_atomic_add_supported;
     ctx->_quad_control = quad_control_supported;
     ctx->_shader_execution_reordering = raytracing_supported && reorder_supported;

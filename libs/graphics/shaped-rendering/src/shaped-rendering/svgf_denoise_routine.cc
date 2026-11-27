@@ -102,7 +102,7 @@ cc::shared_async<cc::unit> svgf_denoise_routine::init(sg::routine_init_scope sco
         if (p->pipeline->try_value() == nullptr)
         {
             impl::log_build_failure(p->pipeline, "svgf", p == &atrous_output ? params() : k_history_format);
-            fail_init(); // not pending: this will not come good until a reload, and a caller should be able to tell
+            fail_init(scope); // not pending: this will not come good until a reload, and a caller should be able to tell
             co_return;
         }
     }

@@ -282,7 +282,8 @@ sg::bytes_future webgpu_stream_system::download_texture(sg::raw_texture_handle t
 
 sg::stream_upload_handle webgpu_stream_system::stream_to_buffer(sg::raw_buffer_handle buffer,
                                                                 std::unique_ptr<sg::stream_source> source,
-                                                                isize offset)
+                                                                isize offset,
+                                                                sg::stream_scope scope)
 {
     auto control = make_control(source->total_size_hint());
     source->set_waker([] { cc::thread_pump_notify(); });
@@ -294,6 +295,7 @@ sg::stream_upload_handle webgpu_stream_system::stream_to_buffer(sg::raw_buffer_h
         .offset = offset,
         .sequence = _next_sequence++,
         .family = family,
+        .claims_region = scope == sg::stream_scope::region,
     });
     ensure_pump();
     return sg::stream_upload_handle(cc::move(control));
@@ -652,6 +654,18 @@ void webgpu_stream_system::flush_uploads_into(void const* resource, bool for_lis
 {
     if (_uploads.empty())
         return;
+
+    // A list owes nothing to streams into regions of the resource alone: the caller keeps it off them.
+    // Anything else in the family is brought forward with every job ahead of it, so the order holds.
+    if (for_list)
+    {
+        auto owed = false;
+        for (auto const& job : _uploads)
+            if (job.family == resource && !job.claims_region)
+                owed = true;
+        if (!owed)
+            return;
+    }
 
     auto unbounded = isize(1) << 62;
     auto progressed = false;

@@ -137,9 +137,10 @@ void dx12_buffer::release_storage() const
         // Gate release on the async copy queue too: an in-flight upload to this buffer may still reference the resource after its epoch has retired on the direct queue.
         // This is the buffer's highest pending async value, and deferred deletion holds the resource until the copy fence reaches it.
         // Both stamps live on the upload timeline, so the gate is one value on one group.
-        expiring.copy_wait
-            = dx12_group_value{_upload_group, cc::max(_pending_async_upload_value.load(std::memory_order_acquire),
-                                                      _pending_stream_copy_value.load(std::memory_order_acquire))};
+        expiring.copy_wait = dx12_group_value{
+            _upload_group, cc::max(_pending_async_upload_value.load(std::memory_order_acquire),
+                                   cc::max(_pending_stream_copy_value.load(std::memory_order_acquire),
+                                           _pending_region_stream_copy_value.load(std::memory_order_acquire)))};
         _ctx.schedule_deferred_deletion(cc::move(expiring));
     }
 }
