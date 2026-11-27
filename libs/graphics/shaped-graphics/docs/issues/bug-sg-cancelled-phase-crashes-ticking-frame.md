@@ -4,6 +4,8 @@ tags: [routine, async]
 refs:
   - file: libs/graphics/shaped-graphics/src/shaped-graphics/routine/routine_registry.cc
   - test: "sg - a routine cancelled at its own generation is not restarted"
+claimed-by: Claude (for Philip Trettner)
+claimed-at: 2026-11-27T14:41Z
 ---
 
 # A routine phase that ends cancelled crashes the process when the tick runs in a test's own frame
