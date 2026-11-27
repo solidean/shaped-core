@@ -12,7 +12,8 @@ So an async download of a texture followed by an async upload into it is unorder
 dx12 orders both since 04984bd18, and so does vulkan for buffers.
 
 04984bd18 gave vulkan's two texture upload paths the same wait, and on 2026-11-27 that hung the GPU under the full suite on an Arc B580.
-`shaped-graphics-test --repeat 5` lost the device on iteration 2 three times, first noticed in `sg - async upload interleaved with inline writes does not deadlock`; vulkan logged `VK_ERROR_DEVICE_LOST` and dx12 `DXGI_ERROR_DEVICE_HUNG` straight after.
+`shaped-graphics-test --repeat 5` lost the device on iteration 2 three times, first noticed in `sg - async upload interleaved with inline writes does not deadlock`.
+Vulkan logged `VK_ERROR_DEVICE_LOST`, and dx12 `DXGI_ERROR_DEVICE_HUNG` straight after.
 Without the two waits, ten iterations passed, and the test passes 60 repeats alone either way, so it is load that closes the cycle.
 The waits are out again; where the cycle runs is not known.
 

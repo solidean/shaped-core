@@ -17,6 +17,7 @@ If so, the test wants an exclusive group every routine-registering test shares, 
 
 ## Resolution
 
-Two tests in `routine-test.cc` registered routines on the shared context without `sg-reload-generation`: `try_acquire hands out a read-only scope…` and `a routine compiles a shader and dispatches it end to end`.
+Two tests in `routine-test.cc` registered routines on the shared context without `sg-reload-generation`.
+They are `try_acquire hands out a read-only scope…` and `a routine compiles a shader and dispatches it end to end`.
 Either one running beside the idle-registry test leaves the registry pending at its first check, so both now hold the tag.
 Read from the tags rather than caught in the act; the flake was too rare to reproduce on demand.
