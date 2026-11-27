@@ -60,8 +60,18 @@ callables ops = (twice)
     const if has(.shader_execution_reordering):
         let h = trace_hit(gP.world, ray(origin = pos3(0.0, 0.0, -1.0), direction = vec3(0.0, 0.0, 1.0)), R.surface, mut p)
         let seen = k + 1.0
+        p.color.y = seen
         h.invoke(mut p)
         gP.data[id.x] = float4(p.color.x * k, seen, 0.0, 1.0)
+
+@raygen fun chained(@launch_id id: int3){gP}:
+    let k = gP.scale * 2.0
+    let mut p = payload(float3(k))
+    trace(gP.world, ray(origin = pos3(0.0, 0.0, -1.0), direction = vec3(0.0, 0.0, 1.0)), R.surface, mut p)
+    let j = k + 1.0
+    p.color.x = j
+    trace(gP.world, ray(origin = pos3(0.0, 0.0, -1.0), direction = vec3(0.0, 0.0, 1.0)), R.surface, mut p)
+    gP.data[id.x] = float4(p.color.x, j, 0.0, 1.0)
 
 @raygen fun adjacent(@launch_id id: int3){gP}:
     let a = gP.fixed[0].x
@@ -187,6 +197,23 @@ TEST("slib - SGL's DXIL reads a constant block's row again after each trace, and
     CHECK(b.between("dispatchRaysIndex", trace, b.lines.size()) == 2).dump("body", b.text());
     // what the shader can write is read where the source reads it
     CHECK(b.calls_of("rawBufferLoad").size() == 2).dump("body", b.text());
+}
+
+TEST("slib - SGL's DXIL reads a constant block's row in each stretch between traces that computes from it (EMIT-292)")
+{
+    auto compiler = ssc::dxc::compiler::create();
+    if (compiler.has_error())
+        SKIP("no DXC");
+#ifndef CC_OS_WINDOWS
+    SKIP("DXC compiles DXIL only on Windows, where its reflection is");
+#endif
+    // `k` for the first payload, `j` from it for the second, and `j` again for the store after both
+    auto const b = disassembled(compiler.value(), "chained", reordering::none);
+    auto const traces = b.calls_of("traceRay.");
+    REQUIRE(traces.size() == 2).dump("body", b.text());
+    CHECK(b.between("cbufferLoadLegacy", -1, traces[0]) == 1).dump("body", b.text());
+    CHECK(b.between("cbufferLoadLegacy", traces[0], traces[1]) == 1).dump("body", b.text());
+    CHECK(b.between("cbufferLoadLegacy", traces[1], b.lines.size()) == 1).dump("body", b.text());
 }
 
 TEST("slib - SGL's DXIL reads a constant block again after a callable call (EMIT-292)")

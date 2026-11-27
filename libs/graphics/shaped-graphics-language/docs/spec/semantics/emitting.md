@@ -629,9 +629,10 @@ fn main_ps(p: pixel_input) -> target_ {
   Such a value reads only constant blocks, the launch's index and size, and constants, through arithmetic, comparisons, conversions, `select`s, composites and addresses into memory.
   A use the walk from the value can reach past a call point reads a copy of the value's whole chain, at the start of its block's stretch between two call points; one copy serves that stretch.
   What the shader or a called shader can write is read where the source reads it, never again: a writable buffer, a payload, a callable's parameter.
-  A phi and a resource handle stay as they are, and so does a read of a buffer the shader cannot write, as DXC keeps them.
-  On DXIL a copy reads its constants with a `cbufferLoadLegacy` of its own and the launch with a `dispatchRaysIndex` of its own, and on SPIR-V with an `OpLoad` of its own.
-  Neither writer's own sharing joins a read ahead of a call point with one after it, but what one stretch reads twice it reads once.
+  A phi and a resource handle stay as they are, and so does a read of a buffer the shader cannot write, as DXC's DXIL keeps them.
+  On DXIL a copy reads its constants with a `cbufferLoadLegacy` of its own and the launch with a `dispatchRaysIndex` or `dispatchRaysDimensions` of its own.
+  On SPIR-V it reads each with an `OpLoad` of its own.
+  The DXIL writer's own sharing joins no read ahead of a call point with one after it, but what one stretch reads twice it reads once.
 * **EMIT-247** A native route's atomic on a 64-bit integer is its target's own, as an `i32` one is.
   On DXIL it is the `i64` form of `dx.op.atomicBinOp` and `dx.op.atomicCompareExchange` on a buffer, and an `atomicrmw` or `cmpxchg` of `i64` in workgroup memory.
   A resource it reaches carries Atomic64Use in its metadata, and `PSV0` flags it `UsedByAtomic64`, since the validator compares the two.

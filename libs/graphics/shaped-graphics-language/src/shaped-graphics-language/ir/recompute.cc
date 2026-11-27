@@ -213,8 +213,11 @@ void sgl::ir::recompute_after_calls(program& p)
             auto o = p.operands[source.first + k];
             if (operand_role(source.code, k) == operand::value && is_operation(value_ref(o)))
             {
-                auto const from = index_of(value_ref(o));
-                if (from < original_count && is_lasting[from] && crosses(from, b, start))
+                // an operand an earlier use already moved to a copy is asked of again by the value it copies
+                auto from = index_of(value_ref(o));
+                if (from >= original_count)
+                    from = copied_from(from);
+                if (is_lasting[from] && crosses(from, b, start))
                     o = self(self, from, b, start);
             }
             mapped.push_back(o);

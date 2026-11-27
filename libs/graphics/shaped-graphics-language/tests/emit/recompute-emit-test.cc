@@ -59,12 +59,22 @@ callables ops = (twice)
     let mut p = payload(float3(k, k, k))
     trace(gP.world, ray(origin = pos3(0.0, 0.0, -1.0), direction = vec3(0.0, 0.0, 1.0)), R.surface, mut p)
 
+@raygen fun chained(@launch_id id: int3){gP}:
+    let k = gP.scale * 2.0
+    let mut p = payload(float3(k))
+    trace(gP.world, ray(origin = pos3(0.0, 0.0, -1.0), direction = vec3(0.0, 0.0, 1.0)), R.surface, mut p)
+    let j = k + 1.0
+    p.color.x = j
+    trace(gP.world, ray(origin = pos3(0.0, 0.0, -1.0), direction = vec3(0.0, 0.0, 1.0)), R.surface, mut p)
+    gP.data[id.x] = float4(p.color.x, j, 0.0, 1.0)
+
 @raygen fun reordered(@launch_id id: int3){gP}:
     let k = gP.scale * 2.0
     let mut p = payload(float3(0.0))
     const if has(.shader_execution_reordering):
         let h = trace_hit(gP.world, ray(origin = pos3(0.0, 0.0, -1.0), direction = vec3(0.0, 0.0, 1.0)), R.surface, mut p)
         let seen = k + 1.0
+        p.color.y = seen
         h.invoke(mut p)
         gP.data[id.x] = float4(p.color.x * k, seen, 0.0, 1.0)
 
@@ -302,6 +312,27 @@ TEST("sgl emit - a value no call point stands before its use is computed once (E
     }
 }
 
+TEST("sgl emit - a value first computed between two traces is computed again after the second from its constants "
+     "(EMIT-292)")
+{
+    for (auto const t : {sgl::emit::target::hlsl_dx12, sgl::emit::target::hlsl_vulkan})
+    {
+        auto const e = native_of("chained", t);
+        auto const program = program_lines(e.text);
+        auto const first = program.find("trace_ray ");
+        REQUIRE(first >= 0).dump("program", e.text);
+        auto const second = program.find("trace_ray ", first + 1);
+        REQUIRE(second > first).dump("program", e.text);
+        // `k` for the first payload, `j` for the second, and `j` again for the store, each read where it is used
+        CHECK(program.find("access_chain @gP 0x1") < first).dump("program", e.text);
+        auto const between = program.find("access_chain @gP 0x1", first);
+        CHECK(between > first).dump("program", e.text);
+        CHECK(between < second).dump("program", e.text);
+        CHECK(program.find("access_chain @gP 0x1", second) > second).dump("program", e.text);
+        CHECK(program.count("access_chain @gP 0x1") == 3).dump("program", e.text);
+    }
+}
+
 TEST("sgl emit - a value is read again after a hit object's trace and after its invocation (EMIT-292)")
 {
     for (auto const t : {sgl::emit::target::hlsl_dx12, sgl::emit::target::hlsl_vulkan})
@@ -312,7 +343,7 @@ TEST("sgl emit - a value is read again after a hit object's trace and after its 
         REQUIRE(traced >= 0).dump("program", e.text);
         auto const invoked = program.find("hit_object_invoke ", traced);
         REQUIRE(invoked > traced).dump("program", e.text);
-        // `seen` reads `k` between the two, and the store after both
+        // `seen` reads `k` between the two for the payload, and the store after both reads it again
         auto const first = program.find("access_chain @gP 0x1", traced);
         CHECK(first > traced).dump("program", e.text);
         CHECK(first < invoked).dump("program", e.text);

@@ -105,6 +105,36 @@ TEST("sgl ir recompute_after_calls - a use after a call reads a copy of the whol
     CHECK(copy_at == call_at + 2);
 }
 
+TEST("sgl ir recompute_after_calls - a value computed between two calls is copied after the second whole, not from the "
+     "first one's copy")
+{
+    auto c = call_program();
+    c.b.blocks(1);
+    c.b.open(0);
+    auto const chain = c.b.add(op::access_chain, c.field_pointer, {u32(c.block), u32(c.zero)});
+    auto const read = c.b.add(op::load, c.b.float_type, {u32(chain)});
+    c.call();
+    // the product reads the field past the first call, and is read past the second
+    auto const value = c.b.add(op::fmul, c.b.float_type, {u32(read), u32(c.b.two)});
+    c.call();
+    c.b.keep(value);
+    c.b.finish();
+    recompute_after_calls(c.b.p);
+    remove_unused(c.b.p);
+
+    // nothing of the chain is kept across the second call
+    auto const& p = c.b.p;
+    auto last_call = isize(-1);
+    for (auto i = isize(0); i < p.instructions.size(); ++i)
+        if (p.instructions[i].code == op::execute_callable)
+            last_call = i;
+    for (auto i = isize(0); i < p.instructions.size(); ++i)
+        if (p.instructions[i].code == op::access_chain || p.instructions[i].code == op::load
+            || p.instructions[i].code == op::fmul)
+            CHECK(i > last_call).dump("program", dump(p));
+    CHECK(c.count(op::load) == 1);
+}
+
 TEST("sgl ir recompute_after_calls - a phi reads a copy on the way a call stands on, and the original on the other")
 {
     auto c = call_program();
