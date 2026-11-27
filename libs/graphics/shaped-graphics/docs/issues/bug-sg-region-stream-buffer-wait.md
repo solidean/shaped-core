@@ -3,6 +3,8 @@ created: 2026-10-27
 refs:
   - file: libs/graphics/shaped-graphics/backends/dx12/src/shaped-graphics/backends/dx12/dx12_upload_async.cc
   - file: libs/graphics/shaped-graphics/src/shaped-graphics/transfer/stream.hh
+claimed-by: Claude (for Philip Trettner)
+claimed-at: 2026-11-27T14:16Z
 ---
 
 # A region-scoped stream into a buffer still makes every list touching the buffer wait
