@@ -396,6 +396,15 @@ described_entry_point describe_entry_point(check::checked_module const& m,
     result.footprint = check::footprint_of(m, legal);
     for (auto const id : driver::impl::file_samplers_of(legal))
         result.samplers.push_back(m.qualified_name_of(id));
+    for (auto const t : m.callable_tables)
+        for (auto const& x : legal.exprs)
+            if (auto const* const base = x.node.try_as<check::flat_callable_base>(); base != nullptr && base->table == t)
+            {
+                result.callables_tables.push_back(m.qualified_name_of(t));
+                break;
+            }
+    if (!e.traced_rays.empty())
+        result.ray_set = m.qualified_name_of(e.traced_rays.front().set);
     auto facts = driver::impl::entry_interface_of(m, e);
     result.vertex_input = cc::move(facts.vertex_input);
     result.vertex_attributes = cc::move(facts.vertex_attributes);
