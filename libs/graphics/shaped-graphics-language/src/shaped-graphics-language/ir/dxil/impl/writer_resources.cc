@@ -652,7 +652,7 @@ void writer::atomic_op(u32 index, instruction const& i)
         auto const comparator = leaf_at(value_ref(operands[2]));
         if (where.kind == place::kind_t::memory)
         {
-            auto const pointer = memory_pointer(where, 0, held);
+            auto const pointer = memory_pointer(where, 0);
             return define_one(index, _m.extract_value(_m.atomic_exchange(pointer, comparator, desired), 0));
         }
         ll_value offsets[3];
@@ -677,7 +677,7 @@ void writer::atomic_op(u32 index, instruction const& i)
     auto value = i.code == op::atomic_load ? _m.constant_int(type, 0) : leaf_at(value_ref(operands[1]));
     if (where.kind == place::kind_t::memory)
     {
-        auto const result = _m.atomic_rmw(found->llvm, memory_pointer(where, 0, held), value);
+        auto const result = _m.atomic_rmw(found->llvm, memory_pointer(where, 0), value);
         if (i.code != op::atomic_store)
             define_one(index, result);
         return;

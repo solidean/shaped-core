@@ -1662,3 +1662,61 @@ TEST("slib - SGL's DXIL of a 16-bit normalized image passes the validator, and i
             CHECK(theirs.value().contains(component)).dump("format", f.name).dump("theirs", theirs.value());
         }
 }
+
+TEST("slib - SGL's DXIL splits a local array of structs a column per field and lane, as DXC does (EMIT-293)")
+{
+    auto compiler = ssc::dxc::compiler::create();
+    if (compiler.has_error())
+        SKIP("no DXC");
+#ifndef CC_OS_WINDOWS
+    SKIP("DXC compiles DXIL only on Windows, where its reflection is");
+#endif
+    // AMD's compiler for RDNA4 crashed creating this pipeline when SGL held `q` as one `[128 x float]`
+    constexpr cc::string_view source
+        = "struct vertex:\n"
+          "    pos: float3\n"
+          "    variation: float\n"
+          "    normal: float3\n"
+          "    spread: float\n"
+          "    tangent: float3\n"
+          "    pad0: float\n"
+          "    uv: float2\n"
+          "    pad1: float2\n"
+          "\n"
+          "binding pass:\n"
+          "    params: buffer[uint]\n"
+          "    @padding(.none) target: mut buffer[vertex]\n"
+          "\n"
+          "fun zero_v() -> vertex =>\n"
+          "    vertex(pos = float3(0.0), variation = 0.0, normal = float3(0.0), spread = 0.0, tangent = float3(0.0), "
+          "pad0 = 0.0, uv = float2(0.0), pad1 = float2(0.0))\n"
+          "\n"
+          "@compute(64) fun split(@thread_id id: int3){pass}:\n"
+          "    let mut q = vertex[8].filled(zero_v())\n"
+          "    if pass.params[0] == 0u:\n"
+          "        for z in 0 ..< 8:\n"
+          "            q[z] = zero_v()\n"
+          "    let n = pass.params[1]\n"
+          "    for g in 0 ..< (n as int):\n"
+          "        q[g].pad1.y = 0.5\n"
+          "    for i in 0 ..< (n as int):\n"
+          "        pass.target[(id.x as uint) * 8u + (i as uint)] = q[i]\n"
+          "\n"
+          "@compute(64) fun whole(@thread_id id: int3){pass}:\n"
+          "    @indexed(.memory) let mut q = vertex[8].filled(zero_v())\n"
+          "    q[pass.params[1] as int].pos[pass.params[2] as int] = 0.5\n"
+          "    pass.target[id.x] = q[pass.params[3] as int]\n";
+
+    // sixteen leaves, each its own column of the eight elements
+    auto const split = native_dxil_of(compiler.value(), source, "split");
+    CHECK(lines_with(split, "alloca [8 x float]") == 16).dump("dxil", split);
+    CHECK(lines_with(split, "alloca [128 x float]") == 0).dump("dxil", split);
+    auto const theirs = text_dxil_of(compiler.value(), source, "split");
+    CHECK(lines_with(theirs, "alloca [8 x float]") == 16).dump("dxil", theirs);
+
+    // a lane picked at run time keeps each vector whole, so the three of a vector are one column
+    auto const whole = native_dxil_of(compiler.value(), source, "whole");
+    CHECK(lines_with(whole, "alloca [24 x float]") == 3).dump("dxil", whole);
+    CHECK(lines_with(whole, "alloca [16 x float]") == 2).dump("dxil", whole);
+    CHECK(lines_with(whole, "alloca [8 x float]") == 3).dump("dxil", whole);
+}

@@ -7,7 +7,7 @@ using namespace sgl::ir;
 using namespace sgl::ir::dxil::impl;
 
 // Three kinds of place, each with its own addressing.
-// A variable and workgroup memory are arrays of scalars, one per scalar type a value holds, indexed by leaf.
+// A variable and workgroup memory are arrays of scalars, the columns `memory` describes, each leaf at a position in one.
 // A block of constants is read in rows of 16 bytes, and a buffer an element and a byte offset at a time.
 
 namespace
@@ -24,88 +24,261 @@ constexpr u32 k_group_shared = 3;
 }
 } // namespace
 
-u32 writer::memory_of_type(type_ref value, bool is_workgroup, cc::string_view name)
+bool writer::holds_composite_array(type_ref t)
 {
-    auto entry = memory{.value = value, .leaves = leaves_of(value)};
+    auto const& info = _p.at(t);
+    switch (info.kind)
+    {
+    case type_kind::array:
+    {
+        auto const element = _p.at(info.element).kind;
+        if (element == type_kind::structure || element == type_kind::vector || element == type_kind::matrix)
+            return true;
+        return holds_composite_array(info.element);
+    }
+    case type_kind::structure:
+        for (auto m = u32(0); m < info.member_count; ++m)
+            if (holds_composite_array(_p.members[info.first_member + m].type))
+                return true;
+        return false;
+    default:
+        return false;
+    }
+}
+
+void writer::lay_out_split(memory& entry,
+                           type_ref t,
+                           cc::vector<u32>& key,
+                           u64 position,
+                           bool whole_lanes,
+                           cc::vector<cc::vector<u32>>& keys,
+                           cc::vector<column_shape>& shapes)
+{
+    auto const& info = _p.at(t);
+    auto const is_key = [&](cc::vector<u32> const& other)
+    {
+        if (other.size() != key.size())
+            return false;
+        for (auto k = isize(0); k < key.size(); ++k)
+            if (other[k] != key[k])
+                return false;
+        return true;
+    };
+    auto const leaf = [&](u64 at)
+    {
+        // the latest column first, since a struct's leaves meet their columns in order
+        auto column = u32(keys.size());
+        for (auto c = isize(keys.size()); c-- > 0;)
+            if (is_key(keys[c]))
+            {
+                column = u32(c);
+                break;
+            }
+        if (column == keys.size())
+        {
+            keys.push_back(key);
+            shapes.push_back({.suffix = column});
+        }
+        entry.column_of.push_back(column);
+        entry.position_of.push_back(u32(at));
+        shapes[column].size = cc::max(shapes[column].size, u32(at) + 1);
+    };
+    switch (info.kind)
+    {
+    case type_kind::structure:
+        for (auto m = u32(0); m < info.member_count; ++m)
+        {
+            key.push_back(m);
+            lay_out_split(entry, _p.members[info.first_member + m].type, key, position, whole_lanes, keys, shapes);
+            key.pop_back();
+        }
+        return;
+    case type_kind::array:
+        for (auto e = u32(0); e < info.count; ++e)
+            lay_out_split(entry, info.element, key, position * info.count + e, whole_lanes, keys, shapes);
+        return;
+    case type_kind::vector:
+    case type_kind::matrix:
+        if (!whole_lanes)
+        {
+            // a lane is a field of its own, and so is a matrix's column
+            for (auto k = u32(0); k < info.count; ++k)
+            {
+                key.push_back(k);
+                lay_out_split(entry, info.element, key, position, whole_lanes, keys, shapes);
+                key.pop_back();
+            }
+            return;
+        }
+        [[fallthrough]];
+    default:
+    {
+        auto const count = leaves_of(t);
+        for (auto k = u32(0); k < count; ++k)
+            leaf(position * count + k);
+        return;
+    }
+    }
+}
+
+cc::vector<writer::column_shape> writer::lay_out_memory(memory& entry, bool whole_lanes)
+{
+    auto shapes = cc::vector<column_shape>();
+    // AMD's compiler crashes on such an array held flat: docs/bugs-external/amd-dxil-flat-local-array-crashes-compiler
+    if (holds_composite_array(entry.value))
+    {
+        auto key = cc::vector<u32>();
+        auto keys = cc::vector<cc::vector<u32>>();
+        lay_out_split(entry, entry.value, key, 0, whole_lanes, keys, shapes);
+    }
+    else
+    {
+        // one column per scalar type, each as long as the value, so a leaf's position is the leaf
+        i32 slots[8] = {-1, -1, -1, -1, -1, -1, -1, -1};
+        for (auto l = u32(0); l < entry.leaves; ++l)
+        {
+            auto type = scalar_type(scalar_at(entry.value, l));
+            if (type == _m.bool_type())
+                type = _m.int_type();
+            auto const slot = storage_slot(_m.is_float(type), _m.bits_of(type));
+            if (slots[slot] < 0)
+            {
+                slots[slot] = i32(shapes.size());
+                shapes.push_back({.size = entry.leaves, .suffix = u32(slot)});
+            }
+            entry.column_of.push_back(u32(slots[slot]));
+            entry.position_of.push_back(l);
+        }
+    }
     for (auto l = u32(0); l < entry.leaves; ++l)
     {
-        auto type = scalar_type(scalar_at(value, l));
-        if (type == _m.bool_type())
-            type = _m.int_type();
-        auto const slot = storage_slot(_m.is_float(type), _m.bits_of(type));
-        if (entry.storage[slot] != ll_value::none)
+        auto& shape = shapes[isize(entry.column_of[isize(l)])];
+        if (shape.type != ll_type::none)
             continue;
-        auto const array = _m.array(type, entry.leaves);
-        auto const alignment = _m.bits_of(type) / 8;
-        if (is_workgroup)
-            _summary.workgroup_bytes += entry.leaves * alignment;
-        entry.storage[slot] = is_workgroup
-                                ? _m.add_variable(cc::format("{}.{}", name, slot), array, k_group_shared, alignment)
-                                : _m.alloca_of(array, alignment);
+        auto type = scalar_type(scalar_at(entry.value, l));
+        shape.type = type == _m.bool_type() ? _m.int_type() : type;
     }
-    _memories.push_back(entry);
+    return shapes;
+}
+
+u32 writer::memory_of_type(type_ref value, bool is_workgroup, cc::string_view name, bool whole_lanes)
+{
+    auto entry = memory{.value = value, .leaves = leaves_of(value)};
+    for (auto const& shape : lay_out_memory(entry, whole_lanes))
+    {
+        auto const array = _m.array(shape.type, shape.size);
+        auto const alignment = _m.bits_of(shape.type) / 8;
+        if (is_workgroup)
+            _summary.workgroup_bytes += shape.size * alignment;
+        entry.columns.push_back(
+            is_workgroup ? _m.add_variable(cc::format("{}.{}", name, shape.suffix), array, k_group_shared, alignment)
+                         : _m.alloca_of(array, alignment));
+    }
+    _memories.push_back(cc::move(entry));
     return u32(_memories.size() - 1);
 }
 
-u32 writer::memory_of_table(global const& g)
+u32 writer::memory_of_table(global const& g, bool whole_lanes)
 {
     auto const value = _p.at(g.type).element;
     auto entry = memory{.value = value, .leaves = leaves_of(value)};
-    auto const name = _p.name_at(g.name_first, g.name_size);
-    for (auto l = u32(0); l < entry.leaves; ++l)
-    {
-        auto type = scalar_type(scalar_at(value, l));
-        if (type == _m.bool_type())
-            type = _m.int_type();
-        auto const slot = storage_slot(_m.is_float(type), _m.bits_of(type));
-        if (entry.storage[slot] != ll_value::none)
-            continue;
-        // one array per scalar type, as a variable's, its other types' leaves zero
-        auto elements = cc::vector<ll_value>();
-        for (auto k = u32(0); k < entry.leaves; ++k)
-        {
-            auto held = scalar_type(scalar_at(value, k));
-            auto const is_bool = held == _m.bool_type();
-            if (is_bool)
-                held = _m.int_type();
-            if (held != type)
-            {
-                elements.push_back(_m.is_float(type) ? _m.constant_float(type, 0) : _m.constant_int(type, 0));
-                continue;
-            }
-            auto const leaf = value_ref(_p.initializers[isize(g.initializer_first) + k]);
-            auto const& c = _p.constants[index_of(leaf)];
-            auto const bits = c.is_null ? u64(0) : (u64(c.high) << 32) | c.low;
-            elements.push_back(_m.is_float(type) ? _m.constant_float(type, bits) : _m.constant_int(type, bits));
-        }
-        auto const array = _m.array(type, entry.leaves);
-        entry.storage[slot] = _m.add_constant_table(cc::format("{}.{}", name, slot), array,
-                                                    _m.constant_struct(array, elements), _m.bits_of(type) / 8);
-    }
-    _memories.push_back(entry);
+    entry.shapes = lay_out_memory(entry, whole_lanes);
+    entry.columns.resize_to_filled(entry.shapes.size(), ll_value::none);
+    entry.table = i32(&g - _p.globals.data());
+    _memories.push_back(cc::move(entry));
     return u32(_memories.size() - 1);
+}
+
+ll_value writer::table_column(memory& held, u32 c)
+{
+    if (held.columns[c] != ll_value::none)
+        return held.columns[c];
+    auto const& g = _p.globals[isize(held.table)];
+    auto const& shape = held.shapes[c];
+    auto const type = shape.type;
+    // a position no leaf of the column takes holds zero
+    auto elements = cc::vector<ll_value>();
+    for (auto k = u32(0); k < shape.size; ++k)
+        elements.push_back(_m.is_float(type) ? _m.constant_float(type, 0) : _m.constant_int(type, 0));
+    for (auto k = u32(0); k < held.leaves; ++k)
+    {
+        if (held.column_of[isize(k)] != c)
+            continue;
+        auto const leaf = value_ref(_p.initializers[isize(g.initializer_first) + k]);
+        auto const& constant = _p.constants[index_of(leaf)];
+        auto const bits = constant.is_null ? u64(0) : (u64(constant.high) << 32) | constant.low;
+        elements[isize(held.position_of[isize(k)])]
+            = _m.is_float(type) ? _m.constant_float(type, bits) : _m.constant_int(type, bits);
+    }
+    auto const array = _m.array(type, shape.size);
+    auto const name = _p.name_at(g.name_first, g.name_size);
+    held.columns[c] = _m.add_constant_table(cc::format("{}.{}", name, shape.suffix), array,
+                                            _m.constant_struct(array, elements), _m.bits_of(type) / 8);
+    return held.columns[c];
 }
 
 void writer::declare_memory()
 {
     _local_memory.resize_to_filled(_p.locals.size(), -1);
     _global_memory.resize_to_filled(_p.globals.size(), -1);
+
+    // a variable indexed into a vector or a matrix at run time keeps each whole, since its lanes cannot be columns
+    auto local_lanes = cc::vector<u8>();
+    local_lanes.resize_to_filled(_p.locals.size(), 0);
+    auto global_lanes = cc::vector<u8>();
+    global_lanes.resize_to_filled(_p.globals.size(), 0);
+    auto roots = cc::vector<value_ref>();
+    roots.resize_to_filled(_p.instructions.size(), value_ref::none);
+    for (auto pass = 0; pass < 2; ++pass)
+        for (auto n = isize(0); n < _p.instructions.size(); ++n)
+        {
+            auto const& i = _p.instructions[n];
+            if (i.code != op::access_chain)
+                continue;
+            auto const operands = _p.operands_of(i);
+            auto const base = value_ref(operands[0]);
+            auto const root = is_operation(base) ? roots[index_of(base)] : base;
+            auto const is_memory_global = [&]
+            {
+                auto const space = _p.at(_p.globals[index_of(root)].type).space;
+                return space == storage::workgroup || space == storage::table;
+            };
+            if (!is_local(root) && !(is_global(root) && is_memory_global()))
+                continue;
+            roots[n] = root;
+            auto type = _p.at(_p.type_of(base)).element;
+            for (auto k = isize(1); k < operands.size(); ++k)
+            {
+                auto const& info = _p.at(type);
+                auto const at = value_ref(operands[k]);
+                if (info.kind == type_kind::structure)
+                {
+                    type = _p.members[info.first_member + _p.constants[index_of(at)].low].type;
+                    continue;
+                }
+                if ((info.kind == type_kind::vector || info.kind == type_kind::matrix) && !is_constant(at))
+                    (is_local(root) ? local_lanes[index_of(root)] : global_lanes[index_of(root)]) = 1;
+                type = info.element;
+            }
+        }
+
     for (auto l = isize(0); l < _p.locals.size(); ++l)
     {
         auto const value = _p.at(_p.locals[l].type).element;
-        _local_memory[l] = i32(memory_of_type(value, false, {}));
+        _local_memory[l] = i32(memory_of_type(value, false, {}, local_lanes[l] != 0));
     }
     for (auto g = isize(0); g < _p.globals.size(); ++g)
     {
         auto const& pointer = _p.at(_p.globals[g].type);
         if (pointer.space == storage::table)
         {
-            _global_memory[g] = i32(memory_of_table(_p.globals[g]));
+            _global_memory[g] = i32(memory_of_table(_p.globals[g], global_lanes[g] != 0));
             continue;
         }
         if (pointer.space == storage::workgroup)
-            _global_memory[g] = i32(
-                memory_of_type(pointer.element, true, _p.name_at(_p.globals[g].name_first, _p.globals[g].name_size)));
+            _global_memory[g] = i32(memory_of_type(pointer.element, true,
+                                                   _p.name_at(_p.globals[g].name_first, _p.globals[g].name_size),
+                                                   global_lanes[g] != 0));
         if (pointer.space != storage::task_payload)
             continue;
         auto alignment = u32(1);
@@ -365,6 +538,7 @@ void writer::access_chain(u32 index, instruction const& i)
         return payload_chain(index, i);
     auto type = _p.at(_p.type_of(base)).element;
     auto const is_memory = result.kind == place::kind_t::memory;
+    auto added = cc::vector<memory_term>();
 
     auto first = isize(1);
     // a binding array's element is a resource of its own, which only here has a handle
@@ -423,24 +597,54 @@ void writer::access_chain(u32 index, instruction const& i)
             result.matrix_stride = 0;
         if (is_known)
             result.offset += known * step;
+        else if (is_memory)
+            added.push_back({.index = leaf_at(index_value), .stride = step, .count = info.count});
         else
             result.dynamic = add_dynamic(result.dynamic, leaf_at(index_value), step);
         type = element;
     }
+    if (!added.empty())
+    {
+        auto const first = u32(_terms.size());
+        for (auto t = u32(0); t < result.term_count; ++t)
+            _terms.push_back(_terms[isize(result.term_first + t)]);
+        _terms.push_back_range(added);
+        result.term_first = first;
+        result.term_count = u32(_terms.size()) - first;
+    }
     _places[index] = result;
 }
 
-ll_value writer::memory_pointer(place const& p, u32 leaf, type_ref scalar)
+ll_value writer::memory_pointer(place const& p, u32 leaf)
 {
-    auto const& held = _memories[p.root];
-    auto type = scalar_type(scalar);
-    if (type == _m.bool_type())
-        type = _m.int_type();
-    auto const storage = held.storage[storage_slot(_m.is_float(type), _m.bits_of(type))];
+    auto& held = _memories[p.root];
     auto const at = p.offset + leaf;
-    auto const position
-        = p.dynamic == ll_value::none ? _m.constant_i32(at) : _m.binary(binary_op::add, p.dynamic, _m.constant_i32(at));
-    ll_value const indices[] = {_m.constant_i32(0), position};
+    if (at >= held.leaves)
+    {
+        unsupported("an index past the end of a variable");
+        return held.table >= 0 ? table_column(held, 0) : held.columns[0];
+    }
+    auto const column = held.column_of[isize(at)];
+    auto const position = held.position_of[isize(at)];
+    // each index steps by what one element of its array holds of this column, which the next element's leaf shows
+    auto dynamic = ll_value::none;
+    for (auto t = u32(0); t < p.term_count; ++t)
+    {
+        auto const& term = _terms[isize(p.term_first + t)];
+        if (term.count < 2)
+            continue;
+        auto const next = at + term.stride;
+        if (next >= held.leaves || held.column_of[isize(next)] != column)
+        {
+            unsupported("an index known at run time alone into a level its variable splits");
+            return held.table >= 0 ? table_column(held, 0) : held.columns[0];
+        }
+        dynamic = add_dynamic(dynamic, term.index, held.position_of[isize(next)] - position);
+    }
+    auto const storage = held.table >= 0 ? table_column(held, column) : held.columns[column];
+    auto const index = dynamic == ll_value::none ? _m.constant_i32(position)
+                                                 : _m.binary(binary_op::add, dynamic, _m.constant_i32(position));
+    ll_value const indices[] = {_m.constant_i32(0), index};
     return _m.element_pointer(_m.element_of(_m.type_of(storage)), storage, indices);
 }
 
@@ -467,7 +671,7 @@ void writer::load_memory(place const& p, type_ref t, cc::vector<ll_value>& out)
             auto const wanted = scalar_type(scalar);
             auto const is_bool = wanted == _m.bool_type();
             auto const held = is_bool ? _m.int_type() : wanted;
-            auto const loaded = _m.load(held, memory_pointer(p, l, scalar), _m.bits_of(held) / 8);
+            auto const loaded = _m.load(held, memory_pointer(p, l), _m.bits_of(held) / 8);
             out.push_back(is_bool ? _m.compare(predicate::i_ne, loaded, _m.constant_i32(0)) : loaded);
         }
         return;
@@ -493,11 +697,10 @@ void writer::store_memory(place const& p, type_ref t, cc::span<ll_value const> l
     {
         for (auto l = u32(0); l < leaves_of(t); ++l)
         {
-            auto const scalar = scalar_at(t, l);
             auto value = leaves[l];
             if (_m.type_of(value) == _m.bool_type())
                 value = _m.cast(cast_op::zext, value, _m.int_type());
-            _m.store(memory_pointer(p, l, scalar), value, _m.bits_of(_m.type_of(value)) / 8);
+            _m.store(memory_pointer(p, l), value, _m.bits_of(_m.type_of(value)) / 8);
         }
         return;
     }

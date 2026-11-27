@@ -459,6 +459,7 @@ if(SC_BUILD_TESTS)
             tests/compute/compute-double-maths-test.cc
             tests/compute/compute-pack-routes-test.cc
             tests/compute/compute-array-equality-test.cc
+            tests/compute/compute-struct-arrays-test.cc
             tests/compute/compute-native-dxil-test.cc
             tests/compute/compute-native-spirv-test.cc
             tests/compute/compute-matrix-arithmetic-test.cc
@@ -557,6 +558,7 @@ if(SC_BUILD_TESTS)
                 sixty_four_bit_min_max.sgl:*
                 double_maths.sgl:*
                 array_equality.sgl:*
+                struct_arrays.sgl:*
                 matrix_arithmetic.sgl:*
                 float_atomics.sgl:*
                 differentiable_buffers.sgl:*
