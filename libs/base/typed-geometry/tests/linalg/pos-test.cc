@@ -1,3 +1,4 @@
+#include <clean-core/container/set.hh>
 #include <nexus/test.hh>
 #include <typed-geometry/geometry/query/distance.hh>
 #include <typed-geometry/linalg/pos.hh>
@@ -84,4 +85,17 @@ TEST("tg pos - scaling by a scalar scales the singleton about the origin")
     auto const a = tg::pos3f(0, 0, 0);
     auto const b = tg::pos3f(2, 4, 6);
     CHECK((a + b) / 2.0f == tg::pos3f(1, 2, 3));
+}
+
+TEST("tg pos - a position keys a set, and +0 and -0 are one key")
+{
+    auto cells = cc::set<tg::pos3i>();
+    CHECK(cells.insert(tg::pos3i(1, -2, 3)));
+    CHECK(!cells.insert(tg::pos3i(1, -2, 3)));
+    CHECK(cells.contains(tg::pos3i(1, -2, 3)));
+    CHECK(!cells.contains(tg::pos3i(3, -2, 1)));
+
+    auto points = cc::set<tg::pos3f>();
+    CHECK(points.insert(tg::pos3f(0.f, 1, 2)));
+    CHECK(!points.insert(tg::pos3f(-0.f, 1, 2)));
 }

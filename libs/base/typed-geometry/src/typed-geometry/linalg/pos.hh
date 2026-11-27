@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clean-core/common/assert.hh>
+#include <clean-core/common/hash.hh>
 #include <typed-geometry/fwd.hh>
 #include <typed-geometry/linalg/fwd.hh>
 #include <typed-geometry/linalg/vec.hh>
@@ -145,6 +146,15 @@ public:
     // comparison
 public:
     [[nodiscard]] friend constexpr bool operator==(pos const&, pos const&) = default;
+
+    /// The hash of the components in order, so it keys a cc::map or a cc::set.
+    [[nodiscard]] friend constexpr u64 hash(pos const& v)
+    {
+        auto h = cc::make_hash(v.data[0]);
+        for (auto i = 1; i < D; ++i)
+            h = cc::combine_hash(h, cc::make_hash(v.data[i]));
+        return h;
+    }
 
     // affine arithmetic
 public:
