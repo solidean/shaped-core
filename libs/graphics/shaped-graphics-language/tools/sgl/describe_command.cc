@@ -256,6 +256,12 @@ void write_entry_point(babel::json::object_writer& o, sgl::described_entry_point
             list.write(cc::string_view(name));
     }
     {
+        auto list = o.write_array("callables_tables", babel::json::layout::compact);
+        for (auto const& name : e.callables_tables)
+            list.write(cc::string_view(name));
+    }
+    o.write("ray_set", cc::string_view(e.ray_set));
+    {
         auto list = o.write_array("options", babel::json::layout::compact);
         for (auto const& name : e.options)
             list.write(cc::string_view(name));

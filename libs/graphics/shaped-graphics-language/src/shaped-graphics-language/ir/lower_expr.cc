@@ -250,6 +250,8 @@ value_ref lowering::expr(flat_expr_id id)
                 unsupported("a resource used as a value");
         },
         [&](flat_file_sampler const&) { unsupported("a file sampler used as a value"); },
+        // a tree legalized without its bases resolved; the plan's validation refused a table with no record
+        [&](flat_callable_base const& b) { result = int_constant(emit::callable_record(_m, _plan.numbering, b.table)); },
         [&](flat_written_word const&) { unsupported("a word of the workgroup shadow used as a value"); },
         [&](flat_buffer_element const&)
         {

@@ -133,7 +133,12 @@ def test_dev_toml_sets_the_project_s_half() -> None:
         (root / "dev.toml").write_text('[build_server]\nenabled = true\nclient = "bin/server.exe"\nship_proof = "yes"\n', encoding="utf-8")
         c = bs.from_dev_toml(root, client=default, install_hint="hint")
         assert c.enabled and c.client == root / "bin" / "server.exe" and c.install_hint == "hint", c
-        assert not c.ship_proof and not c.speculative_tests, "only `true` turns a switch on"
+        assert not c.ship_proof and not c.speculative_tests, "both switches are off by default"
+        on = bs.from_dev_toml(root, client=default, speculative_tests=True, ship_proof=True)
+        assert on.speculative_tests and on.ship_proof, "a value that is no bool keeps the project's default"
+        (root / "dev.toml").write_text("[build_server]\nspeculative_tests = false\nship_proof = true\n", encoding="utf-8")
+        c = bs.from_dev_toml(root, client=default, speculative_tests=True)
+        assert not c.speculative_tests and c.ship_proof, "a bool in the table overrides the project's default either way"
         (root / "dev.toml").write_text("[build_server\n", encoding="utf-8")
         assert bs.from_dev_toml(root, client=default) == bs.BuildServer(client=default), "a dev.toml that does not parse is ignored"
 

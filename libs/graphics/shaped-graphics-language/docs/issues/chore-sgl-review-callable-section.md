@@ -32,3 +32,6 @@ What to look at:
 - whether the order (dependencies, then names) is the one SGL should promise;
 - whether `describe`'s qualified names break another host;
 - the gap the change leaves (issue `feat-sgl-build-reached-modules-callables`): a used module's callables are listed in the section but not built in the program that reaches them (CHK-350).
+- the link step that closes that gap (branch `jn/sgl-link`): CHK-562 gains the sentence that a link group's numbering replaces the program's.
+  A new page, [linking.md](../spec/semantics/linking.md), holds LINK-1 to LINK-9.
+  A flattened callable call now keeps `i + callable_base(t)`, resolved when the entry is written (LINK-5), so an unlinked compile writes what it wrote.

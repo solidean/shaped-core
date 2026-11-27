@@ -183,6 +183,7 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/driver/compile_to_text.cc
     src/shaped-graphics-language/driver/test_source.cc
     src/shaped-graphics-language/driver/describe.cc
+    src/shaped-graphics-language/driver/link.cc
     src/shaped-graphics-language/driver/pipeline_fields.cc
     src/shaped-graphics-language/driver/impl/front_end.cc
     src/shaped-graphics-language/driver/shared_library.cc
@@ -367,8 +368,10 @@ target_sources(shaped-graphics-language
     src/shaped-graphics-language/driver/compile_to_text.hh
     src/shaped-graphics-language/driver/test_source.hh
     src/shaped-graphics-language/driver/describe.hh
+    src/shaped-graphics-language/driver/link.hh
     src/shaped-graphics-language/driver/pipeline_fields.hh
     src/shaped-graphics-language/driver/impl/front_end.hh
+    src/shaped-graphics-language/driver/impl/emit_text.hh
     src/shaped-graphics-language/driver/library_file.hh
     src/shaped-graphics-language/driver/prelude.hh
     src/shaped-graphics-language/driver/classify.hh
@@ -424,6 +427,7 @@ if(SC_BUILD_TOOLS OR SC_BUILD_SGL)
         tools/sgl/describe_command.cc
         tools/sgl/bench_command.cc
         tools/sgl/emit_command.cc
+        tools/sgl/link_command.cc
         tools/sgl/prelude_command.cc
         tools/sgl/test_command.cc
         tools/sgl/format_command.cc
@@ -603,6 +607,7 @@ if(SC_BUILD_TESTS)
         tests/driver/format-test.cc
         tests/driver/outline-test.cc
         tests/driver/compile-to-text-test.cc
+        tests/driver/link-test.cc
         tests/driver/compile-profile-test.cc
         tests/driver/options-test.cc
         tests/driver/float-guarantee-test.cc

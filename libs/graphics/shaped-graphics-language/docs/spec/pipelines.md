@@ -39,6 +39,9 @@ The host then acquires it by name, and states nothing the shader already said: n
   A compute pipeline needs no declaration, since one shader and its binding list are the whole of it: every compute entry point is its own.
 * **A `@raytracing pipeline` is a table rather than a chain of stages**, and [raytracing.md](raytracing.md) is its model.
   It names a ray set, a raygen, a miss per ray type and its hit groups, and the rest of this file is about raster pipelines.
+* **A pipeline a host assembles from entries of several files is a link group** ([linking.md](semantics/linking.md)).
+  `sgl::link` numbers the static samplers and the callables records its stages reach once, for the pipeline, and returns the map the host builds it from.
+  Each stage is still built from its own file, and a stage of the first file in the pipeline's order is the output it is compiled alone.
 
 ## Settings are assignments
 

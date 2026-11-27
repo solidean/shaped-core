@@ -240,7 +240,8 @@ binding material:
 
 * **`sampler name:` at file scope** is a static sampler of the pipeline layout, an `sg::bound_sampler`.
   Nobody binds it, so it is not listed anywhere: it joins the layout of every entry point whose inlined body uses it, and no other.
-  Its index in that layout is its position among the file's samplers, so every stage and every entry point states the same one.
+  Its index in that layout is its position among the file's samplers, so every stage and every entry point of the file states the same one.
+  A pipeline whose stages come from several files links them, and the link numbers their samplers once, for the pipeline ([LINK-3](semantics/linking.md#the-numbering)).
   A stage holds 16, so an entry point reaching one of index 16 or more is `too-many-samplers`, however few it reaches ([EMIT-133](semantics/emitting.md#bindings)).
 * **`sampler name:` inside a binding** is a static sampler of that group's layout, an `sg::named_sampler`.
   It is part of the group, and the host binds nothing for it.

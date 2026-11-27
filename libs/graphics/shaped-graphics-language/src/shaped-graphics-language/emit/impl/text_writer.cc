@@ -1544,6 +1544,9 @@ struct writer
                 result = read_as_value(id, result);
             },
             [&](flat_file_sampler const& smp) { result = {.text = p.samplers[sampler_of(p, smp.sampler)].name}; },
+            // a tree legalized without its bases resolved; `validate` refused a table with no record
+            [&](flat_callable_base const& b)
+            { result = {.text = int_literal_text(callable_record(p.m, p.numbering, b.table))}; },
             [&](flat_buffer_length const& b)
             {
                 auto const is_bytes = p.m.at(p.e.at(b.buffer).type).kind == check::type_kind::bytes;

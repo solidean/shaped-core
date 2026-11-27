@@ -1214,6 +1214,12 @@ struct machine
             result.leaves.push_back(scalar::of(l->value));
             return {};
         }
+        // the program's own section: a run is no link (LINK-5), and a test reaches no call of a callable (CHK-344)
+        if (auto const* const b = x.node.try_as<flat_callable_base>())
+        {
+            result.leaves.push_back(scalar::of(m.callable_offset_of(b->table)).narrowed_to(kind));
+            return {};
+        }
         if (auto const* const v = x.node.try_as<flat_enum_value>())
         {
             auto const cases = m.at(m.at(x.type).cases);

@@ -27,6 +27,10 @@ bytes → line tree → tokens → group tokens → form tree      sgl::parse   
 `sgl::compile_to_text` is the whole pipeline in one call, against the prelude the library carries, so compiling needs no file.
 `sgl::describe` stops short of text: it runs the same front end and the emitter's own checks, and hands back what a host is generated from.
 It is what slib's package generator reads, through `sgl describe`, and it describes exactly what the emitter would build.
+`sgl::link` checks the files of one pipeline's entries once each, and numbers the samplers and callables tables they reach as one ([linking.md](spec/semantics/linking.md)).
+It emits each entry from its own file with that numbering.
+The numbering reaches the writers as `emit::options::numbering`, read through `emit::sampler_slot` and `emit::callable_record` alone, and a null one is the file's own.
+A callable call stays `i + callable_base(t)` in the flat tree, a `flat_callable_base` that `emit::with_callable_bases` resolves before legalizing.
 
 **The library answers every question, and a tool translates.**
 What a compiler, an editor or any other tool asks about a source — what a token is, what type a binding got, which tests passed where — is a function of this library.
@@ -258,6 +262,7 @@ A builtin reaches it by its record's name rather than by a spelling of its own: 
 uv run dev.py run sgl -- emit <file> --entry <name> --target <hlsl-dx12|hlsl-vulkan|wgsl|msl> [--run-tests]
 uv run dev.py run sgl -- test <file>...              # the tests of each file, on the interpreter
 uv run dev.py run sgl -- describe <file>             # what slib's generator reads: bindings, edge structs, entry points
+uv run dev.py run sgl -- link <group.json> --module-dir <dir> --target dxil --map <map.json> --out <dir>   # one pipeline's entries, numbered as one
 uv run dev.py run sgl -- prelude --check <path>      # exit 2, and where the texts part, when the file differs
 uv run dev.py run sgl -- prelude --write <path>      # what `uv run dev.py check sgl-prelude --fix` runs
 uv run dev.py run sgl -- bench <list> [--rounds N]   # compile speed in-process; shader-rosetta's sgl-benchmark.py drives it

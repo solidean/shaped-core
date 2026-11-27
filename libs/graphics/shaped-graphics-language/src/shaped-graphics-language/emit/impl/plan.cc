@@ -102,6 +102,7 @@ struct validator
     flat_entry_point const& e;
     cc::vector<error>& errors;
     bool writes_prints = false;
+    emit::numbering const* numbering = nullptr;
 
     void report(error_kind kind, symbol_id symbol, cc::string detail)
     {
@@ -147,6 +148,23 @@ struct validator
             validate_binding(m, id, errors);
     }
 
+    /// LINK-6: a callables table the entry point calls has a first record wherever it is written.
+    void callable_bases()
+    {
+        auto reported = cc::vector<symbol_id>();
+        for (auto const& x : e.exprs)
+        {
+            auto const* const base = x.node.try_as<check::flat_callable_base>();
+            if (base == nullptr || callable_record(m, numbering, base->table) >= 0
+                || reported.values().contains(base->table))
+                continue;
+            reported.push_back(base->table);
+            report(error_kind::unnumbered, base->table,
+                   cc::format("'{}' calls callables table '{}', which the {} numbers no record for", e.name,
+                              m.qualified_name_of(base->table), numbering != nullptr ? "link" : "callable section"));
+        }
+    }
+
     /// EMIT-133: refused on every target, so an entry point written for one is written for all of them.
     void file_samplers()
     {
@@ -154,7 +172,10 @@ struct validator
         for (auto const& x : e.exprs)
         {
             auto const* const smp = x.node.try_as<check::flat_file_sampler>();
-            if (smp == nullptr || file_sampler_index(m, smp->sampler) < k_max_file_samplers)
+            if (smp == nullptr)
+                continue;
+            auto const slot = sampler_slot(m, numbering, smp->sampler);
+            if (slot >= 0 && slot < k_max_file_samplers)
                 continue;
             auto is_repeat = false;
             for (auto const r : reported)
@@ -162,11 +183,19 @@ struct validator
             if (is_repeat)
                 continue;
             reported.push_back(smp->sampler);
-            report(
-                error_kind::too_many_samplers, smp->sampler,
-                cc::format("'{}' reaches sampler '{}' at index {}, and a stage holds {}; every sampler declared above "
-                           "it counts toward its index, whether reached or not",
-                           e.name, m.at(smp->sampler).name, file_sampler_index(m, smp->sampler), k_max_file_samplers));
+            if (slot < 0)
+                report(error_kind::unnumbered, smp->sampler,
+                       cc::format("'{}' reaches sampler '{}', which the link numbers no slot for", e.name,
+                                  m.qualified_name_of(smp->sampler)));
+            else if (numbering != nullptr)
+                report(error_kind::too_many_samplers, smp->sampler,
+                       cc::format("'{}' reaches sampler '{}' at its link group's slot {}, and a stage holds {}", e.name,
+                                  m.qualified_name_of(smp->sampler), slot, k_max_file_samplers));
+            else
+                report(error_kind::too_many_samplers, smp->sampler,
+                       cc::format("'{}' reaches sampler '{}' at index {}, and a stage holds {}; every sampler declared "
+                                  "above it counts toward its index, whether reached or not",
+                                  e.name, m.at(smp->sampler).name, slot, k_max_file_samplers));
         }
     }
 
@@ -731,7 +760,7 @@ struct planner
             if (smp == nullptr || sampler_of(p, smp->sampler) >= 0)
                 continue;
             auto const& s = p.m.at(smp->sampler);
-            auto const index = file_sampler_index(p.m, smp->sampler);
+            auto const index = sampler_slot(p.m, p.numbering, smp->sampler);
             auto at = isize(0);
             while (at < p.samplers.size() && p.samplers[at].index < index)
                 ++at;
@@ -1443,9 +1472,10 @@ sgl::emit::impl::block_placement sgl::emit::impl::place_block(check::checked_mod
 void sgl::emit::impl::validate(check::checked_module const& m,
                                check::flat_entry_point const& e,
                                cc::vector<error>& errors,
-                               bool writes_prints)
+                               bool writes_prints,
+                               emit::numbering const* numbering)
 {
-    auto v = validator{.m = m, .e = e, .errors = errors, .writes_prints = writes_prints};
+    auto v = validator{.m = m, .e = e, .errors = errors, .writes_prints = writes_prints, .numbering = numbering};
     // a mesh stage made from a geometry stage takes no payload and returns nothing, as a compute stage does
     if (e.input == e.result && e.entry_stage != stage::compute && e.entry_stage != stage::task
         && !(e.entry_stage == stage::mesh && !check::is_valid(e.input)))
@@ -1476,6 +1506,7 @@ void sgl::emit::impl::validate(check::checked_module const& m,
     v.bindings();
     v.tree();
     v.file_samplers();
+    v.callable_bases();
 }
 
 namespace
@@ -1539,9 +1570,10 @@ struct live_nodes
 sgl::emit::impl::plan sgl::emit::impl::make_plan(check::checked_module const& m,
                                                  check::flat_entry_point const& e,
                                                  target t,
-                                                 bool native_float_atomic_add)
+                                                 bool native_float_atomic_add,
+                                                 emit::numbering const* numbering)
 {
-    auto result = plan{.m = m, .e = e, .which = t};
+    auto result = plan{.m = m, .e = e, .which = t, .numbering = numbering};
     // dx12 and WebGPU have no float add, so there an `atomic[float]` stays a uint's bits whatever the device says.
     // MSL has float atomics in threadgroup memory only from 4.1, past sg's floor of 4.0 (the spec's bindings file).
     // So an entry point sharing one keeps every `atomic[float]` a uint's bits, the type being one whatever holds it.

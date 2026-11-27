@@ -223,6 +223,7 @@ struct dumper
                          out.appendf("(binding {} {}", m.at(b.binding).name, m.at(binding.members)[b.member].name);
                      },
                      [&](flat_file_sampler const& smp) { out.appendf("(sampler {}", m.at(smp.sampler).name); },
+                     [&](flat_callable_base const& b) { out.appendf("(callable_base {}", m.at(b.table).name); },
                      [&](flat_member const& member)
                      {
                          out += "(member ";
