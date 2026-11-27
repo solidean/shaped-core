@@ -31,7 +31,7 @@ src/typed-geometry/
   symbolic/    [planned]
   calculus/    [planned]
   sampling/    [planned]
-  spatial/     [planned]
+  spatial/     [in progress]
   mesh/        [planned]
 ```
 
@@ -372,9 +372,11 @@ sample_triangle(tri, rng)
 sample_mesh(mesh, rng)
 ```
 
-## spatial/ [planned]
+## spatial/ [in progress]
 
 Acceleration structures and space partitioning (`bvh`, `kd_tree`, `grid`, `hash_grid`, `octree`; `builder`, `queries`, `traversal`).
+`uniform_grid` is in: the mapping between space and cells named by `pos<D, i32>`, and the walk of a ray through them front to back.
+It holds no data, so whoever keys their own data by cell, a hash map of chunks say, gets the grid's queries over it.
 
 ```cpp
 bvh<Triangle> b;

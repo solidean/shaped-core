@@ -432,6 +432,19 @@ o.sample_uniform(rng);   // cc::random&; uniform over the object's point set —
 // also disk3 / circle3 (through an orthonormal basis of their plane); not yet ellipsoid_boundary (not a linear image)
 ```
 
+## spatial — grids and their traversals
+
+```cpp
+#include <typed-geometry/spatial/spatial.hh>
+auto const grid = tg::uniform_grid3f{.origin = tg::pos3f::zero, .cell_size = tg::vec3f(16)};  // holds no data
+grid.cell_at(p);  grid.box_of(cell);  grid.plane_of(index, axis);      // cell: pos3i, floor per axis
+for (auto const step : grid.cells_along(ray, t_min, t_max))            // front to back (Amanatides-Woo); break whenever
+    visit(step.cell, step.along);                                      // along: hit_interval, where the ray enters and leaves
+// stretches are contiguous bit for bit; an edge or corner crossing steps every tied axis at once (no touched-only cells)
+// a ray starting on a face starts in the cell it heads into; t_max may be infinite, then only the caller stops the walk
+cc::set<tg::pos3i> cells;                                              // pos and vec hash: they key cc::map / cc::set
+```
+
 ## geometric queries (members; definitions per verb)
 
 ```cpp
