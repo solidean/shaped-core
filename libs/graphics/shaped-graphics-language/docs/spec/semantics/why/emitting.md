@@ -18,6 +18,13 @@ A constant block cannot change during a dispatch, and neither can the launch, so
 DXC keeps a read of the launch's index across a call, since it takes it as a pure value; SGL copies it too, as the measured transform did.
 A copy is a few operations a lane where keeping the value costs a register the driver saves around every call, so no chain is too long to copy.
 
+## EMIT-291
+
+The attribute is in the source, and the text route already honoured it, so the native routes ignoring it made the three routes compile one program three ways.
+Around a trace an unrolled loop multiplies what a driver compiles when the pipeline is created, since the driver inlines every `TraceRay` and callable call site.
+DXIL's passes fold a loop's structure away, so the hint stands on the loop's header in SGL's IR and moves with it.
+Where threading an empty header would make two loops of different hints one, the header stays: a back edge names one loop's node, and LLVM reads a loop's hint off its back edges.
+
 ## EMIT-290
 
 DXC refuses an array under `SV_ClipDistance` in a DXIL signature, since each element would take a row, and takes a float per lane, which it packs as it would a `float4` and the rest.

@@ -603,6 +603,19 @@ enum class sgl::ir::merge_kind : sgl::u8
     loop,
 };
 
+/// What a loop's header asks of the target's unrolling (EMIT-291).
+/// A pass that moves a header's construct to another block moves its hint too, and none makes two loops of different
+/// hints one.
+enum class sgl::ir::loop_hint : sgl::u8
+{
+    /// The block heads no loop.
+    none,
+    /// It heads a loop that asks nothing.
+    plain,
+    /// It heads a loop written `@unroll(false)` (CHK-414), which the target is asked to keep a loop.
+    rolled,
+};
+
 struct sgl::ir::block
 {
     /// A range of `program::instructions`, whose last one is the terminator.
@@ -612,6 +625,8 @@ struct sgl::ir::block
     /// Where its construct ends, and a loop's continue target.
     block_ref merge = block_ref::none;
     block_ref continue_to = block_ref::none;
+    /// Where it heads a loop, what the loop asks; it outlives `merges`, which DXIL's passes fold away.
+    loop_hint hint = loop_hint::none;
 };
 
 /// A scalar constant, its bits low word first, or zero or nothing of any type.

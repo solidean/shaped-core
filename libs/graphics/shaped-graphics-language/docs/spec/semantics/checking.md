@@ -2007,7 +2007,7 @@ hit_group textured for path_rays:
   On any statement but a `for` the attribute is `unsupported-yet`, by CHK-39.
   So are arguments, such as the count of `@unroll(4)`, which would unroll the loop in part.
 * **CHK-414** `@unroll(false)` on a `for` asks the target to keep it a loop, and changes nothing of what it means: a hint, never a promise.
-  HLSL writes `[loop]` ahead of it, and MSL and WGSL have no spelling for it, so there it is nothing.
+  HLSL writes `[loop]` ahead of it, SGL's own DXIL and SPIR-V state it as EMIT-291 says, and MSL and WGSL have no spelling for it, so there it is nothing.
   Every other argument of `@unroll` is `unsupported-yet`, a count among them.
 * **CHK-415** A `for` runs over an int range, or over a walk of one ([EVAL-102](evaluation.md#from-the-source)): `.reversed` and `.by(step)` after the range, in any number and order.
   A step is an int constant of at least 1, a literal or a `const`, and anything else is `invalid-constant-argument`.

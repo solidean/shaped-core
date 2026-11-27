@@ -450,6 +450,7 @@ enum class derivative : u8;
 enum class barrier : u8;
 struct instruction;
 enum class merge_kind : u8;
+enum class loop_hint : u8;
 struct block;
 struct constant;
 enum class global_kind : u8;

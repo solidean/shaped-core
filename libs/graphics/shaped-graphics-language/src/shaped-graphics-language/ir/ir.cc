@@ -399,6 +399,8 @@ cc::string sgl::ir::dump(program const& p)
             out.appendf(" merge b{}", u32(block.merge));
         if (block.merges == merge_kind::loop)
             out.appendf(" merge b{} continue b{}", u32(block.merge), u32(block.continue_to));
+        if (block.hint == loop_hint::rolled)
+            out += " rolled";
         out += "\n";
         for (auto i = block.first; i < block.first + block.count; ++i)
         {

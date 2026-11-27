@@ -309,6 +309,17 @@ void module_builder::md_named(cc::string_view name, cc::span<u32 const> nodes)
         {.name_first = add_name(name), .name_size = u32(name.size()), .first = first, .count = u32(nodes.size())});
 }
 
+u32 module_builder::md_loop(cc::span<u32 const> properties)
+{
+    // METADATA_DISTINCT_NODE, whose operands are ids plus one as a node's are; the node is the id it is about to take
+    constexpr u32 k_md_distinct_node = 5;
+    auto fields = cc::vector<u64>::create_with_capacity(properties.size() + 1);
+    fields.push_back(u64(_metadata.size() + 1));
+    for (auto const p : properties)
+        fields.push_back(p);
+    return md_record(k_md_distinct_node, fields);
+}
+
 u32 module_builder::md_record(u32 code, cc::span<u64 const> fields)
 {
     auto const first = u32(_md_fields.size());

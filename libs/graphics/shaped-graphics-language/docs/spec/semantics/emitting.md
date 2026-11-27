@@ -643,6 +643,11 @@ fn main_ps(p: pixel_input) -> target_ {
   A shuffle by an offset reads `waveReadLaneAt` at the lane it computes from `waveGetLaneIndex`, as EMIT-146's text does.
   An inclusive sum or product is `wavePrefixOp` and then this invocation's own value folded in, since DXIL's prefix is exclusive alone.
   A ballot is `waveActiveBallot`'s four words, a quad swap `quadOp` of its axis, and a quad broadcast `quadReadLaneAt`.
+* **EMIT-291** A loop written `@unroll(false)` (CHK-414) reaches both native routes, as HLSL's `[loop]` reaches DXC's ([why](why/emitting.md#emit-291)).
+  DXIL attaches `!llvm.loop` to every branch that goes back to the loop's header, a distinct node of the loop's own naming `llvm.loop.unroll.disable`, as DXC's compile of `[loop]` does.
+  SPIR-V states `DontUnroll` as the loop control of the loop's `OpLoopMerge`, which SPIR-V 1.0 has.
+  A loop nested in it, or around it, asks nothing unless it is written so too.
+  A loop that asks nothing carries no metadata on DXIL and `None` on SPIR-V, an unrolled one past CHK-389's limit among them.
 * **EMIT-285** DXIL branches on what a `not` negates, with the branch's two ways swapped, as DXC writes it.
   AMD's D3D12 driver takes the compared value on the wrong side of a branch on a negated equality.
   [amd-d3d12-negated-equality-branch-substitutes-constant](../../../../../../docs/bugs-external/amd-d3d12-negated-equality-branch-substitutes-constant/readme.md) reproduces it.

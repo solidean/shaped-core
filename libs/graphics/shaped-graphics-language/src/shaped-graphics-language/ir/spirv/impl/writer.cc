@@ -138,7 +138,8 @@ void writer::terminator(ir::block const& b, instruction const& i)
     if (b.merges == merge_kind::selection)
         emit(_code, spv::SelectionMerge, {id_of(b.merge), 0u});
     else if (b.merges == merge_kind::loop)
-        emit(_code, spv::LoopMerge, {id_of(b.merge), id_of(b.continue_to), 0u});
+        emit(_code, spv::LoopMerge,
+             {id_of(b.merge), id_of(b.continue_to), b.hint == loop_hint::rolled ? k_loop_dont_unroll : 0u});
 
     switch (i.code)
     {

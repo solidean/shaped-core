@@ -232,8 +232,8 @@ struct sgl::check::flat_local
 struct sgl::check::flat_label
 {
     cc::string name;
-    /// A loop written `@unroll(false)`, which the target is asked to keep a loop; a hint, which HLSL writes as `[loop]`
-    /// and the other targets cannot spell (CHK-414).
+    /// A loop written `@unroll(false)`, which the target is asked to keep a loop; a hint, which HLSL writes as `[loop]`,
+    /// the native routes as EMIT-291 says, and MSL and WGSL cannot spell (CHK-414).
     bool is_rolled = false;
 
     bool operator==(flat_label const&) const = default;

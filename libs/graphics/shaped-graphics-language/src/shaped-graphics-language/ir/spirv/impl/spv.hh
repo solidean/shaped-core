@@ -346,4 +346,6 @@ constexpr u32 k_semantics_workgroup = 0x100;
 constexpr u32 k_semantics_image = 0x800;
 /// The image operand of an offset every lane of which is a constant.
 constexpr u32 k_image_const_offset = 0x8;
+/// `OpLoopMerge`'s loop control: `DontUnroll`, which SPIR-V 1.0 has.
+constexpr u32 k_loop_dont_unroll = 0x2;
 } // namespace sgl::ir::spirv::impl

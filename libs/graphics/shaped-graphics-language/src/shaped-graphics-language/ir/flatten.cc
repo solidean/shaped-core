@@ -83,6 +83,7 @@ private:
                 place[isize(b)] = u32(_first.size());
                 _first.push_back(_p.blocks[isize(b)].first);
                 _count.push_back(_p.blocks[isize(b)].count);
+                _hint.push_back(_p.blocks[isize(b)].hint);
             }
         _block_count = _first.size();
         _merges = cc::vector<merge_kind>::create_filled(_block_count, merge_kind::none);
@@ -397,6 +398,9 @@ private:
     {
         if (_is_touched[b] || _is_touched[merge] || i64(merge) == b || b == 0)
             return false;
+        // a loop's header going straight to another's would make the two one loop, which keeps one hint of the two
+        if (_hint[b] != loop_hint::none && _hint[merge] != loop_hint::none && _hint[b] != _hint[merge])
+            return false;
         auto const preds = cc::span<u32 const>(_ways_in.data() + _first_way[b], isize(_first_way[b + 1] - _first_way[b]));
         if (preds.empty())
             return false;
@@ -468,6 +472,9 @@ private:
         }
         _incoming[merge] += u32(preds.size()) - 1;
         _is_dead[b] = true;
+        // what reached the header reaches `merge` now, which heads the loop in its place
+        if (_hint[merge] == loop_hint::none)
+            _hint[merge] = _hint[b];
         _is_touched[b] = true;
         _is_touched[merge] = true;
         return true;
@@ -485,6 +492,7 @@ private:
             _merge[b] = _merge[to];
             _continue_to[b] = _continue_to[to];
             _merges[to] = merge_kind::none;
+            _hint[b] = _hint[to];
         }
         while (is_phi(_head[to]))
         {
@@ -727,7 +735,7 @@ private:
                 copy.first = first;
                 kept.push_back(copy);
             }
-            auto rebuilt = ir::block{.first = start, .count = u32(kept.size()) - start};
+            auto rebuilt = ir::block{.first = start, .count = u32(kept.size()) - start, .hint = _hint[b]};
             if (_merges[b] != merge_kind::none)
             {
                 rebuilt.merges = _merges[b];
@@ -750,6 +758,8 @@ private:
     cc::vector<u32> _merge;
     cc::vector<u32> _continue_to;
     cc::vector<u32> _named;
+    /// Parallel to the blocks: the loop each heads, which outlives `_merges` where unstructured.
+    cc::vector<loop_hint> _hint;
     cc::vector<u32> _first;
     cc::vector<u32> _count;
     cc::vector<u32> _next;
