@@ -3,6 +3,8 @@ created: 2026-11-22
 refs:
   - file: libs/graphics/shaped-graphics/tests/routine/routine-test.cc:537-556
   - test: sg - an idle registry's idle_completion is ready when asked
+claimed-by: Claude (for Philip Trettner)
+claimed-at: 2026-11-27T14:56Z
 ---
 
 # The idle-registry test fails now and then under a full run
