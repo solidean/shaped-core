@@ -121,7 +121,7 @@ cc::optional<cc::string> user_config_directory_path()
 #else
 #if !defined(CC_OS_MACOS)
     // XDG says a relative value is invalid and must be ignored.
-    if (auto const xdg = cc::environment_variable("XDG_CONFIG_HOME"); xdg.has_value() && xdg.value().starts_with('/'))
+    if (auto const xdg = cc::environment_variable("XDG_CONFIG_HOME"); xdg.has_value() && xdg.value().starts_with("/"))
         return cc::string(without_trailing_separator(xdg.value()));
 #endif
     auto const home = cc::environment_variable("HOME");
