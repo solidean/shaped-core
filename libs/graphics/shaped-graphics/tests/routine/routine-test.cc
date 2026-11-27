@@ -214,7 +214,8 @@ private:
 } // namespace
 
 ASYNC_INVOCABLE_TEST("sg - try_acquire hands out a read-only scope, try_acquire_exclusive a move-only guard",
-                     (sg::context_handle const& ctx))
+                     (sg::context_handle const& ctx),
+                     exclusive("sg-reload-generation"))
 {
     // A mutable reference creeping back into the unlocked path would silently re-open unguarded writes.
     static_assert(std::is_same_v<decltype(guard_routine::try_acquire(std::declval<sg::command_list&>())),
@@ -303,7 +304,9 @@ ASYNC_INVOCABLE_TEST("sg - evicting a routine drops its instance (the acquire ca
     ctx->drop_command_list(cc::move(cmd));
 }
 
-ASYNC_INVOCABLE_TEST("sg - a routine compiles a shader and dispatches it end to end", (sg::context_handle const& ctx))
+ASYNC_INVOCABLE_TEST("sg - a routine compiles a shader and dispatches it end to end",
+                     (sg::context_handle const& ctx),
+                     exclusive("sg-reload-generation"))
 {
     REQUIRE(ctx != nullptr);
 

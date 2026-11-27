@@ -579,10 +579,11 @@ cc::shared_async<cc::unit> context::epochs_in_flight_steps(int allowed_in_flight
 cc::shared_async<compute_pipeline_handle> context::create_compute_pipeline_async(compute_pipeline_description const& desc,
                                                                                  lifetime_scope scope)
 {
-    auto build = [this, d = compute_pipeline_description(desc),
+    // A description holds its shader by reference, and the build runs after this returns, so it owns a copy.
+    auto build = [this, shader = compiled_shader(desc.shader), layout = desc.layout, cached = desc.cached_pipeline,
                   scope](cc::async_context<compute_pipeline_handle>& actx) -> cc::async_step_status
     {
-        auto res = try_create_compute_pipeline(d, scope);
+        auto res = try_create_compute_pipeline({.shader = shader, .layout = layout, .cached_pipeline = cached}, scope);
         if (res.has_error())
             return actx.error(cc::move(res.error()));
         return actx.success(cc::move(res.value()));

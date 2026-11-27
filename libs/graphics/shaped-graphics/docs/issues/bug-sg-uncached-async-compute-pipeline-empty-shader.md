@@ -22,3 +22,11 @@ Measured, not explained:
 - `context::create_compute_pipeline_async` copies the description into its build lambda, as `create_raster_pipeline_async` does, and the raster one has never shown this.
 
 Next: a test that builds one compute pipeline through `ctx.uncached.create_compute_pipeline_async` and awaits it, on every backend, under `--repeat`.
+
+## Resolution
+
+`compute_pipeline_description` holds its shader as `compiled_shader const&`, where a raster description holds its stages by value.
+`context::create_compute_pipeline_async` copied the description into its build, which copied the reference, and the build runs on a worker after the call returns.
+So it read whatever the caller's shader had become by then: in the polyfill, a description local to the raster call that had already gone.
+The build now owns a copy of the shader.
+`sg - an async compute build owns its shader, so the caller's may change or go at once` empties the caller's copy after the call; it failed with "compute shader has no bytecode" before.
