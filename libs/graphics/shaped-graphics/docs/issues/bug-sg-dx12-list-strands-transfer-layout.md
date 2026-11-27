@@ -37,3 +37,12 @@ sg's happens-before model is the order of calls on the *context*, and recording 
 Submit the fixup from the transfer actor, immediately before the job it belongs to, so a list submitting in between cannot get underneath it.
 Clamping the entry layout at finalize instead does not work — a vulkan copy command names its layout literally, captured at record, so the body and the entry barrier would disagree.
 Until then the guard is worth neither trusting nor deleting: rewrite it in terms of context-call order, or remove it with the fix.
+
+## The proposed fix can deadlock (2026-11-27, read from the code)
+
+Submitting the fixup from the transfer actor puts it on the direct queue whenever the actor gets to the job.
+A list submitted before that, touching the texture, folds a GPU wait on the transfer's value at its submit.
+The copy then waits on the fixup's direct-queue token, which is behind that list, so the list waits on the copy and the copy on the list.
+So the fixup has to stay ahead of every list that can wait on the copy, which is the enqueue, as now.
+What the layer objects to is call order: its copy-queue submit lands after the list's, though the GPU order is right.
+A fix has to make the copy's submit precede, in call order, any list submit that moves the layout, or have such a list not move it.
