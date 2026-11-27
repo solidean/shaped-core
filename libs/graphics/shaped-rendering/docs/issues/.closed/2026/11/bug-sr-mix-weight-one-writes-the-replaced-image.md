@@ -4,8 +4,8 @@ priority: next
 refs:
   - file: libs/graphics/shaped-rendering/tests/mix-test.cc:110
   - test: sr - a mix reaches both of its endpoints exactly
-claimed-by: Claude (for Philip Trettner)
-claimed-at: 2026-11-27T14:03Z
+closed: 2026-11-27
+resolution: fixed
 ---
 
 # A mix at weight 1 writes the image it replaces, not the source
