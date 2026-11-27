@@ -182,31 +182,39 @@ u32 writer::memory_of_table(global const& g, bool whole_lanes)
 {
     auto const value = _p.at(g.type).element;
     auto entry = memory{.value = value, .leaves = leaves_of(value)};
-    auto const name = _p.name_at(g.name_first, g.name_size);
-    auto const shapes = lay_out_memory(entry, whole_lanes);
-    for (auto c = isize(0); c < shapes.size(); ++c)
-    {
-        auto const type = shapes[c].type;
-        // a position no leaf of the column takes holds zero
-        auto elements = cc::vector<ll_value>();
-        for (auto k = u32(0); k < shapes[c].size; ++k)
-            elements.push_back(_m.is_float(type) ? _m.constant_float(type, 0) : _m.constant_int(type, 0));
-        for (auto k = u32(0); k < entry.leaves; ++k)
-        {
-            if (entry.column_of[isize(k)] != u32(c))
-                continue;
-            auto const leaf = value_ref(_p.initializers[isize(g.initializer_first) + k]);
-            auto const& constant = _p.constants[index_of(leaf)];
-            auto const bits = constant.is_null ? u64(0) : (u64(constant.high) << 32) | constant.low;
-            elements[isize(entry.position_of[isize(k)])]
-                = _m.is_float(type) ? _m.constant_float(type, bits) : _m.constant_int(type, bits);
-        }
-        auto const array = _m.array(type, shapes[c].size);
-        entry.columns.push_back(_m.add_constant_table(cc::format("{}.{}", name, shapes[c].suffix), array,
-                                                      _m.constant_struct(array, elements), _m.bits_of(type) / 8));
-    }
+    entry.shapes = lay_out_memory(entry, whole_lanes);
+    entry.columns.resize_to_filled(entry.shapes.size(), ll_value::none);
+    entry.table = i32(&g - _p.globals.data());
     _memories.push_back(cc::move(entry));
     return u32(_memories.size() - 1);
+}
+
+ll_value writer::table_column(memory& held, u32 c)
+{
+    if (held.columns[c] != ll_value::none)
+        return held.columns[c];
+    auto const& g = _p.globals[isize(held.table)];
+    auto const& shape = held.shapes[c];
+    auto const type = shape.type;
+    // a position no leaf of the column takes holds zero
+    auto elements = cc::vector<ll_value>();
+    for (auto k = u32(0); k < shape.size; ++k)
+        elements.push_back(_m.is_float(type) ? _m.constant_float(type, 0) : _m.constant_int(type, 0));
+    for (auto k = u32(0); k < held.leaves; ++k)
+    {
+        if (held.column_of[isize(k)] != c)
+            continue;
+        auto const leaf = value_ref(_p.initializers[isize(g.initializer_first) + k]);
+        auto const& constant = _p.constants[index_of(leaf)];
+        auto const bits = constant.is_null ? u64(0) : (u64(constant.high) << 32) | constant.low;
+        elements[isize(held.position_of[isize(k)])]
+            = _m.is_float(type) ? _m.constant_float(type, bits) : _m.constant_int(type, bits);
+    }
+    auto const array = _m.array(type, shape.size);
+    auto const name = _p.name_at(g.name_first, g.name_size);
+    held.columns[c] = _m.add_constant_table(cc::format("{}.{}", name, shape.suffix), array,
+                                            _m.constant_struct(array, elements), _m.bits_of(type) / 8);
+    return held.columns[c];
 }
 
 void writer::declare_memory()
@@ -609,12 +617,12 @@ void writer::access_chain(u32 index, instruction const& i)
 
 ll_value writer::memory_pointer(place const& p, u32 leaf)
 {
-    auto const& held = _memories[p.root];
+    auto& held = _memories[p.root];
     auto const at = p.offset + leaf;
     if (at >= held.leaves)
     {
         unsupported("an index past the end of a variable");
-        return held.columns[0];
+        return held.table >= 0 ? table_column(held, 0) : held.columns[0];
     }
     auto const column = held.column_of[isize(at)];
     auto const position = held.position_of[isize(at)];
@@ -629,11 +637,11 @@ ll_value writer::memory_pointer(place const& p, u32 leaf)
         if (next >= held.leaves || held.column_of[isize(next)] != column)
         {
             unsupported("an index known at run time alone into a level its variable splits");
-            return held.columns[0];
+            return held.table >= 0 ? table_column(held, 0) : held.columns[0];
         }
         dynamic = add_dynamic(dynamic, term.index, held.position_of[isize(next)] - position);
     }
-    auto const storage = held.columns[column];
+    auto const storage = held.table >= 0 ? table_column(held, column) : held.columns[column];
     auto const index = dynamic == ll_value::none ? _m.constant_i32(position)
                                                  : _m.binary(binary_op::add, dynamic, _m.constant_i32(position));
     ll_value const indices[] = {_m.constant_i32(0), index};

@@ -193,6 +193,14 @@ private:
         u32 count = 0;
     };
 
+    /// What a memory's column holds: its scalar type, its size, and its name's suffix.
+    struct column_shape
+    {
+        ll_type type = ll_type::none;
+        u32 size = 0;
+        u32 suffix = 0;
+    };
+
     /// Variables or workgroup memory, as arrays of scalars called columns, each leaf at a position in one of them.
     ///
     /// A value holding an array of structs, vectors or matrices is split as DXC splits it: a column per scalar field
@@ -206,8 +214,11 @@ private:
         /// Parallel to the leaves: the column each is held in, and its position there.
         cc::vector<u32> column_of;
         cc::vector<u32> position_of;
-        /// Each column's storage.
+        /// Each column's storage; a table's is made when first read, since the validator refuses an unused one.
         cc::vector<ll_value> columns;
+        /// A table's global, and the shape of each column, for the columns made when first read.
+        i32 table = -1;
+        cc::vector<column_shape> shapes;
     };
 
     struct handle_entry
@@ -416,14 +427,9 @@ private:
     [[nodiscard]] ll_value add_dynamic(ll_value dynamic, ll_value index, u32 scale);
     /// A table's memory: an internal constant per scalar type it holds.
     [[nodiscard]] u32 memory_of_table(global const& g, bool whole_lanes);
+    /// A table's column `c`, made the first time it is read.
+    [[nodiscard]] ll_value table_column(memory& held, u32 c);
     [[nodiscard]] u32 memory_of_type(type_ref value, bool is_workgroup, cc::string_view name, bool whole_lanes);
-    /// Where each leaf of `value` is held, and what each column holds: its scalar type, its size, and its name's suffix.
-    struct column_shape
-    {
-        ll_type type = ll_type::none;
-        u32 size = 0;
-        u32 suffix = 0;
-    };
     [[nodiscard]] cc::vector<column_shape> lay_out_memory(memory& entry, bool whole_lanes);
     void lay_out_split(memory& entry,
                        type_ref t,
