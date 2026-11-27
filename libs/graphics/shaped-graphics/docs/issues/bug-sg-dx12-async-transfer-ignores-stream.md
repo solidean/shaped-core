@@ -7,6 +7,8 @@ refs:
   - file: libs/graphics/shaped-graphics/backends/dx12/src/shaped-graphics/backends/dx12/dx12_download_async.cc
   - file: libs/graphics/shaped-graphics/backends/metal/src/shaped-graphics/backends/metal/metal_transfer.cc
   - file: libs/graphics/shaped-graphics/tests/transfer/stream-test.cc
+claimed-by: Claude (for Philip Trettner)
+claimed-at: 2026-11-27T14:15Z
 ---
 
 # An async transfer does not order against an in-flight stream of the same resource
