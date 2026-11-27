@@ -4,8 +4,8 @@ refs:
   - symbol: sg::context_uncached_scope::create_compute_pipeline_async
   - symbol: sg::context::create_compute_pipeline_async
   - file: libs/graphics/shaped-graphics/src/shaped-graphics/context/uncached.cc
-claimed-by: Claude (for Philip Trettner)
-claimed-at: 2026-11-27T14:56Z
+closed: 2026-11-27
+resolution: fixed
 ---
 
 # `ctx.uncached.create_compute_pipeline_async` can hand the backend an empty or corrupted shader
