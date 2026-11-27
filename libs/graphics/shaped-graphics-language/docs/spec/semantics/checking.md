@@ -1810,6 +1810,7 @@ HLSL writes it on dx12 and vulkan; WebGPU has none, and sg's metal backend does 
   A module's tables follow those of every module it uses, and of the modules that may come next, the one whose name sorts first by its bytes comes first, so the program's own module comes last.
   Within a module, its tables stand in declaration order: its library files in the library's order (CHK-346), then the program's file.
   A table's place is the number of callables the tables before it list, and the host's callables follow the last table's.
+  Under a link, the group's numbering ([LINK-5](linking.md#the-numbering)) replaces the program's.
   How the program is checked, and the modules of the library it does not reach, change no place.
 
 ### Queries

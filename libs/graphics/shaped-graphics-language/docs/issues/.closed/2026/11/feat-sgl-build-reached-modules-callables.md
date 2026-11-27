@@ -3,6 +3,8 @@ created: 2026-11-26
 refs:
   - file: libs/graphics/shaped-graphics-language/docs/spec/semantics/checking.md
   - issue: chore-sgl-review-callable-section
+closed: 2026-11-27
+resolution: fixed
 ---
 
 # A program builds the callables of the modules it reaches
@@ -18,3 +20,10 @@ A callable built that way that calls another table takes the module's own callab
 
 Either build the reached modules' callables as entry points of the program that reaches them, so each sees the program's section.
 Or refuse a module's callable that calls a table when it is built from its own file (`unsupported-yet`) until then.
+
+## Resolution (branch `jn/sgl-link`, under review)
+
+`sgl::link` builds each callable from its own file, as Quest3D does, and numbers every callables table the group reaches once ([linking.md](../../../../spec/semantics/linking.md), LINK-3, LINK-5).
+A callable that calls another table now calls the group's record, not its module's own section's: the flattened call keeps a symbolic `callable_base(t)`, resolved when the entry is written.
+CHK-562 gained the sentence that a link's numbering replaces the program's.
+Julius and Philip review the branch before it merges; a shader package's `@raytracing pipeline` linking its modules' callables is linking.md's open item.
