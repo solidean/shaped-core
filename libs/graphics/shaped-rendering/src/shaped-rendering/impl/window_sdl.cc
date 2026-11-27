@@ -718,8 +718,17 @@ void window_system::poll_events()
                 break;
             }
             auto const* const name = SDL_GetGamepadName(pad);
-            auto state = gamepad_state{.gamepad = event.gdevice.which, .name = cc::string(name != nullptr ? name : "")};
-            push(nullptr, gamepad_connection_event{.gamepad = state.gamepad, .name = state.name, .is_connected = true});
+            auto state = gamepad_state{
+                .gamepad = event.gdevice.which,
+                .name = cc::string(name != nullptr ? name : ""),
+                .kind = impl::gamepad_kind_from_sdl(SDL_GetGamepadType(pad)),
+                .face = impl::gamepad_face_from_sdl(SDL_GetGamepadButtonLabel(pad, SDL_GAMEPAD_BUTTON_SOUTH),
+                                                    SDL_GetGamepadButtonLabel(pad, SDL_GAMEPAD_BUTTON_EAST))};
+            push(nullptr, gamepad_connection_event{.gamepad = state.gamepad,
+                                                   .name = state.name,
+                                                   .kind = state.kind,
+                                                   .face = state.face,
+                                                   .is_connected = true});
             _gamepads.push_back(cc::move(state));
             break;
         }
@@ -729,7 +738,10 @@ void window_system::poll_events()
                 if (_gamepads[i].gamepad == event.gdevice.which)
                 {
                     SDL_CloseGamepad(SDL_GetGamepadFromID(event.gdevice.which));
-                    push(nullptr, gamepad_connection_event{.gamepad = event.gdevice.which, .name = _gamepads[i].name});
+                    push(nullptr, gamepad_connection_event{.gamepad = event.gdevice.which,
+                                                           .name = _gamepads[i].name,
+                                                           .kind = _gamepads[i].kind,
+                                                           .face = _gamepads[i].face});
                     _gamepads.remove_at(i);
                     break;
                 }

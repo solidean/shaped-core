@@ -199,6 +199,48 @@ cc::optional<sr::gamepad_button> gamepad_button_from_sdl(u8 sdl_button)
     }
 }
 
+sr::gamepad_kind gamepad_kind_from_sdl(SDL_GamepadType type)
+{
+    switch (type)
+    {
+    case SDL_GAMEPAD_TYPE_STANDARD:
+        return gamepad_kind::standard;
+    case SDL_GAMEPAD_TYPE_XBOX360:
+        return gamepad_kind::xbox_360;
+    case SDL_GAMEPAD_TYPE_XBOXONE:
+        return gamepad_kind::xbox_one;
+    case SDL_GAMEPAD_TYPE_PS3:
+        return gamepad_kind::playstation_3;
+    case SDL_GAMEPAD_TYPE_PS4:
+        return gamepad_kind::playstation_4;
+    case SDL_GAMEPAD_TYPE_PS5:
+        return gamepad_kind::playstation_5;
+    case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO:
+        return gamepad_kind::switch_pro;
+    case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_LEFT:
+        return gamepad_kind::switch_joycon_left;
+    case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_RIGHT:
+        return gamepad_kind::switch_joycon_right;
+    case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_PAIR:
+        return gamepad_kind::switch_joycon_pair;
+    case SDL_GAMEPAD_TYPE_GAMECUBE:
+        return gamepad_kind::gamecube;
+    default:
+        return gamepad_kind::unknown;
+    }
+}
+
+sr::gamepad_face gamepad_face_from_sdl(SDL_GamepadButtonLabel south, SDL_GamepadButtonLabel east)
+{
+    if (south == SDL_GAMEPAD_BUTTON_LABEL_CROSS)
+        return gamepad_face::shapes;
+    if (south == SDL_GAMEPAD_BUTTON_LABEL_B)
+        return gamepad_face::bayx;
+    if (south == SDL_GAMEPAD_BUTTON_LABEL_A && east == SDL_GAMEPAD_BUTTON_LABEL_X)
+        return gamepad_face::axby;
+    return gamepad_face::abxy;
+}
+
 cc::optional<sr::gamepad_axis> gamepad_axis_from_sdl(u8 sdl_axis)
 {
     switch (sdl_axis)

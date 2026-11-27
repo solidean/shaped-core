@@ -9,6 +9,7 @@ add_library(shaped-rendering
     src/shaped-rendering/shaped-rendering.cc
     src/shaped-rendering/capture.cc
     src/shaped-rendering/window.cc
+    src/shaped-rendering/input_map.cc
     src/shaped-rendering/blit_routine.cc
     src/shaped-rendering/taa_routine.cc
     src/shaped-rendering/box_filter_mipmap_routine.cc
@@ -57,6 +58,7 @@ target_sources(shaped-rendering
     src/shaped-rendering/fwd.hh
     src/shaped-rendering/all.hh
     src/shaped-rendering/input.hh
+    src/shaped-rendering/input_map.hh
     src/shaped-rendering/blit_routine.hh
     src/shaped-rendering/taa_routine.hh
     src/shaped-rendering/box_filter_mipmap_routine.hh
@@ -345,6 +347,7 @@ if(SC_BUILD_TESTS)
         tests/smoke-test.cc
         tests/capture-request-test.cc
         tests/input-test.cc
+        tests/input-map-test.cc
         tests/window-test.cc
         tests/window-manual-test.cc
         tests/imgui-registry-test.cc

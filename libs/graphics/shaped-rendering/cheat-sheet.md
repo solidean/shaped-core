@@ -121,7 +121,7 @@ for (auto const& e : wsys->events())   // -> cc::span<input_event const>, oldest
             g.gamepad;  g.button;  g.is_down;     // u32, sr::gamepad_button by POSITION (south = A / cross), bool
         },
         // gamepad_axis_event {gamepad, axis, value}: sticks -1..1 with up positive, triggers 0..1, NO dead zone
-        // gamepad_connection_event {gamepad, name, is_connected}: pads already plugged in report on the first poll
+        // gamepad_connection_event {gamepad, name, kind, face, is_connected}: pads already plugged in report on the first poll
         [](auto const&) {});           // catch-all; SPELL ALL NINE instead and a new event kind fails to compile here
 
     e.is_key();       // -> bool (is_text/_mouse_move/_mouse_button/_mouse_wheel/_file_drop too) — for predicates, and loops that `continue`
@@ -133,6 +133,9 @@ for (auto const& pad : wsys->gamepads())  // polled state, for what a held stick
     pad.left_stick;  pad.right_stick;     // tg::vec2f, up and right positive, NO dead zone
     pad.left_trigger;  pad.right_trigger; // float 0..1
     pad.is_held(sr::gamepad_button::south);
+    pad.kind;                             // sr::gamepad_kind: xbox_one, playstation_5, switch_pro, ... standard, unknown
+    pad.face;                             // sr::gamepad_face: abxy, axby, bayx, shapes — the legends, per pad, not per kind
+    sr::label_of(pad.face, sr::gamepad_button::south);  // -> sr::gamepad_button_label: a, cross, ...; none off the face
 }
 // gamepads report only while a window of this app has focus; no rumble, and imgui does not navigate with them yet
 
@@ -154,6 +157,35 @@ win->start_text_input();              // begin text_events + IME for this window
 - **`input_event::payload` is a `cc::variant`**, and the `try_as_*` accessors above are one-liners over its `try_as<T>()`.
   Reach for them, or for `payload.visit(...)` with one handler per alternative for an exhaustive dispatch.
 - **A missed `try_as_*` builds an error, which allocates** — branch once per kind you handle, and `visit` the payload when you dispatch over all five.
+
+## Input map — semantic actions over real inputs
+
+```cpp
+#include <shaped-rendering/input_map.hh>
+
+auto map = sr::input_map();                                      // input_map_config: dead zones, press threshold
+auto const jump = map.add_action("jump", sr::input_action_kind::button);  // also axis, vector
+map.bind(jump, {.source = sr::key_binding{sr::scancode::space}});
+map.bind(jump, {.source = sr::gamepad_button_binding{sr::gamepad_button::south}});
+map.bind(move, {.source = sr::key_binding{sr::scancode::w}, .direction = tg::vec2f(0, 1)});  // a key adds its direction
+map.bind(move, {.source = sr::gamepad_stick_binding{sr::gamepad_stick::left}});
+map.bind(look, {.source = sr::mouse_motion_binding{}});           // read through motion(), never vector()
+// also mouse_button_binding, mouse_wheel_binding{wheel_direction}, gamepad_axis_binding{axis, positive}
+
+wsys->poll_events();
+map.update(*wsys);                     // once per frame, after the poll; update(events, pads, has_focus) for a test
+map.is_held(jump);  map.was_pressed(jump);  map.was_released(jump);
+map.value(rise);                       // -> float, summed, clamped to [-1, 1]
+map.vector(move);                      // -> tg::vec2f, summed, shortened to length 1
+map.motion(look);                      // -> tg::vec2f, the pointer's logical pixels this update, x right, y down
+map.active_device();                   // -> sr::input_device {kind, gamepad, pad_kind, face}: the one used last
+map.binding_for(jump, sr::input_device_kind::gamepad);  // -> optional<input_binding>, the first there: what a prompt shows
+```
+
+- **Every device counts at once**; `active_device` only says which one was used last, which is what prompts follow.
+  A pad plugged in is not used: it becomes active on a button or a stick pushed past the press threshold, and the mouse only on a real move.
+- **A tap within one update is a press and a release**, and never held; each scroll of the wheel is one too.
+- **Without the focus nothing is held**, since the releases of keys let go elsewhere never arrive.
 
 ## Dear ImGui
 

@@ -145,6 +145,40 @@ TEST("sr - gamepad buttons map by position, and what sr does not model reads as 
     CHECK(!impl::gamepad_button_from_sdl(SDL_GAMEPAD_BUTTON_MISC1).has_value());
 }
 
+TEST("sr - a gamepad's type names its make, and a type sr does not know reads as unknown")
+{
+    CHECK(impl::gamepad_kind_from_sdl(SDL_GAMEPAD_TYPE_XBOXONE) == gamepad_kind::xbox_one);
+    CHECK(impl::gamepad_kind_from_sdl(SDL_GAMEPAD_TYPE_PS5) == gamepad_kind::playstation_5);
+    CHECK(impl::gamepad_kind_from_sdl(SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_PAIR) == gamepad_kind::switch_joycon_pair);
+    CHECK(impl::gamepad_kind_from_sdl(SDL_GAMEPAD_TYPE_STANDARD) == gamepad_kind::standard);
+    CHECK(impl::gamepad_kind_from_sdl(SDL_GAMEPAD_TYPE_UNKNOWN) == gamepad_kind::unknown);
+    CHECK(impl::gamepad_kind_from_sdl(SDL_GAMEPAD_TYPE_COUNT) == gamepad_kind::unknown);
+}
+
+TEST("sr - a pad's face follows the legends SDL reports, and round-trips through label_of")
+{
+    for (auto const face : {gamepad_face::abxy, gamepad_face::axby, gamepad_face::bayx, gamepad_face::shapes})
+    {
+        // SDL's own legends for SDL's face style of the same name.
+        auto const type = face == gamepad_face::shapes ? SDL_GAMEPAD_TYPE_PS5
+                        : face == gamepad_face::bayx   ? SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO
+                        : face == gamepad_face::axby   ? SDL_GAMEPAD_TYPE_GAMECUBE
+                                                       : SDL_GAMEPAD_TYPE_XBOXONE;
+        auto const south = SDL_GetGamepadButtonLabelForType(type, SDL_GAMEPAD_BUTTON_SOUTH);
+        auto const east = SDL_GetGamepadButtonLabelForType(type, SDL_GAMEPAD_BUTTON_EAST);
+        CHECK(impl::gamepad_face_from_sdl(south, east) == face);
+
+        // sr's legend table agrees with SDL's on all four face buttons.
+        // Both declare the face buttons first, south to north, and the legends in the same order.
+        for (auto i = 0; i < 4; ++i)
+            CHECK(int(label_of(face, gamepad_button(i)))
+                  == int(SDL_GetGamepadButtonLabelForType(type, SDL_GamepadButton(i))));
+    }
+    CHECK(impl::gamepad_face_from_sdl(SDL_GAMEPAD_BUTTON_LABEL_UNKNOWN, SDL_GAMEPAD_BUTTON_LABEL_UNKNOWN)
+          == gamepad_face::abxy);
+    CHECK(label_of(gamepad_face::shapes, gamepad_button::start) == gamepad_button_label::none);
+}
+
 TEST("sr - a stick reads up as positive, and reaches its end on both sides")
 {
     // SDL's y points down, and its range is one longer below zero than above.
@@ -237,6 +271,39 @@ TEST("sr - a gamepad connects, reports its input as events and state, and discon
     for (auto const& e : wsys->events())
         disconnected += e.is_gamepad_connection() && !e.as_gamepad_connection().is_connected ? 1 : 0;
     CHECK(disconnected == 1);
+}
+
+TEST("sr - a pad's make and face come from its vendor and product", main_thread, exclusive("sr-window-system"))
+{
+    auto const wsys = sr::window_system::create({.headless = true});
+
+    auto desc = SDL_VirtualJoystickDesc{};
+    SDL_INIT_INTERFACE(&desc);
+    desc.type = SDL_JOYSTICK_TYPE_GAMEPAD;
+    desc.vendor_id = 0x054c;  // Sony
+    desc.product_id = 0x0ce6; // DualSense
+    desc.naxes = SDL_GAMEPAD_AXIS_COUNT;
+    desc.nbuttons = SDL_GAMEPAD_BUTTON_DPAD_RIGHT + 1;
+    desc.axis_mask = (1u << SDL_GAMEPAD_AXIS_COUNT) - 1;
+    desc.button_mask = (1u << (SDL_GAMEPAD_BUTTON_DPAD_RIGHT + 1)) - 1;
+    desc.name = "virtual dualsense";
+    auto const id = SDL_AttachVirtualJoystick(&desc);
+    REQUIRE(id != 0);
+    wsys->poll_events();
+
+    REQUIRE(wsys->gamepads().size() == 1);
+    CHECK(wsys->gamepads()[0].kind == gamepad_kind::playstation_5);
+    CHECK(wsys->gamepads()[0].face == gamepad_face::shapes);
+    REQUIRE(wsys->events().size() == 1);
+    CHECK(wsys->events()[0].as_gamepad_connection().kind == gamepad_kind::playstation_5);
+    CHECK(wsys->events()[0].as_gamepad_connection().face == gamepad_face::shapes);
+
+    // Going away, it still says what it was.
+    REQUIRE(SDL_DetachVirtualJoystick(id));
+    wsys->poll_events();
+    REQUIRE(wsys->events().size() == 1);
+    CHECK(!wsys->events()[0].as_gamepad_connection().is_connected);
+    CHECK(wsys->events()[0].as_gamepad_connection().kind == gamepad_kind::playstation_5);
 }
 
 #endif
