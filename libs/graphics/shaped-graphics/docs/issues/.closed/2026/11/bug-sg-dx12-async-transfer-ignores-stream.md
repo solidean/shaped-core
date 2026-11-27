@@ -7,8 +7,8 @@ refs:
   - file: libs/graphics/shaped-graphics/backends/dx12/src/shaped-graphics/backends/dx12/dx12_download_async.cc
   - file: libs/graphics/shaped-graphics/backends/metal/src/shaped-graphics/backends/metal/metal_transfer.cc
   - file: libs/graphics/shaped-graphics/tests/transfer/stream-test.cc
-claimed-by: Claude (for Philip Trettner)
-claimed-at: 2026-11-27T14:15Z
+closed: 2026-11-27
+resolution: fixed
 ---
 
 # An async transfer does not order against an in-flight stream of the same resource
@@ -17,7 +17,7 @@ Command lists do: their access tracking reads the stream stamps alongside the as
 The async tier does not — a download job reads `_pending_async_upload_value` and no stream value, and the upload side mirrors that.
 So `ctx.stream.bytes_to_buffer` followed by `ctx.download.bytes_from_buffer` on one resource is unordered, and the readback can beat the stream.
 
-Found while writing [stream-test.cc](../../tests/transfer/stream-test.cc)'s stream-wait test, whose first draft used the async tier as the consumer and read zeroes on dx12.
+Found while writing [stream-test.cc](../../../../../tests/transfer/stream-test.cc)'s stream-wait test, whose first draft used the async tier as the consumer and read zeroes on dx12.
 The fix mirrors what the command lists already do, in dx12's async enqueue paths.
 
 **Metal already does it**: its streaming timeline is per resource, so an async transfer waits on the same value a command list would.
