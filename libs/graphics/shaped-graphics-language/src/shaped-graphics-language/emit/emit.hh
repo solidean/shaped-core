@@ -161,13 +161,16 @@ enum class sgl::emit::debug_info : sgl::u8
 
 /// A link group's numbers for one checked module (LINK-6): the slot of each file-scope sampler and the first record of
 /// each callables table the group numbers, by the module's own symbols.
-/// `sgl::link` makes one per file it checked; a writer reads it through `sampler_slot` and `callable_record` alone.
+/// `sgl::link` makes one per file it checked; a writer reads it through `sampler_slot` and `callable_record` alone,
+/// and the interface takes each sampler's `name` (LINK-6).
 struct sgl::emit::numbering
 {
     struct number
     {
         check::symbol_id symbol = check::symbol_id::none;
         i32 value = 0;
+        /// The symbol's name in the group, as the link map names it (LINK-2): `hits.gWater`, `trace.sgl:gBorder`.
+        cc::string name;
 
         bool operator==(number const&) const = default;
     };

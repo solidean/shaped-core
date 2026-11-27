@@ -668,16 +668,18 @@ cc::result<sgl::link_result, cc::string> sgl::link(link_request const& request)
                 auto const& sym = m.symbols[k];
                 if (sym.kind == check::symbol_kind::sampler)
                 {
-                    if (auto const slot = n.slot_of(key_of(m, file->source_name, id)); slot >= 0)
-                        numbering.samplers.push_back({.symbol = id, .value = slot});
+                    auto key = key_of(m, file->source_name, id);
+                    if (auto const slot = n.slot_of(key); slot >= 0)
+                        numbering.samplers.push_back({.symbol = id, .value = slot, .name = cc::move(key)});
                 }
                 else if (sym.kind == check::symbol_kind::pipeline && sym.state == check::symbol_state::checked
                          && sym.info >= 0 && sym.info < m.pipelines.size()
                          && m.pipelines[sym.info].kind == check::pipeline_kind::callables
                          && m.pipelines[sym.info].symbol == id)
                 {
-                    if (auto const record = n.record_of(key_of(m, file->source_name, id)); record >= 0)
-                        numbering.tables.push_back({.symbol = id, .value = record});
+                    auto key = key_of(m, file->source_name, id);
+                    if (auto const record = n.record_of(key); record >= 0)
+                        numbering.tables.push_back({.symbol = id, .value = record, .name = cc::move(key)});
                 }
             }
             file->numberings.push_back(cc::move(numbering));

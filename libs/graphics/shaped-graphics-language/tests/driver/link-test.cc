@@ -956,3 +956,97 @@ TEST("sgl link - the numbering hash covers what a target's branch reaches, not o
     CHECK(A.numbering_hash(1) != B.numbering_hash(4));
     CHECK(joined(B.map().renumbered).contains("by_target.sgl:sky"));
 }
+
+namespace
+{
+/// Each file sampler `e`'s interface reflects, as `name@slot`, each checked against the map: one name, one slot.
+cc::string reflected_samplers(sgl::link_map const& map, sgl::emitted_source const& e)
+{
+    auto result = cc::vector<cc::string>();
+    for (auto const& b : e.bindings)
+    {
+        if (!b.is_file_sampler)
+            continue;
+        result.push_back(cc::format("{}@{}", b.name, b.slot));
+        auto is_mapped = false;
+        for (auto const& s : map.samplers)
+            is_mapped = is_mapped || (s.symbol == b.name && s.slot == b.slot);
+        CHECK(is_mapped);
+    }
+    return joined(result);
+}
+} // namespace
+
+TEST("sgl link - a sampler of the entry's own file is reflected by its map name, on every route")
+{
+    // LINK-6: hits.sgl's own gWater is `hits.gWater` in the map, and so in the interface of the water hit linked
+    auto const r = linked(k_deck);
+    auto const water = deck_entry("water");
+    for (auto const t : k_traced)
+    {
+        auto const text = emitted(r, water, t);
+        CHECK(reflected_samplers(r.map(), text) == "samplers.linear@1, hits.gWater@3");
+        // the text spells it as before, which is what a compiler of the text reflects
+        for (auto const& b : text.bindings)
+            if (b.name == "hits.gWater")
+                CHECK(b.emitted == "gWater");
+    }
+    for (auto const t : {sgl::emit::target::hlsl_dx12, sgl::emit::target::hlsl_vulkan})
+        CHECK(reflected_samplers(r.map(), emitted(r, water, t, sgl::emit::native_route::require))
+              == "samplers.linear@1, hits.gWater@3");
+
+    // compiled alone, it keeps the name its file gives it
+    auto names = cc::vector<cc::string>();
+    for (auto const& b : alone("hits.sgl", "water", sgl::emit::target::hlsl_dx12).bindings)
+        if (b.is_file_sampler)
+            names.push_back(cc::format("{}@{}", b.name, b.slot));
+    CHECK(joined(names) == "samplers.linear@0, gWater@2");
+}
+
+TEST("sgl link - a sampler of a file that names no module is reflected by the file's path and its name")
+{
+    // LINK-2, LINK-6
+    constexpr cc::string_view own = "sampler gBorder:\n"
+                                    "    filter = .linear\n"
+                                    "    address = .clamp_edge\n"
+                                    "binding work:\n"
+                                    "    map: texture_2d[float4]\n"
+                                    "    values: mut buffer[float4]\n"
+                                    "@compute(64) fun cs(@thread_id id: int3){work}:\n"
+                                    "    work.values[id.x] = work.map.sample(float2(0.5), gBorder, level = 0.0)\n";
+    sgl::library_file const library[] = {{.name = "x/own.sgl", .source = own}};
+    sgl::link_entry const group[] = {{.source_name = "x/own.sgl", .entry_point = "cs"}};
+    auto const r = linked(group, library);
+    CHECK(samplers_of(r.map()) == "x/own.sgl:gBorder@0");
+    for (auto const t : k_all)
+        CHECK(reflected_samplers(r.map(), emitted(r, 0, t)) == "x/own.sgl:gBorder@0");
+    for (auto const t : {sgl::emit::target::hlsl_dx12, sgl::emit::target::hlsl_vulkan})
+        CHECK(reflected_samplers(r.map(), emitted(r, 0, t, sgl::emit::native_route::require)) == "x/own.sgl:gBorder@0");
+    auto names = cc::vector<cc::string>();
+    for (auto const& b : alone("x/own.sgl", "cs", sgl::emit::target::hlsl_dx12, sgl::emit::native_route::text, library)
+                             .bindings)
+        if (b.is_file_sampler)
+            names.push_back(cc::format("{}@{}", b.name, b.slot));
+    CHECK(joined(names) == "gBorder@0");
+}
+
+TEST("sgl link - an entry that expects a diagnostic is refused as never built, not as missing")
+{
+    // CHK-403
+    constexpr cc::string_view source = "require early_depth_test\n"
+                                       "struct varyings:\n"
+                                       "    @position position: hpos4\n"
+                                       "@vertex fun vs(@vertex_index i: int) -> varyings:\n"
+                                       "    return {position = hpos4(0.0, 0.0, 0.0, 1.0)}\n"
+                                       "@expect(warning = \"early-depth-keeps-discarded\")\n"
+                                       "@early_depth_test\n"
+                                       "@pixel fun bad(p: varyings) -> float4:\n"
+                                       "    if p.position.x < 0.5 => discard\n"
+                                       "    return float4(1.0)\n";
+    sgl::library_file const library[] = {{.name = "e.sgl", .source = source}};
+    sgl::link_entry const group[] = {{.source_name = "e.sgl", .entry_point = "bad"}};
+    auto const r = sgl::link({.name = "deck", .entries = group, .library = library, .targets = k_all});
+    REQUIRE(r.has_error());
+    CHECK(r.error().starts_with(
+        "deck: error: link-no-entry-point: 'bad' of e.sgl expects a diagnostic, so it is never built"));
+}

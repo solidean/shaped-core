@@ -39,6 +39,7 @@ Back to the [semantics](_index.md); the reasons are in [why/linking.md](why/link
 * **LINK-6** An entry emitted under a link reads each sampler at its group's slot, wherever EMIT-133 places a slot, and calls each table at its group's first record ([why](why/linking.md#link-6)).
   The group numbers from a check for no target, as `describe` checks, and each entry is emitted from its file's check for the target it is written for (CHK-426).
   A sampler or a table an emitted entry reaches and the group does not number is `unnumbered`.
+  Its interface names each sampler by its LINK-2 name, as the map does, a sampler of the entry's own file too, while the text spells it as the file compiled alone does.
 * **LINK-7** An entry's **numbering hash** is a hash of the slots and records it reaches, the same in every process ([why](why/linking.md#link-7)).
   What it reaches is what the check that numbers reaches and what each target the link checks for reaches, a branch on `target_api` or `has` included.
   So is what makes it renumbered (LINK-4).

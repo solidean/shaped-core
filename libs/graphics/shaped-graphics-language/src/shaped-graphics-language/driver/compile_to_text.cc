@@ -104,7 +104,13 @@ cc::vector<interface_binding> interface_of(check::checked_module const& m,
     for (auto const id : driver::impl::file_samplers_of(legal))
     {
         auto const described = driver::impl::describe_file_sampler(m, id);
-        result.push_back({.name = described.name,
+        // LINK-6: under a link, the host binds it by the name the group's map gives it, a program file's own too
+        auto name = described.name;
+        if (numbering != nullptr)
+            for (auto const& n : numbering->samplers)
+                if (n.symbol == id && !n.name.empty())
+                    name = n.name;
+        result.push_back({.name = cc::move(name),
                           .emitted = emitted_of(described.name),
                           .kind = described_member_kind::sampler,
                           .is_file_sampler = true,

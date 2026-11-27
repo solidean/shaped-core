@@ -47,6 +47,9 @@ A base of 0 leaving `i` alone keeps every output of an unlinked compile byte for
 
 A target's register of a sampler and its record of a callable are the only places the numbering reaches, so changing those is the whole of a link's effect on an output.
 The numbering is every target's, so the host builds one table per pipeline whichever backend runs it, and a check for no target is what `describe` reports to it.
+The interface names a sampler as the map does because a host fits a stage to its layout by name.
+A file's own sampler would otherwise be bare in that file's stages and qualified in another file's that uses its module: two names for one slot of one table.
+The text keeps its spelling, so an entry whose numbers are its file's is still the binary it is compiled alone (LINK-4).
 
 ## LINK-7
 
