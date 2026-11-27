@@ -1005,7 +1005,7 @@ cmd.raytracing.build_micromap(micromap_triangles)  // -> micromap_handle; ASSERT
 ctx.persistent.create_partitioned_tlas({.instance_capacity, .partition_count, .max_instances_per_partition,
                                         .max_global_instances, .allows_partition_translation, .flags})
                                                    // -> partitioned_tlas_handle, a tlas: empty, built by its first update;
-                                                   //    needs sg::feature::partitioned_tlas (vulkan's NV extension today)
+                                                   //    needs sg::feature::partitioned_tlas (vulkan's NV extension; dx12's preview Agility SDK)
 cmd.raytracing.update(ptlas, {.writes, .updates, .clears, .translations})
                                                    // in place; a slot once per update; ptlas_write{index, partition, tlas_instance},
                                                    // ptlas_update{index, blas, hit_group_offset}, ptlas_translation{partition, xyz};
@@ -1021,7 +1021,7 @@ cmd.raytracing.update_indirect(ptlas, {.writes, .updates, .translations, .tables
 cmd.raytracing.build_clusters(span<cluster_triangles const>{vertices, vertex_count, indices, triangle_count, cluster_id,
                                                             geometry_index, is_opaque, ...}, flags=fast_trace)
                                                    // -> cluster_set_handle: immutable, <= 256 triangles and vertices a cluster;
-                                                   //    needs sg::feature::clustered_geometry (vulkan's NV extension today)
+                                                   //    needs sg::feature::clustered_geometry (vulkan's NV extension; dx12's preview Agility SDK)
 cmd.raytracing.build_cluster_blas(set, span<cluster_range const>{first, count}, flags, hit_record_stride=1)
                                                    // -> vector<blas_handle>, one per contiguous range, each holding the set
 ctx.persistent.create_cluster_pool({.max_clusters, .max_total_triangles, .max_total_vertices, .max_triangles_per_cluster,
