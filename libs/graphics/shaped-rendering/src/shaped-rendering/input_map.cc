@@ -107,6 +107,18 @@ void sr::input_map::unbind_all(input_action action)
     _actions[action.index].bindings.clear();
 }
 
+void sr::input_map::set_binding(input_action action, isize index, input_binding binding)
+{
+    CC_ASSERT(index >= 0 && index < state_of(action).bindings.size(), "the binding must exist");
+    _actions[action.index].bindings[index] = cc::move(binding);
+}
+
+void sr::input_map::remove_binding(input_action action, isize index)
+{
+    CC_ASSERT(index >= 0 && index < state_of(action).bindings.size(), "the binding must exist");
+    _actions[action.index].bindings.remove_at(index);
+}
+
 cc::string_view sr::input_map::name_of(input_action action) const
 {
     return state_of(action).name;

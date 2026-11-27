@@ -10,6 +10,7 @@ add_library(shaped-rendering
     src/shaped-rendering/capture.cc
     src/shaped-rendering/window.cc
     src/shaped-rendering/input_map.cc
+    src/shaped-rendering/input_map_io.cc
     src/shaped-rendering/blit_routine.cc
     src/shaped-rendering/taa_routine.cc
     src/shaped-rendering/box_filter_mipmap_routine.cc

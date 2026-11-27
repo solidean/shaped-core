@@ -294,3 +294,120 @@ TEST("sr - input_map: an action names its bindings per device, the first one fir
     f.map.unbind_all(jump);
     CHECK(f.map.bindings_of(jump).empty());
 }
+
+TEST("sr - input_map: a press is captured as the binding it makes, and nothing else is")
+{
+    auto const captured = [](input_event const& e) { return binding_pressed_in(e); };
+
+    REQUIRE(captured(key(scancode::q, true)).has_value());
+    CHECK(captured(key(scancode::q, true)).value().source.as<key_binding>().key == scancode::q);
+    CHECK(!captured(key(scancode::q, true, true)).has_value()); // auto-repeat
+    CHECK(!captured(key(scancode::q, false)).has_value());
+    CHECK(!captured(mouse_move(tg::vec2f(50, 0))).has_value());
+
+    auto const wheel = captured({.payload = mouse_wheel_event{.delta = tg::vec2f(0, -2)}});
+    REQUIRE(wheel.has_value());
+    CHECK(wheel.value().source.as<mouse_wheel_binding>().direction == wheel_direction::down);
+
+    // A stick resting near the middle is no press; pushed far, it is the half of its axis it went along.
+    CHECK(!captured({.payload = gamepad_axis_event{.axis = gamepad_axis::left_y, .value = 0.1f}}).has_value());
+    auto const stick = captured({.payload = gamepad_axis_event{.axis = gamepad_axis::left_y, .value = -0.8f}});
+    REQUIRE(stick.has_value());
+    CHECK(stick.value().source.as<gamepad_axis_binding>().axis == gamepad_axis::left_y);
+    CHECK(!stick.value().source.as<gamepad_axis_binding>().positive);
+
+    CHECK(captured(pad_button(2, gamepad_button::north, true)).value().source.as<gamepad_button_binding>().button
+          == gamepad_button::north);
+}
+
+TEST("sr - input_map: every input's text names it back, and text of no input names none")
+{
+    auto sources = cc::vector<input_binding>();
+    for (auto k = int(scancode::a); k <= int(scancode::kp_period); ++k)
+        sources.push_back({.source = key_binding{scancode(k)}});
+    for (auto b = 0; b <= int(mouse_button::x2); ++b)
+        sources.push_back({.source = mouse_button_binding{mouse_button(b)}});
+    for (auto w = 0; w <= int(wheel_direction::right); ++w)
+        sources.push_back({.source = mouse_wheel_binding{wheel_direction(w)}});
+    sources.push_back({.source = mouse_motion_binding{}});
+    for (auto b = 0; b <= int(gamepad_button::dpad_right); ++b)
+        sources.push_back({.source = gamepad_button_binding{gamepad_button(b)}});
+    for (auto a = 0; a <= int(gamepad_axis::right_trigger); ++a)
+        for (auto const positive : {true, false})
+            sources.push_back({.source = gamepad_axis_binding{gamepad_axis(a), positive}});
+    sources.push_back({.source = gamepad_stick_binding{gamepad_stick::left}});
+    sources.push_back({.source = gamepad_stick_binding{gamepad_stick::right}});
+
+    for (auto const& b : sources)
+    {
+        auto const text = source_name_of(b);
+        auto const back = parse_binding_source(text);
+        REQUIRE(back.has_value());
+        CHECK(source_name_of(back.value()) == text);
+    }
+    CHECK(source_name_of({.source = key_binding{scancode::left_shift}}) == "key:left_shift");
+    CHECK(source_name_of({.source = gamepad_axis_binding{gamepad_axis::left_y, false}}) == "axis:left_y-");
+
+    for (auto const text : {"", "key:", "key:unknown", "key:shift", "pad", "axis:left_y", "stick:middle", "motion:x"})
+        CHECK(!parse_binding_source(text).has_value()).dump("text", text);
+}
+
+TEST("sr - input_map: bindings written as JSON load back, and replace only the actions they name")
+{
+    auto saved = input_map();
+    auto const move = saved.add_action("move", input_action_kind::vector);
+    auto const jump = saved.add_action("jump", input_action_kind::button);
+    saved.bind(move, {.source = key_binding{scancode::up}, .direction = tg::vec2f(0, 1)});
+    saved.bind(move, {.source = gamepad_stick_binding{gamepad_stick::left}});
+    saved.bind(jump, {.source = gamepad_button_binding{gamepad_button::east}});
+
+    auto writer = babel::json::string_writer();
+    writer.underlying().begin_object();
+    saved.write_bindings(writer.underlying());
+    writer.underlying().end_object();
+    auto const json = writer.finish();
+    REQUIRE(json.has_value());
+
+    // A map of the same actions, bound otherwise, with one action the file does not name.
+    auto loaded = input_map();
+    auto const loaded_move = loaded.add_action("move", input_action_kind::vector);
+    auto const loaded_jump = loaded.add_action("jump", input_action_kind::button);
+    auto const crouch = loaded.add_action("crouch", input_action_kind::button);
+    loaded.bind(loaded_move, {.source = key_binding{scancode::w}, .direction = tg::vec2f(0, 1)});
+    loaded.bind(crouch, {.source = key_binding{scancode::c}});
+
+    auto const doc = babel::json::read(json.value());
+    REQUIRE(doc.has_value());
+    loaded.load_bindings(doc.value().root());
+
+    REQUIRE(loaded.bindings_of(loaded_move).size() == 2);
+    CHECK(source_name_of(loaded.bindings_of(loaded_move)[0]) == "key:up");
+    CHECK(loaded.bindings_of(loaded_move)[0].direction == tg::vec2f(0, 1));
+    CHECK(source_name_of(loaded.bindings_of(loaded_move)[1]) == "stick:left");
+    CHECK(loaded.bindings_of(loaded_move)[1].direction == tg::vec2f(1, 0));
+    REQUIRE(loaded.bindings_of(loaded_jump).size() == 1);
+    CHECK(source_name_of(loaded.bindings_of(loaded_jump)[0]) == "pad:east");
+    REQUIRE(loaded.bindings_of(crouch).size() == 1); // kept
+}
+
+TEST("sr - input_map: a file of old bindings loads what it can, and skips the rest")
+{
+    nx::expect_warning("this map has none of");
+    nx::expect_warning("no input sr knows");
+    auto map = input_map();
+    auto const jump = map.add_action("jump", input_action_kind::button);
+    auto const doc = babel::json::read(R"({"jump": [{"input": "key:space"}, {"input": "key:hyperspace"}],
+                                           "teleport": [{"input": "key:t"}]})");
+    REQUIRE(doc.has_value());
+    map.load_bindings(doc.value().root());
+    REQUIRE(map.bindings_of(jump).size() == 1);
+    CHECK(source_name_of(map.bindings_of(jump)[0]) == "key:space");
+
+    // An action index stays put across set and remove.
+    map.bind(jump, {.source = key_binding{scancode::enter}});
+    map.set_binding(jump, 0, {.source = key_binding{scancode::j}});
+    CHECK(source_name_of(map.bindings_of(jump)[0]) == "key:j");
+    map.remove_binding(jump, 0);
+    REQUIRE(map.bindings_of(jump).size() == 1);
+    CHECK(source_name_of(map.bindings_of(jump)[0]) == "key:enter");
+}

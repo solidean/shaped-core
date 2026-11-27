@@ -1,5 +1,6 @@
 #pragma once
 
+#include <babel-data/data/json.hh>
 #include <clean-core/container/fixed_bitset.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/variant.hh>
@@ -113,6 +114,20 @@ struct sr::input_binding
     [[nodiscard]] input_device_kind device() const;
 };
 
+namespace sr
+{
+/// The binding a press in `e` makes, which is what rebinding waits for: a key or a mouse or pad button going down, a scroll,
+/// or a stick or trigger pushed past `threshold`, a stick as the half of its axis it was pushed along.
+/// None for anything else, a key's auto-repeat and the pointer's motion included.
+[[nodiscard]] cc::optional<input_binding> binding_pressed_in(input_event const& e, float threshold = 0.5f);
+
+/// The binding's source as stable text, for a settings file: `key:space`, `mouse:left`, `wheel:up`, `motion`,
+/// `pad:south`, `axis:left_y-`, `stick:left`; keys and buttons by their enumerator's name.
+[[nodiscard]] cc::string source_name_of(input_binding const& binding);
+/// The binding `text` names, as `source_name_of` writes it, with the default direction; none for text it does not.
+[[nodiscard]] cc::optional<input_binding> parse_binding_source(cc::string_view text);
+} // namespace sr
+
 /// What an input_map's thresholds are.
 struct sr::input_map_config
 {
@@ -152,6 +167,17 @@ public:
 
     void bind(input_action action, input_binding binding);
     void unbind_all(input_action action);
+    /// Replaces the binding at `index` of `bindings_of(action)`, which must exist, keeping its place.
+    void set_binding(input_action action, isize index, input_binding binding);
+    /// Removes the binding at `index` of `bindings_of(action)`, which must exist; the ones after it move up.
+    void remove_binding(input_action action, isize index);
+
+    /// Every action's bindings as members of the JSON object `out` has open: an array per action, by name,
+    /// each binding `{"input": "key:w", "direction": [0, 1]}`, the direction left out where it is (1, 0).
+    void write_bindings(babel::json::writer& out) const;
+    /// Replaces the bindings of each action `bindings` names, an object as `write_bindings` writes it; the others keep theirs.
+    /// A name no action has, and a binding that does not parse, are skipped and logged, so an old file still loads.
+    void load_bindings(babel::json::ref bindings);
 
     [[nodiscard]] cc::string_view name_of(input_action action) const;
     [[nodiscard]] input_action_kind kind_of(input_action action) const;

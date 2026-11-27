@@ -180,12 +180,23 @@ map.vector(move);                      // -> tg::vec2f, summed, shortened to len
 map.motion(look);                      // -> tg::vec2f, the pointer's logical pixels this update, x right, y down
 map.active_device();                   // -> sr::input_device {kind, gamepad, pad_kind, face}: the one used last
 map.binding_for(jump, sr::input_device_kind::gamepad);  // -> optional<input_binding>, the first there: what a prompt shows
+
+// rebinding: wait for the next press, and put it where the old binding was
+for (auto const& e : wsys->events())
+    if (auto const b = sr::binding_pressed_in(e); b.has_value())   // key/button down, a scroll, a stick or trigger past 0.5
+        map.set_binding(jump, index, {.source = b.value().source, .direction = old.direction});
+map.remove_binding(jump, index);
+sr::source_name_of(binding);          // "key:space", "pad:south", "axis:left_y-", "stick:left", "wheel:up", "mouse:left", "motion"
+sr::parse_binding_source("key:space"); // -> optional<input_binding>, back again
+map.write_bindings(json_writer);      // into an open JSON object: an array per action, by name
+map.load_bindings(json_ref);          // replaces the actions it names; unknown actions and inputs are skipped and logged
 ```
 
 - **Every device counts at once**; `active_device` only says which one was used last, which is what prompts follow.
   A pad plugged in is not used: it becomes active on a button or a stick pushed past the press threshold, and the mouse only on a real move.
 - **A tap within one update is a press and a release**, and never held; each scroll of the wheel is one too.
 - **Without the focus nothing is held**, since the releases of keys let go elsewhere never arrive.
+- **The text names are a file format**: they are the enumerators' names, so renaming a scancode or a button breaks saved bindings.
 
 ## Dear ImGui
 
