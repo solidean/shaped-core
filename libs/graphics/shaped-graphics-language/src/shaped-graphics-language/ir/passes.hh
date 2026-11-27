@@ -75,6 +75,8 @@ void state_constant_tables(program& p);
 /// start of the use's stretch of its block between two call points, after its phis; a phi's use is at the end of the
 /// way it comes in by.
 /// One copy serves every use of its stretch, and a copy keeps its value's statement and guarantee.
+/// A debug value that names the value is stated again with the copy, after it, where its variable holds the value on every
+/// way from that debug value to the copy (EMIT-267).
 /// A read of memory the shader or a called shader can write, a payload, a phi and a resource handle are kept as they are.
 /// Run it after every pass that shares or moves values, then `remove_unused` for what nothing reads any more.
 void recompute_after_calls(program& p);

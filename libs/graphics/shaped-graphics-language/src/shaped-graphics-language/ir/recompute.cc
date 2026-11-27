@@ -1,6 +1,7 @@
 #include "passes.hh"
 
 #include <clean-core/container/vector.hh>
+#include <clean-core/error/optional.hh>
 #include <shaped-graphics-language/ir/dominance.hh>
 #include <shaped-graphics-language/ir/ir.hh>
 
@@ -197,9 +198,107 @@ void sgl::ir::recompute_after_calls(program& p)
             ++start;
         return start;
     };
-    // the operation each copy was made from, by its position past `original_count`
+    // the operation each copy was made from, by its position past `original_count`; none for a restated variable
     auto origin = cc::vector<u32>();
     auto const copied_from = [&](u32 c) { return origin[c - original_count]; };
+
+    // EMIT-267: each variable a debug value states with a value, which a copy of the value states again where the
+    // variable holds it on every way from that debug value to the copy
+    struct statement
+    {
+        u32 at = 0;
+        u32 variable = 0;
+        u32 leaf_first = 0;
+        u32 leaf_end = 0;
+    };
+    auto statements = cc::vector<statement>();
+    auto named_by = cc::vector<cc::vector<u32>>();
+    if (p.describes_variables)
+    {
+        named_by.resize_to_defaulted(original_count);
+        for (auto i = u32(0); i < original_count; ++i)
+        {
+            auto const& inst = p.instructions[i];
+            if (inst.code != op::debug_value || lay.block_of[i] == k_none)
+                continue;
+            auto const operands = p.operands_of(inst);
+            auto const value = value_ref(operands[1]);
+            auto const leaf = operands[2];
+            if (is_operation(value) && index_of(value) < original_count && is_lasting[index_of(value)])
+                named_by[index_of(value)].push_back(u32(statements.size()));
+            statements.push_back({.at = i,
+                                  .variable = operands[0],
+                                  .leaf_first = leaf,
+                                  .leaf_end = leaf + (is_valid(value) ? p.leaves_of(p.type_of(value)) : 1u)});
+        }
+    }
+    // who dominates whom, by each filled block's place in the blocks' order, which a dominator stands ahead in
+    auto place_of = cc::vector<u32>::create_filled(block_count, k_none);
+    auto order_first = cc::vector<u32>();
+    auto order_preds = cc::vector<u32>();
+    auto tree = cc::optional<dominance>();
+    auto const dominates = [&](u32 a, u32 b)
+    {
+        if (!tree.has_value())
+        {
+            auto filled = cc::vector<u32>();
+            for (auto const bb : blocks_in_order(p))
+                if (p.blocks[isize(bb)].count > 0)
+                {
+                    place_of[isize(bb)] = u32(filled.size());
+                    filled.push_back(u32(bb));
+                }
+            order_first.resize_to_filled(filled.size() + 1, 0u);
+            for (auto const from : filled)
+                for (auto k = succ_first[from]; k < succ_first[from + 1]; ++k)
+                    ++order_first[place_of[succs[k]] + 1];
+            for (auto k = isize(0); k < filled.size(); ++k)
+                order_first[k + 1] += order_first[k];
+            order_preds.resize_to_filled(isize(order_first[filled.size()]), 0u);
+            auto cursor = cc::vector<u32>::create_copy_of(cc::span<u32 const>(order_first));
+            for (auto const from : filled)
+                for (auto k = succ_first[from]; k < succ_first[from + 1]; ++k)
+                    order_preds[cursor[place_of[succs[k]]]++] = place_of[from];
+            tree = dominance(order_first, order_preds);
+        }
+        return tree.value().dominates(place_of[a], place_of[b]);
+    };
+    // whether the variable of statement `s` still holds its value at position `start` of block `b`
+    auto const holds = [&](statement const& st, u32 b, u32 start)
+    {
+        auto const from = lay.block_of[st.at];
+        auto const restates = [&](u32 i)
+        {
+            if (i == st.at || p.instructions[i].code != op::debug_value)
+                return false;
+            auto const operands = p.operands_of(p.instructions[i]);
+            if (operands[0] != st.variable)
+                return false;
+            auto const value = value_ref(operands[1]);
+            auto const first = operands[2];
+            auto const end = first + (is_valid(value) ? p.leaves_of(p.type_of(value)) : 1u);
+            return first < st.leaf_end && st.leaf_first < end;
+        };
+        // a debug value of the variable standing in `block` from position `first` on, and ahead of `end`
+        auto const restated_in = [&](u32 block, u32 first, u32 end)
+        {
+            auto const& range = p.blocks[block];
+            for (auto i = cc::max(range.first, first); i < cc::min(range.first + range.count, end); ++i)
+                if (restates(i))
+                    return true;
+            return false;
+        };
+        if (from == b)
+            return st.at < start && !restated_in(b, st.at + 1, start);
+        if (!dominates(from, b) || restated_in(from, st.at + 1, k_none) || restated_in(b, 0, start))
+            return false;
+        // nor in any block a walk from the one to the other passes
+        auto is_restating = cc::vector<bool>::create_filled(block_count, false);
+        for (auto bb = u32(0); bb < u32(block_count); ++bb)
+            is_restating[bb] = restated_in(bb, 0, k_none);
+        auto walk = marked_walks(succ_first, succs, is_restating);
+        return !walk.passes_mark(from, b);
+    };
     auto const copy_of = [&](auto const& self, u32 v, u32 b, u32 start) -> u32
     {
         for (auto const c : ahead[start])
@@ -230,6 +329,21 @@ void sgl::ir::recompute_after_calls(program& p)
         p.instructions.push_back(copy);
         origin.push_back(v);
         ahead[start].push_back(at);
+        if (!named_by.empty())
+            for (auto const named : named_by[v])
+            {
+                auto const& st = statements[named];
+                if (!holds(st, b, start))
+                    continue;
+                auto restated = p.instructions[st.at];
+                auto const first = u32(p.operands.size());
+                for (auto k = u32(0); k < restated.count; ++k)
+                    p.operands.push_back(k == 1 ? at : p.operands[restated.first + k]);
+                restated.first = first;
+                p.instructions.push_back(restated);
+                origin.push_back(k_none);
+                ahead[start].push_back(u32(p.instructions.size()) - 1);
+            }
         return at;
     };
 

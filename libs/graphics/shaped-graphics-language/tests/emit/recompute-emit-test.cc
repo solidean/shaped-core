@@ -354,3 +354,133 @@ TEST("sgl emit - a value is read again after a hit object's trace and after its 
         CHECK(program.find("stage_load e0") > invoked).dump("program", e.text);
     }
 }
+
+namespace
+{
+/// A value each variable names, used only after a trace, in three shapes: kept, assigned again before the trace, and
+/// traced in one arm and used after the join.
+constexpr cc::string_view k_described = R"(require raytracing_pipeline
+
+binding gP:
+    scale: float
+    world: acceleration_structure[.triangles]
+    data: mut buffer[float4]
+
+struct payload:
+    color: float3
+
+rays R:
+    surface: payload
+
+@raygen fun kept(@launch_id id: int3){gP}:
+    let k = gP.scale * 2.0
+    let mut p = payload(float3(0.0))
+    trace(gP.world, ray(origin = pos3(0.0, 0.0, -1.0), direction = vec3(0.0, 0.0, 1.0)), R.surface, mut p)
+    gP.data[0] = float4(p.color.x * k, 0.0, 0.0, 1.0)
+
+@raygen fun reassigned(@launch_id id: int3){gP}:
+    let mut m = gP.scale * 2.0
+    let first = m
+    m = 5.0
+    let mut p = payload(float3(0.0))
+    trace(gP.world, ray(origin = pos3(0.0, 0.0, -1.0), direction = vec3(0.0, 0.0, 1.0)), R.surface, mut p)
+    gP.data[0] = float4(p.color.x * first, m, 0.0, 1.0)
+
+@raygen fun joined(@launch_id id: int3){gP}:
+    let k = gP.scale * 2.0
+    let mut p = payload(float3(0.0))
+    if id.x > 3:
+        trace(gP.world, ray(origin = pos3(0.0, 0.0, -1.0), direction = vec3(0.0, 0.0, 1.0)), R.surface, mut p)
+    gP.data[id.y] = float4(p.color.x * k, 0.0, 0.0, 1.0)
+
+@miss fun sky(p: mut payload):
+    p.color = float3(1.0)
+
+hit_group hits for R:
+    surface = ()
+
+@raytracing pipeline path:
+    rays = R
+    raygen = kept
+    miss.surface = sky
+    hit_groups = (hits)
+)";
+
+[[nodiscard]] sgl::emitted_source described(cc::string_view entry, sgl::emit::target t)
+{
+    auto const e = sgl::compile_to_text({.source = k_described,
+                                         .source_name = "described.sgl",
+                                         .entry_point = entry,
+                                         .target = t,
+                                         .native = sgl::emit::native_route::require,
+                                         .native_debug_info = sgl::emit::debug_info::full});
+    REQUIRE(e.has_value()).dump("entry", entry).dump("error", e.has_error() ? e.error() : cc::string());
+    return e.value();
+}
+
+/// The `DebugValue`s of SGL's SPIR-V that state the variable named `name` after the module's first `OpTraceRayKHR`.
+[[nodiscard]] isize values_after_trace(cc::span<u32 const> words, cc::string_view name)
+{
+    constexpr u32 k_op_string = 7;
+    constexpr u32 k_op_ext_inst = 12;
+    constexpr u32 k_debug_local_variable = 26;
+    constexpr u32 k_debug_value = 29;
+    auto const walk = spirv_walk{.words = words};
+    auto named = cc::vector<u32>();
+    for (auto at = isize(5); at < words.size(); at = walk.next(at))
+        if (walk.opcode(at) == k_op_string && cc::string_view(reinterpret_cast<char const*>(&words[at + 2])) == name)
+            named.push_back(words[at + 1]);
+    auto variables = cc::vector<u32>();
+    for (auto at = isize(5); at < words.size(); at = walk.next(at))
+        if (walk.opcode(at) == k_op_ext_inst && words[at + 4] == k_debug_local_variable)
+            for (auto const n : named)
+                if (words[at + 5] == n)
+                    variables.push_back(words[at + 2]);
+    auto const trace = walk.find(k_op_trace_ray);
+    REQUIRE(trace >= 0);
+    auto count = isize(0);
+    for (auto at = trace; at < words.size(); at = walk.next(at))
+        if (walk.opcode(at) == k_op_ext_inst && words[at + 4] == k_debug_value)
+            for (auto const v : variables)
+                count += words[at + 5] == v ? 1 : 0;
+    return count;
+}
+} // namespace
+
+TEST("sgl emit - a copy after a trace states again each variable that still names its value, on both routes "
+     "(EMIT-292, EMIT-267)")
+{
+    for (auto const t : {sgl::emit::target::hlsl_dx12, sgl::emit::target::hlsl_vulkan})
+    {
+        // a let read after the trace reads the copy
+        auto const kept = described("kept", t);
+        auto const kept_lines = program_lines(kept.text);
+        auto const trace = kept_lines.find("trace_ray ");
+        REQUIRE(trace >= 0).dump("program", kept.text);
+        CHECK(kept_lines.find("debug_value v1:k %", trace) > trace).dump("program", kept.text);
+
+        // `first` still holds the value at the copy; `m` was given 5.0 before the trace, which stays what it holds
+        auto const again = described("reassigned", t);
+        auto const again_lines = program_lines(again.text);
+        auto const traced = again_lines.find("trace_ray ");
+        REQUIRE(traced >= 0).dump("program", again.text);
+        CHECK(again_lines.find("debug_value v2:first %", traced) > traced).dump("program", again.text);
+        CHECK(again_lines.find("debug_value v1:m %", traced) < 0).dump("program", again.text);
+
+        // traced in one arm, read after the join: the copy in the joining block states it
+        auto const joined = described("joined", t);
+        auto const joined_lines = program_lines(joined.text);
+        auto const arm = joined_lines.find("trace_ray ");
+        REQUIRE(arm >= 0).dump("program", joined.text);
+        auto const join = joined_lines.find("b2:", arm);
+        REQUIRE(join > arm).dump("program", joined.text);
+        CHECK(joined_lines.find("debug_value v1:k %", join) > join).dump("program", joined.text);
+    }
+
+    // SPIR-V's DebugValue of each, after the trace
+    CHECK(values_after_trace(described("kept", sgl::emit::target::hlsl_vulkan).spirv, "k") == 1);
+    auto const again = described("reassigned", sgl::emit::target::hlsl_vulkan).spirv;
+    CHECK(values_after_trace(again, "first") == 1);
+    CHECK(values_after_trace(again, "m") == 0);
+    CHECK(values_after_trace(described("joined", sgl::emit::target::hlsl_vulkan).spirv, "k") == 1);
+}

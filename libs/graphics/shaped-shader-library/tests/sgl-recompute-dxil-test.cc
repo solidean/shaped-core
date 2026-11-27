@@ -282,3 +282,118 @@ TEST("slib - SGL's DXIL joins no two lanes of a read-only buffer across a trace 
     CHECK(b.between("rawBufferLoad", -1, traces[0]) == 1).dump("body", b.text());
     CHECK(b.between("rawBufferLoad", traces[0], b.lines.size()) == 1).dump("body", b.text());
 }
+
+namespace
+{
+/// A value each variable names, read after a trace: kept, assigned again before the trace, and traced in one arm.
+constexpr cc::string_view k_described = R"(require raytracing_pipeline
+
+binding gP:
+    scale: float
+    world: acceleration_structure[.triangles]
+    data: mut buffer[float4]
+
+struct payload:
+    color: float3
+
+rays R:
+    surface: payload
+
+@raygen fun kept(@launch_id id: int3){gP}:
+    let k = gP.scale * 2.0
+    let mut p = payload(float3(0.0))
+    trace(gP.world, ray(origin = pos3(0.0, 0.0, -1.0), direction = vec3(0.0, 0.0, 1.0)), R.surface, mut p)
+    gP.data[0] = float4(p.color.x * k, 0.0, 0.0, 1.0)
+
+@raygen fun reassigned(@launch_id id: int3){gP}:
+    let mut m = gP.scale * 2.0
+    let first = m
+    m = 5.0
+    let mut p = payload(float3(0.0))
+    trace(gP.world, ray(origin = pos3(0.0, 0.0, -1.0), direction = vec3(0.0, 0.0, 1.0)), R.surface, mut p)
+    gP.data[0] = float4(p.color.x * first, m, 0.0, 1.0)
+
+@raygen fun joined(@launch_id id: int3){gP}:
+    let k = gP.scale * 2.0
+    let mut p = payload(float3(0.0))
+    if id.x > 3:
+        trace(gP.world, ray(origin = pos3(0.0, 0.0, -1.0), direction = vec3(0.0, 0.0, 1.0)), R.surface, mut p)
+    gP.data[id.y] = float4(p.color.x * k, 0.0, 0.0, 1.0)
+
+@miss fun sky(p: mut payload):
+    p.color = float3(1.0)
+
+hit_group hits for R:
+    surface = ()
+
+@raytracing pipeline path:
+    rays = R
+    raygen = kept
+    miss.surface = sky
+    hit_groups = (hits)
+)";
+
+/// How many `llvm.dbg.value`s after the body's first trace state the variable named `name` with a value.
+[[nodiscard]] isize stated_after_trace(cc::string_view disassembly, cc::string_view name)
+{
+    // the metadata of each DILocalVariable of that name
+    auto nodes = cc::vector<cc::string>();
+    auto const variable = cc::format("!DILocalVariable(tag: DW_TAG_auto_variable, name: \"{}\"", name);
+    auto lines = cc::vector<cc::string_view>();
+    for (auto at = isize(0); at < disassembly.size();)
+    {
+        auto end = disassembly.find('\n', at);
+        if (end < 0)
+            end = disassembly.size();
+        lines.push_back(disassembly.subview({.offset = at, .size = end - at}));
+        at = end + 1;
+    }
+    for (auto const l : lines)
+        if (l.starts_with("!") && l.contains(variable))
+            nodes.push_back(cc::string(l.subview({.offset = 0, .size = l.find(' ')})));
+    auto traced = false;
+    auto count = isize(0);
+    for (auto const l : lines)
+    {
+        traced = traced || l.contains("@dx.op.traceRay.");
+        if (!traced || !l.contains("call void @llvm.dbg.value(metadata ") || l.contains(" undef,"))
+            continue;
+        for (auto const& n : nodes)
+            count += l.contains(cc::format("metadata {},", n)) ? 1 : 0;
+    }
+    return count;
+}
+} // namespace
+
+TEST("slib - SGL's DXIL states a variable again with the copy a trace's constants are read into (EMIT-292, EMIT-267)")
+{
+    auto compiler = ssc::dxc::compiler::create();
+    if (compiler.has_error())
+        SKIP("no DXC");
+#ifndef CC_OS_WINDOWS
+    SKIP("DXC compiles DXIL only on Windows, where its reflection is");
+#endif
+    auto const disassembled_full = [&](cc::string_view entry)
+    {
+        auto const e = sgl::compile_to_text({.source = k_described,
+                                             .source_name = "described.sgl",
+                                             .entry_point = entry,
+                                             .target = sgl::emit::target::hlsl_dx12,
+                                             .native = sgl::emit::native_route::require,
+                                             .native_debug_info = sgl::emit::debug_info::full});
+        REQUIRE(e.has_value()).dump("entry", entry).dump("error", e.has_error() ? e.error() : cc::string());
+        auto const refused = compiler.value().validate(e.value().dxil);
+        CHECK(!refused.has_value()).dump("entry", entry).dump("validator", refused.value_or(cc::string()));
+        auto const text = compiler.value().disassemble(e.value().dxil);
+        REQUIRE(text.has_value());
+        return cc::string(text.value());
+    };
+    auto const kept = disassembled_full("kept");
+    CHECK(stated_after_trace(kept, "k") == 1).dump("dxil", kept);
+    // `m` holds 5.0 from before the trace on, and `first` the value the copy computes again
+    auto const again = disassembled_full("reassigned");
+    CHECK(stated_after_trace(again, "first") == 1).dump("dxil", again);
+    CHECK(stated_after_trace(again, "m") == 0).dump("dxil", again);
+    auto const joined = disassembled_full("joined");
+    CHECK(stated_after_trace(joined, "k") == 1).dump("dxil", joined);
+}

@@ -673,3 +673,78 @@ TEST("sgl native lines - describing every variable changes no instruction agains
     CC_LOG_INFO("{} native compiles keep every instruction with their variables described", compared);
     CHECK(compared > 0);
 }
+
+TEST("sgl native lines - a variable EMIT-292 states again at a copy after a trace changes no other instruction "
+     "(EMIT-267)")
+{
+    // a value each variable names, read after a trace: kept, assigned again before the trace, and traced in one arm
+    constexpr cc::string_view source = R"(require raytracing_pipeline
+
+binding gP:
+    scale: float
+    world: acceleration_structure[.triangles]
+    data: mut buffer[float4]
+
+struct payload:
+    color: float3
+
+rays R:
+    surface: payload
+
+@raygen fun kept(@launch_id id: int3){gP}:
+    let k = gP.scale * 2.0
+    let mut p = payload(float3(0.0))
+    trace(gP.world, ray(origin = pos3(0.0, 0.0, -1.0), direction = vec3(0.0, 0.0, 1.0)), R.surface, mut p)
+    gP.data[0] = float4(p.color.x * k, 0.0, 0.0, 1.0)
+
+@raygen fun reassigned(@launch_id id: int3){gP}:
+    let mut m = gP.scale * 2.0
+    let first = m
+    m = 5.0
+    let mut p = payload(float3(0.0))
+    trace(gP.world, ray(origin = pos3(0.0, 0.0, -1.0), direction = vec3(0.0, 0.0, 1.0)), R.surface, mut p)
+    gP.data[0] = float4(p.color.x * first, m, 0.0, 1.0)
+
+@raygen fun joined(@launch_id id: int3){gP}:
+    let k = gP.scale * 2.0
+    let mut p = payload(float3(0.0))
+    if id.x > 3:
+        trace(gP.world, ray(origin = pos3(0.0, 0.0, -1.0), direction = vec3(0.0, 0.0, 1.0)), R.surface, mut p)
+    gP.data[id.y] = float4(p.color.x * k, 0.0, 0.0, 1.0)
+
+@miss fun sky(p: mut payload):
+    p.color = float3(1.0)
+
+hit_group hits for R:
+    surface = ()
+
+@raytracing pipeline path:
+    rays = R
+    raygen = kept
+    miss.surface = sky
+    hit_groups = (hits)
+)";
+    for (auto const entry : {cc::string_view("kept"), cc::string_view("reassigned"), cc::string_view("joined")})
+        for (auto const target : {sgl::emit::target::hlsl_vulkan, sgl::emit::target::hlsl_dx12})
+        {
+            auto const request = [&](sgl::emit::debug_info level)
+            {
+                return sgl::compile_to_text({.source = source,
+                                             .source_name = "described.sgl",
+                                             .entry_point = entry,
+                                             .target = target,
+                                             .native = sgl::emit::native_route::require,
+                                             .native_debug_info = level});
+            };
+            auto const lines = request(sgl::emit::debug_info::lines);
+            auto const full = request(sgl::emit::debug_info::full);
+            REQUIRE(lines.has_value()).context(entry);
+            REQUIRE(full.has_value()).context(entry);
+            // the copies state their variables, which the program the writer saw holds
+            CHECK(full.value().text.contains("debug_value v1:")).context(entry);
+            if (target == sgl::emit::target::hlsl_vulkan)
+                CHECK(same<u32>(without_lines(full.value().spirv), without_lines(lines.value().spirv))).context(entry);
+            else
+                CHECK(same<byte>(part_of(full.value().dxil, "DXIL"), part_of(lines.value().dxil, "DXIL"))).context(entry);
+        }
+}

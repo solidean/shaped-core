@@ -633,6 +633,8 @@ fn main_ps(p: pixel_input) -> target_ {
   On DXIL a copy reads its constants with a `cbufferLoadLegacy` of its own and the launch with a `dispatchRaysIndex` or `dispatchRaysDimensions` of its own.
   On SPIR-V it reads each with an `OpLoad` of its own.
   The DXIL writer's own sharing joins no read ahead of a call point with one after it, but what one stretch reads twice it reads once.
+  Asked for `full`, a copy states again each variable that names its value, at the copy, as EMIT-267 has a variable follow its value.
+  It does so only where the variable holds that value on every way from its debug value to the copy; one given another value on any way between keeps that one.
 * **EMIT-247** A native route's atomic on a 64-bit integer is its target's own, as an `i32` one is.
   On DXIL it is the `i64` form of `dx.op.atomicBinOp` and `dx.op.atomicCompareExchange` on a buffer, and an `atomicrmw` or `cmpxchg` of `i64` in workgroup memory.
   A resource it reaches carries Atomic64Use in its metadata, and `PSV0` flags it `UsedByAtomic64`, since the validator compares the two.
