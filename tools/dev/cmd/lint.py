@@ -200,7 +200,7 @@ def run_shaped_linter(
     ctx.discover(preset)  # (re)configure if stale
 
     build_results = dev.build([preset], ["shaped-linter"], root=ctx.root, auto_configure=True,
-                              mirror=mirror, verbose=verbose)
+                              mirror=mirror, verbose=verbose, server=ctx.build_server())
     if not all(r.ok for r in build_results):
         dev.report.print_build_failure(build_results, [preset], ctx.root)
         return False
@@ -285,7 +285,7 @@ def run_prose_apply(
         ctx.die(f"no such plan file: {plan}")
 
     build_results = dev.build([preset], ["shaped-linter"], root=ctx.root, auto_configure=True,
-                              mirror=mirror, verbose=verbose)
+                              mirror=mirror, verbose=verbose, server=ctx.build_server())
     if not all(r.ok for r in build_results):
         dev.report.print_build_failure(build_results, [preset], ctx.root)
         return False
@@ -332,7 +332,7 @@ def run_prose_stats(
         ctx.die(f"no lintable files under {' '.join(paths)}")
 
     build_results = dev.build([preset], ["shaped-linter"], root=ctx.root, auto_configure=True,
-                              mirror=mirror, verbose=verbose)
+                              mirror=mirror, verbose=verbose, server=ctx.build_server())
     if not all(r.ok for r in build_results):
         dev.report.print_build_failure(build_results, [preset], ctx.root)
         return False
@@ -409,7 +409,8 @@ def run_prose_verify(
         exe = _current_built_linter(ctx, preset_specs, "lint prose-verify --no-build")
     else:
         ctx.discover(preset)
-        build_results = dev.build([preset], ["shaped-linter"], root=ctx.root, auto_configure=True, mirror=mirror, verbose=verbose)
+        build_results = dev.build([preset], ["shaped-linter"], root=ctx.root, auto_configure=True,
+                                  mirror=mirror, verbose=verbose, server=ctx.build_server())
         if not all(r.ok for r in build_results):
             dev.report.print_build_failure(build_results, [preset], ctx.root)
             return False
@@ -463,7 +464,7 @@ def run_bless_includes(
     ctx.discover(preset)  # (re)configure if stale
 
     build_results = dev.build([preset], ["shaped-linter"], root=ctx.root, auto_configure=True,
-                              mirror=mirror, verbose=verbose)
+                              mirror=mirror, verbose=verbose, server=ctx.build_server())
     if not all(r.ok for r in build_results):
         dev.report.print_build_failure(build_results, [preset], ctx.root)
         return False

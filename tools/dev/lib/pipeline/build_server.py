@@ -1,4 +1,4 @@
-"""An optional local build server: `dev.py build` and `dev.py test` hand their builds and test runs to it when a project or a developer opts in.
+"""An optional local build server: every dev.py command that builds hands its builds, and `dev.py test` its test runs, to it when a project or a developer opts in.
 
 A build server keeps state between runs, such as a compile cache and test results, so a build or test run through it can be much faster.
 It is never required: without it, or when it cannot serve, dev.py builds and tests exactly as it always has.

@@ -40,6 +40,7 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     p = sub.add_parser(NAME, help="Run one example, or list them all (args after the match are forwarded)")
     a.preset(p)
     a.build_overrides(p)
+    a.server(p)
     a.emsdk(p)
     a.jsruntime(p)
     a.profile(p)
@@ -128,7 +129,7 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
         results = dev.build([preset], names, root=ctx.root,
                             auto_configure=not args.no_configure,
                             mirror=args.mirror_output, verbose=args.verbose,
-                            emsdk_path=args.emsdk_path)
+                            emsdk_path=args.emsdk_path, server=ctx.build_server(args))
         if not all(r.ok for r in results):
             ctx.fail_build(results, [preset])
 

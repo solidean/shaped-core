@@ -113,6 +113,7 @@ def _editors() -> list[_editor]:
 def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     p = sub.add_parser(NAME, help="Install a developer tool of this repo (no argument lists them)")
     a.preset(p)
+    a.server(p)
     p.add_argument("name", nargs="?", help="What to install; without it, every installable and where it stands")
     p.add_argument("--editor", action="append", choices=[e.name for e in _editors()],
                    help="Only this editor, repeatable; default: every editor whose extensions folder exists")
@@ -472,7 +473,8 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
     if not args.no_build and item.targets:
         presets = ctx.resolve_presets(args.preset)
         results = dev.build(presets, list(item.targets), root=ctx.root, auto_configure=True,
-                            mirror=args.mirror_output, verbose=args.verbose, emsdk_path=None, keep_going=False)
+                            mirror=args.mirror_output, verbose=args.verbose, emsdk_path=None, keep_going=False,
+                            server=ctx.build_server(args))
         if not all(r.ok for r in results):
             ctx.fail_build(results, presets)
 

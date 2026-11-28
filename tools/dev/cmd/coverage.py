@@ -24,6 +24,7 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
 
     run_p = cov_sub.add_parser("run", help="Build + run instrumented tests, then merge & report")
     a.preset(run_p)
+    a.server(run_p)
     a.profile(run_p)
     run_p.add_argument("--target", "-t", action="append",
                        help="Test binary target(s): comma-list, repeatable, wildcards")
@@ -81,7 +82,7 @@ def _run(args: argparse.Namespace, ctx: Context) -> None:
     if not args.no_build:
         results = dev.build(
             presets, None, root=ctx.root, auto_configure=not args.no_configure,
-            mirror=args.mirror_output, verbose=args.verbose,
+            mirror=args.mirror_output, verbose=args.verbose, server=ctx.build_server(args),
         )
         if not all(r.ok for r in results):
             ctx.fail_build(results, presets)
