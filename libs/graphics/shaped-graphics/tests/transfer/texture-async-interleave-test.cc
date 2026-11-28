@@ -236,3 +236,45 @@ ASYNC_INVOCABLE_TEST("sg - two concurrent lists, a submit, an async download, an
     ctx->advance_epoch();
     co_await ctx->idle_completion();
 }
+
+ASYNC_INVOCABLE_TEST("sg - a list renders into one mip level of a texture while an async upload fills another",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+
+    // A mip chain filled on the device from an uploaded level 0: the upload goes up through the copy queue, and the
+    // list that renders the next level is recorded at once, while the copy is still in flight.
+    // A list touching a texture with a transfer pending keeps it in the transfer's layout, and a render target cannot
+    // be written in that one: the list that named it there failed to close, so the oracle is that every submit goes through.
+    // Recorded several times, since the copy may finish before the list records, and then nothing is pinned.
+    for (auto round = 0; round < 8; ++round)
+    {
+        auto const tex
+            = ctx->persistent.create_texture_2d({.format = sg::pixel_format::rgba8_unorm,
+                                                 .width = k_extent,
+                                                 .height = k_extent,
+                                                 .mip_levels = 2,
+                                                 .usage = sg::texture_usage::copy_src | sg::texture_usage::copy_dst
+                                                        | sg::texture_usage::render_target | sg::texture_usage::texture});
+        ctx->upload.bytes_to_texture(tex.raw(), pinned_pattern(97 + round));
+
+        auto cmd = ctx->create_command_list();
+        REQUIRE(cmd != nullptr);
+        {
+            auto pass = cmd->raster.render_to(
+                {.color_targets = {tex.as_render_target_view({.mip = 1}).cleared(tg::vec4f(1, 0, 0, 1))}});
+        }
+        auto const level_1 = cmd->download.bytes_from_texture(tex.raw(), {.mip_level = 1});
+        ctx->submit_command_list(cc::move(cmd));
+
+        auto const level_0 = co_await read_back(ctx, tex.raw());
+        CHECK(matches(level_0, 97 + round)).context("the uploaded level did not survive the list rendering the next");
+        auto const cleared = co_await level_1.bytes();
+        REQUIRE(cleared.size() == isize(k_extent / 2) * (k_extent / 2) * 4);
+        CHECK(cleared[0] == byte(255));
+        CHECK(cleared[1] == byte(0));
+    }
+
+    ctx->advance_epoch();
+    co_await ctx->idle_completion();
+}

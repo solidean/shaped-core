@@ -945,6 +945,7 @@ void vulkan_upload_async_system::upload_texture(sg::raw_texture_handle const& te
     // them — and a value stamped for a job still being enqueued is one nothing will ever signal.
     // Running first also means the last-used token read below already covers the fixup.
     (void)_ctx->prepare_texture_for_async(texture, sg::subresource_range(subresource), sg::async_direction::upload);
+    static_cast<vulkan_texture const*>(texture.get())->note_transfer(sg::subresource_range(subresource));
     auto const ticket = dst->reserve_upload(_next_sequence);
 
     vulkan_async_upload_job job;
@@ -1005,6 +1006,7 @@ sg::stream_upload_handle vulkan_upload_async_system::stream_source_texture(sg::r
     // them — and a value stamped for a job still being enqueued is one nothing will ever signal.
     // Running first also means the last-used token read below already covers the fixup.
     (void)_ctx->prepare_texture_for_async(texture, sg::subresource_range(subresource), sg::async_direction::upload);
+    static_cast<vulkan_texture const*>(texture.get())->note_transfer(sg::subresource_range(subresource));
     auto const ticket = dst->reserve_upload(_next_sequence);
 
     vulkan_async_upload_job job;

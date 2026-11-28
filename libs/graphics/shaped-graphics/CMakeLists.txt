@@ -142,6 +142,7 @@ target_sources(shaped-graphics
     src/shaped-graphics/barrier/resource_access_state.hh
     src/shaped-graphics/barrier/access_inference.hh
     src/shaped-graphics/barrier/footprint.hh
+    src/shaped-graphics/barrier/transfer_pin.hh
     src/shaped-graphics/barrier/array_declarations.hh
     src/shaped-graphics/resource/subresource.hh
     src/shaped-graphics/barrier/subresource_state.hh
@@ -308,6 +309,7 @@ if(SC_BUILD_TESTS)
         tests/sampler/sampler-test.cc
         tests/barrier/access_state-test.cc
         tests/barrier/subresource-test.cc
+        tests/barrier/transfer-pin-test.cc
         tests/barrier/slot-test.cc
         tests/barrier/slot-recording-test.cc
         tests/barrier/array-plan-test.cc

@@ -195,12 +195,8 @@ sg::impl::member_track dx12_command_list::track_texture_access(dx12_texture_hand
     // flush_barriers() does the merge just before the op.
     // As for a buffer, the firsts file the texture once each, and the transfer waits are folded at submit from those sets.
 
-    // A texture with a transfer in flight stays in the layout that transfer needs.
-    // This list waits for the transfer and therefore runs after it, but the layer reads submit-call order and this
-    // list's entry barrier is submitted before the copy of a transfer whose actor has not got to it yet.
-    // `general` serves this list's access too, at the compression cost combine_layouts already trades away elsewhere.
-    if (texture->has_pending_transfer())
-        layout = sg::texture_layout::general;
+    // The subresources a transfer in flight covers stay in its layout where this access allows: see sg::impl::transfer_pin.
+    layout = texture->transfer_layout(range, layout);
 
     auto const tracked = texture->track_texture_access(slot(), range, stages, access, layout, from_array_application);
     if (tracked.first_this_op)

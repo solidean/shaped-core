@@ -9,6 +9,7 @@
 #include <shaped-graphics/backends/vulkan/vulkan_common.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_completion_group.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_texture_access.hh>
+#include <shaped-graphics/barrier/transfer_pin.hh>
 #include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/raw_texture.hh>
@@ -95,6 +96,22 @@ public:
             || pending(_upload_group, _pending_stream_copy_value.load(cc::memory_order_acquire))
             || pending(_download_group, _pending_async_download_value.load(cc::memory_order_acquire))
             || pending(_download_group, _pending_stream_download_value.load(cc::memory_order_acquire));
+    }
+
+    /// A transfer of `range` is about to be enqueued: called before it is stamped, so a list recording meanwhile
+    /// either sees no transfer in flight or sees its range.
+    void note_transfer(sg::subresource_range const& range) const
+    {
+        auto const others = has_pending_transfer();
+        _transfer_pin.lock([&](sg::impl::transfer_pin& p) { p.note(range, others); });
+    }
+
+    /// The layout a list's access to `range` takes while this texture's transfers may be in flight; see sg::impl::transfer_pin.
+    [[nodiscard]] sg::texture_layout transfer_layout(sg::subresource_range const& range, sg::texture_layout requested) const
+    {
+        auto const pending = has_pending_transfer();
+        return _transfer_pin.lock([&](sg::impl::transfer_pin const& p)
+                                  { return p.layout_for(range, requested, pending); });
     }
 
     /// The layout `range` is in as of the last submitted command list.
@@ -235,6 +252,8 @@ public:
     // Guarded because concurrent command lists may record against the same texture.
     // Mutable so a const handle can still track access: tracking is bookkeeping about the texture, not a change to it.
     mutable cc::mutex<vulkan_texture_access> _access;
+    /// what this texture's transfers in flight hold in their layout
+    mutable cc::mutex<sg::impl::transfer_pin> _transfer_pin;
 
     /// An attachment view a rendering scope used, and the epoch that created it.
     struct attachment_view

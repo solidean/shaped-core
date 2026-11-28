@@ -345,6 +345,7 @@ template <class Key>
 class slot_table;           // a bindless_array's key -> element-index map (binding/impl/slot_table.hh)
 class bindless_array_state; // what a bindless_array owns, shared so an element may outlive it
 class transfer_drain; // outstanding-job count a transfer system is drained against (transfer/impl/transfer_drain.hh)
+struct transfer_pin;  // the subresources a texture's transfers in flight hold in their layout (barrier/transfer_pin.hh)
 void notify_transfer_drained(sg::context& ctx); // a drain reached zero; defined in context/context.cc
 struct stat_counts;                             // what one command list counted while recording (context/metrics.hh)
 class stat_totals;                              // a context's running stat totals

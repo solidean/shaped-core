@@ -237,7 +237,10 @@ Where an implementation reads something the model does not define — a check ta
 
 **A list's transfer waits are folded at submit**, on dx12 as on vulkan, over every resource the list touched.
 So a transfer enqueued after an access was recorded, and before the submit, is still waited on.
-One record-time read is left: a texture with a transfer in flight is tracked in `general` rather than the layout an op asks for.
+One record-time read is left: a texture with a transfer in flight is tracked in `general` rather than the layout an op asks for,
+but only over the subresources its transfers in flight cover, and only for an access `general` serves: sampling and copies.
+A render-target, depth or storage access keeps its own layout, since `general` is COMMON on dx12, which takes none of them,
+and vulkan's render pass names an attachment layout of its own; `sg::impl::transfer_pin` holds both rules.
 A sticky array declaration freezes that choice at its application, where a later op would otherwise read it again.
 
 ## The transfer queue never moves a layout — the direct queue settles it first

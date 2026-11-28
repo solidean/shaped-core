@@ -776,6 +776,7 @@ sg::bytes_future vulkan_download_async_system::download_texture(sg::raw_texture_
     // them — and a value stamped for a job still being enqueued is one nothing will ever signal.
     // Running first also means the last-used token read below already covers the fixup.
     (void)_ctx->prepare_texture_for_async(texture, sg::subresource_range(subresource), sg::async_direction::download);
+    static_cast<vulkan_texture const*>(texture.get())->note_transfer(sg::subresource_range(subresource));
 
     vulkan_async_download_job job;
     job.texture_source = src;
@@ -859,6 +860,7 @@ sg::stream_download_handle vulkan_download_async_system::stream_to_sink_texture(
     // them — and a value stamped for a job still being enqueued is one nothing will ever signal.
     // Running first also means the last-used token read below already covers the fixup.
     (void)_ctx->prepare_texture_for_async(texture, sg::subresource_range(subresource), sg::async_direction::download);
+    static_cast<vulkan_texture const*>(texture.get())->note_transfer(sg::subresource_range(subresource));
 
     vulkan_async_download_job job;
     job.texture_source = src;

@@ -513,12 +513,8 @@ vulkan_command_list::texture_track vulkan_command_list::track_texture(vulkan_tex
     if (texture._image == VK_NULL_HANDLE)
         return {.layout = layout, .found = {}};
 
-    // A texture with a transfer in flight stays in the layout that transfer needs.
-    // This list waits for the transfer and therefore runs after it, but the layer reads submit-call order and this
-    // list's entry barrier is submitted before the copy of a transfer whose actor has not got to it yet.
-    // `general` serves this list's access too, at the compression cost combine_layouts already trades away elsewhere.
-    if (texture.has_pending_transfer())
-        layout = sg::texture_layout::general;
+    // The subresources a transfer in flight covers stay in its layout where this access allows: see sg::impl::transfer_pin.
+    layout = texture.transfer_layout(range, layout);
 
     auto const found = texture.declare_access(_slot, range, stages, access, layout, from_array_application);
     if (found.member_write)

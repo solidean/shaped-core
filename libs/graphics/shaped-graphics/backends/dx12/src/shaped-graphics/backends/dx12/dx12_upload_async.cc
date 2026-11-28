@@ -1014,6 +1014,7 @@ void dx12_upload_async_system::upload_texture(sg::raw_texture_handle texture,
     // Before the stamps rather than after, because the fixup is an ordinary command list and its submit waits on the
     // texture's pending-transfer values — a value stamped for a job still being enqueued is one nothing will signal.
     (void)_ctx.prepare_texture_for_async(texture, sg::subresource_range(subresource), sg::async_direction::upload);
+    static_cast<dx12_texture const*>(texture.get())->note_transfer(sg::subresource_range(subresource));
 
     dx12_texture_footprint const fp = compute_texture_footprint(dst->description(), subresource, region);
     CC_ASSERT(data.size() == fp.tight_size(), "async upload pixel data size does not match the copy region");
@@ -1146,6 +1147,7 @@ sg::stream_upload_handle dx12_upload_async_system::stream_source_texture(sg::raw
     // Before the stamps rather than after, because the fixup is an ordinary command list and its submit waits on the
     // texture's pending-transfer values — a value stamped for a job still being enqueued is one nothing will signal.
     (void)_ctx.prepare_texture_for_async(texture, sg::subresource_range(subresource), sg::async_direction::upload);
+    static_cast<dx12_texture const*>(texture.get())->note_transfer(sg::subresource_range(subresource));
 
     dx12_texture_footprint const fp = compute_texture_footprint(dst->description(), subresource, region);
 

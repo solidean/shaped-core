@@ -709,6 +709,7 @@ sg::bytes_future dx12_download_async_system::download_texture(sg::raw_texture_ha
     // Before the stamps rather than after, because the fixup is an ordinary command list and its submit waits on the
     // texture's pending-transfer values — a value stamped for a job still being enqueued is one nothing will signal.
     (void)_ctx.prepare_texture_for_async(texture, sg::subresource_range(subresource), sg::async_direction::download);
+    static_cast<dx12_texture const*>(texture.get())->note_transfer(sg::subresource_range(subresource));
 
     dx12_texture_footprint const fp = compute_texture_footprint(src->description(), subresource, region);
 
@@ -846,6 +847,7 @@ sg::stream_download_handle dx12_download_async_system::stream_texture(sg::raw_te
     // Before the stamps rather than after, because the fixup is an ordinary command list and its submit waits on the
     // texture's pending-transfer values — a value stamped for a job still being enqueued is one nothing will signal.
     (void)_ctx.prepare_texture_for_async(texture, sg::subresource_range(subresource), sg::async_direction::download);
+    static_cast<dx12_texture const*>(texture.get())->note_transfer(sg::subresource_range(subresource));
 
     dx12_texture_footprint const fp = compute_texture_footprint(src->description(), subresource, region);
     CC_ASSERT(src->_download_group != nullptr, "a download source must have been created with copy_src");
@@ -935,6 +937,7 @@ sg::stream_download_handle dx12_download_async_system::stream_sink_texture(sg::r
     // Before the stamps rather than after, because the fixup is an ordinary command list and its submit waits on the
     // texture's pending-transfer values — a value stamped for a job still being enqueued is one nothing will signal.
     (void)_ctx.prepare_texture_for_async(texture, sg::subresource_range(subresource), sg::async_direction::download);
+    static_cast<dx12_texture const*>(texture.get())->note_transfer(sg::subresource_range(subresource));
 
     dx12_texture_footprint const fp = compute_texture_footprint(src->description(), subresource, region);
 
