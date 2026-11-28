@@ -743,6 +743,50 @@ def a_modules_struct_and_the_files_own_of_one_bare_name_are_two_cpp_types():
 
 
 @test
+def a_struct_only_another_modules_binding_places_is_generated_once_by_its_own_module():
+    # module `lighting` binds `buffer[sky.parameters]`, which no binding of `sky` holds, so `sky`'s description places
+    # none of it: the package hands it to `sky`, which generates it under its bare name, its own members bare too
+    medium = {"name": "sky.medium", "module": "sky", "space": "storage", "size": 16,
+              "members": [{"name": "density", "type": "float4", "offset": 0, "size": 16}]}
+    parameters = {"name": "sky.parameters", "module": "sky", "space": "storage", "size": 48,
+                  "members": [{"name": "near", "type": "sky.medium", "offset": 0, "size": 16},
+                              {"name": "far", "type": "sky.medium[2]", "offset": 16, "size": 32}]}
+    lighting = SglFile(path="module:lighting", memory_structs=[medium, parameters])
+    group = {"name": "lights", "inline": False, "members": [
+        resource("buffer", name="sky", type="sky.parameters", slot=0, stride=48, access="read"),
+    ]}
+    package = sgl_description.SglEntries()
+    package.modules["lighting"] = sgl_description.SglEntries(module="lighting")
+    package.modules["sky"] = sgl_description.SglEntries(module="sky")
+    sgl_description.add_declared(package.modules["lighting"], set(), "bindings", ("module:lighting", "lights"),
+                                 (lighting, group))
+    # a second binding placing it, in the package's own file, adds no second type
+    sgl_description.add_declared(package, set(), "bindings", ("t.sgl", "lights"), (lighting, group))
+    sgl_description.give_to_owners("pkg", package)
+
+    sky = package.modules["sky"]
+    expect_equal([s["name"] for _, s in sky.memory_structs], ["medium", "parameters"], "sky's, innermost first, once")
+    expect_equal(package.modules["lighting"].memory_structs, [], "lighting generates none of them")
+    header = sgl_host_code.emit_header("pkg", "pkg::sky", sky)
+    expect_in("struct parameters\n{", header, "the struct, by its bare name")
+    expect_in("medium near;", header, "a member of its own module's struct, bare")
+    expect_in("cc::fixed_array<medium, 2> far;", header, "an array of it, bare")
+    expect_in("<typed-geometry/linalg/vec.hh>", "\n".join(sgl_host_code.includes(sky)),
+              "its members' headers, in a module with no binding of its own")
+
+    # placed with a layout of its own elsewhere, it would be two types in one name
+    other = {**parameters, "size": 64, "members": parameters["members"] + [
+        {"name": "extra", "type": "float4", "offset": 48, "size": 16}]}
+    package.foreign_declarations.append(other)
+    try:
+        sgl_description.give_to_owners("pkg", package)
+        raised = ""
+    except sgl_description.DescriptionError as e:
+        raised = str(e)
+    expect_in("two layouts", raised, "two layouts of one struct, refused")
+
+
+@test
 def a_constants_member_is_a_constant_buffer_view_the_caller_binds():
     # CHK-539: its own slot and its own buffer, which the caller fills; the group's block keeps slot 0
     memory = {"view_params": ("view_params", 32)}
