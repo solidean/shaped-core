@@ -1,6 +1,8 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/memory/allocation.hh>
+#include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/native_thread.hh>
+#include <clean-core/thread/spin.hh>
 #include <nexus/test.hh>
 
 using namespace cc::primitive_defines;
@@ -60,6 +62,49 @@ TEST("allocation - a block outlives the thread that allocated it, and counts unt
     bytes = {};
     // freed by another thread than the one that allocated it
     CHECK(near(live(), before));
+}
+
+TEST("allocation - a thread still running counts toward the live bytes once it publishes its counts",
+     main_thread,
+     exclusive())
+{
+    // small blocks, which mimalloc counts per thread, unlike a huge block
+    constexpr auto count = 64 << 10;
+    constexpr auto size = 1 << 10;
+    auto stage = cc::atomic<int>(0);
+    auto const wait_for = [&](int s)
+    {
+        while (stage.load(cc::memory_order_acquire) != s)
+            cc::spin_pause();
+    };
+    auto const before = live();
+    auto thread = cc::native_thread::start(
+        [&]
+        {
+            auto blocks = cc::vector<cc::vector<byte>>();
+            blocks.reserve(count);
+            for (auto i = 0; i < count; ++i)
+                blocks.emplace_back().reserve(size);
+            stage.store(1, cc::memory_order_release);
+            wait_for(2);
+            cc::publish_thread_memory_usage();
+            stage.store(3, cc::memory_order_release);
+            wait_for(4);
+            blocks = {};
+            cc::publish_thread_memory_usage();
+            stage.store(5, cc::memory_order_release);
+            wait_for(6);
+        });
+    wait_for(1);
+    CHECK(near(live(), before)); // allocated, not yet published
+    stage.store(2, cc::memory_order_release);
+    wait_for(3);
+    CHECK(live() - before >= i64(count) * size);
+    stage.store(4, cc::memory_order_release);
+    wait_for(5);
+    CHECK(near(live(), before));
+    stage.store(6, cc::memory_order_release);
+    thread.join();
 }
 
 #endif

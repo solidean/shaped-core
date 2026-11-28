@@ -63,8 +63,18 @@ namespace cc
 void trim_thread_memory(memory_trim how = memory_trim::all);
 
 /// What the default memory resource holds now, as the allocator behind it counts it; costs the allocating path nothing.
+/// The live bytes are exact only once every thread that allocated or freed has published its counts:
+/// the caller and each thread that has since slept on async work, a pool's or a parked one, have; any other thread still running has not.
+/// A thread's unpublished frees of blocks published by another thread may even make the live bytes come out negative.
 /// Reading it walks the allocator's heaps: meant for a debug view or a report, not every allocation.
 [[nodiscard]] cc::default_memory_usage query_default_memory_usage();
+
+/// Adds the calling thread's allocator counts to what query_default_memory_usage reports, as a thread's end does.
+/// mimalloc counts per thread and merges a thread's counts only when asked, so a long-lived thread that never calls this stays invisible to the live bytes.
+/// A thread about to sleep on async work, a pool's or a parked one, calls it itself.
+/// A few hundred atomic adds: meant for a thread going idle, not per allocation.
+/// The system resource counts nothing to publish.
+void publish_thread_memory_usage();
 } // namespace cc
 
 /// What the default memory resource holds, apart from what a process's private bytes count:

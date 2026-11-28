@@ -447,6 +447,7 @@ cc::set_allocation_failure_handler(fn);  // void fn(isize min, isize max, isize 
 cc::system_memory_resource;                               // malloc/free opt-out; pass &it as `res` to bypass mimalloc
 cc::trim_thread_memory();                                 // freed memory back to the OS: this thread's pages, every pending purge
 cc::query_default_memory_usage();                         // {live_bytes, committed_bytes}: mimalloc's own counts, free on the hot path; -1 without it
+cc::publish_thread_memory_usage();                        // this thread's counts into that query; a thread sleeping on async work does it itself
 // CC_HAS_MIMALLOC is 0 under SC_MIMALLOC=OFF (the sanitize presets), and the default IS the system resource there.
 // Only mimalloc resizes in place; the system resource always returns -1, so never assume the default can.
 

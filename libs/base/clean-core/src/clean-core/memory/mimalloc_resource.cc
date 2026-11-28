@@ -163,13 +163,19 @@ constinit cc::memory_resource const* const cc::default_memory_resource = &mimall
 
 cc::default_memory_usage cc::query_default_memory_usage()
 {
-    // mimalloc's own statistics, which it keeps in release builds too: its block counts are merged a page at a time,
-    // its committed bytes as it commits
+    // mimalloc's own statistics, which it keeps in release builds too: the committed bytes as it commits,
+    // the block counts per thread, merged when that thread publishes them
+    publish_thread_memory_usage();
     mi_stats_t_decl(stats);
     if (!mi_stats_get(&stats))
         return {};
     return {.live_bytes = stats.malloc_normal.current + stats.malloc_huge.current + large_live_bytes(),
             .committed_bytes = stats.committed.current};
+}
+
+void cc::publish_thread_memory_usage()
+{
+    mi_theap_stats_merge_to_heap(mi_theap_get_default());
 }
 
 void cc::trim_thread_memory(memory_trim how)

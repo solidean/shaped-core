@@ -58,7 +58,9 @@ Pass `&cc::system_memory_resource` as a custom resource to bypass mimalloc for o
 
 **What the default resource holds** is `cc::query_default_memory_usage()`: the live bytes of its blocks, and what its allocator holds from the OS.
 It reads mimalloc's own statistics, which it keeps in release builds too, so the allocating path pays nothing for it.
-mimalloc merges a thread's block counts a page at a time, so the live bytes run behind by a few MB at most.
+**mimalloc counts per thread, and a thread's counts reach the total only when it publishes them** with `cc::publish_thread_memory_usage()`, or ends.
+The query publishes the caller's, and a thread about to sleep on async work publishes its own, a pool's worker or a parked one, so with every thread idle the live bytes are exact.
+Any other long-lived thread is invisible until it publishes, and its frees of blocks another thread published can push the live bytes below zero.
 A process's private bytes are no substitute: they count every other allocator's too, and the blocks mimalloc keeps freed for a thread to reuse.
 A count of our own, a thread-local add on every allocation and free, cost about 5 ns a pair on mimalloc's 60, which is why there is none.
 Without mimalloc both figures are `-1`: the system allocator reports neither.

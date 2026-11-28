@@ -124,6 +124,11 @@ cc::default_memory_usage cc::query_default_memory_usage()
     return {}; // the platform's malloc reports neither
 }
 
+void cc::publish_thread_memory_usage()
+{
+    // the platform's malloc counts nothing to publish
+}
+
 void cc::trim_thread_memory(memory_trim)
 {
     // the platform's malloc decides for itself what it returns

@@ -1,4 +1,5 @@
 #include <clean-core/common/profiling.hh>
+#include <clean-core/memory/allocation.hh>
 #include <clean-core/platform/resource_limits.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async_thread_pool.hh>
@@ -442,6 +443,8 @@ void cc::async_thread_pool::worker_main(worker& w)
             continue;
         }
 
+        // a worker lives as long as its pool, so its allocator counts reach the process's only when it publishes them
+        cc::publish_thread_memory_usage();
         {
             std::unique_lock<std::mutex> lk(_wait_m);
             _wait_cv.wait(
@@ -687,6 +690,7 @@ void cc::async_thread_pool::participate_until_ready(async_node_base& root)
                 }
             }
 
+            cc::publish_thread_memory_usage(); // as a worker does before it sleeps
             {
                 auto const released = [&]
                 {

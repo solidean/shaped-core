@@ -1,4 +1,5 @@
 #include <clean-core/common/assert.hh>
+#include <clean-core/memory/allocation.hh>
 #include <clean-core/memory/unique_ptr.hh>
 #include <clean-core/thread/async_node.hh>
 #include <clean-core/thread/atomic.hh>
@@ -129,6 +130,9 @@ void cc::impl::async_parker::park_for(double max_secs)
     // work posted before the clear is visible to the sweep, and a notify after it sets the flag the wait below reads.
     if (_state->drives_pumps && cc::impl::thread_pump_registry())
         return;
+
+    // a thread about to sleep publishes its allocator counts, as a pool worker does, since it may sleep for long
+    cc::publish_thread_memory_usage();
 
     if (home != nullptr)
     {
