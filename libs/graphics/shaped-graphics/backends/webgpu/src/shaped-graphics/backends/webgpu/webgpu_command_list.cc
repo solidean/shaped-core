@@ -470,6 +470,40 @@ void webgpu_command_list::copy_buffer_to_texture(sg::raw_buffer_handle src,
     touch(src);
     touch(dst);
 }
+void webgpu_command_list::copy_texture_to_buffer(sg::raw_texture_handle src,
+                                                 sg::subresource_index const& subresource,
+                                                 sg::texture_region const& region,
+                                                 sg::raw_buffer_handle dst,
+                                                 isize dst_offset_in_bytes,
+                                                 isize dst_row_pitch_in_bytes)
+{
+    auto const& s = as_webgpu_texture(src);
+    auto const& d = as_webgpu_buffer(dst);
+
+    // WebGPU counts rows per image in block rows, the same unit sg's pitch is in.
+    auto const extent = isize(sg::format_block_extent(s.format()));
+    auto const rows = (isize(region.size[1]) + extent - 1) / extent;
+
+    auto const source = WGPUTexelCopyTextureInfo{
+        .texture = s.raw(),
+        .mipLevel = u32(subresource.mip_level),
+        .origin = {u32(region.offset[0]), u32(region.offset[1]),
+                   s.dimension() == sg::texture_dimension::d3 ? u32(region.offset[2]) : u32(subresource.array_layer)},
+        .aspect = to_wgpu_copy_aspect(s.format(), subresource.aspect),
+    };
+    auto const destination = WGPUTexelCopyBufferInfo{
+        .layout
+        = {.offset = u64(dst_offset_in_bytes), .bytesPerRow = u32(dst_row_pitch_in_bytes), .rowsPerImage = u32(rows)},
+        .buffer = d.raw(),
+    };
+    auto const copy_extent = copy_extent_of(s.format(), region.size);
+
+    end_open_pass("a copy");
+    wgpuCommandEncoderCopyTextureToBuffer(encoder(), &source, &destination, &copy_extent);
+    touch(src);
+    touch(dst);
+}
+
 void webgpu_command_list::copy_texture_to_texture(sg::raw_texture_handle src,
                                                   sg::subresource_index const& src_subresource,
                                                   sg::texture_region const& region,

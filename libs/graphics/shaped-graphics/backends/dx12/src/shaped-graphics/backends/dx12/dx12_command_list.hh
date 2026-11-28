@@ -254,6 +254,12 @@ protected:
                                  sg::raw_texture_handle dst,
                                  sg::subresource_index const& dst_subresource,
                                  tg::pos3i dst_offset) override;
+    void copy_texture_to_buffer(sg::raw_texture_handle src,
+                                sg::subresource_index const& subresource,
+                                sg::texture_region const& region,
+                                sg::raw_buffer_handle dst,
+                                isize dst_offset_in_bytes,
+                                isize dst_row_pitch_in_bytes) override;
 
     // Compute recording (reached through cmd.compute). Bodies in dx12_command_list.cc.
     void compute_bind_pipeline(sg::compute_pipeline const& pipeline) override;

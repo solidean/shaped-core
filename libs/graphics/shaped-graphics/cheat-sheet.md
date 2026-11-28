@@ -426,6 +426,7 @@ sg::texture_region     // { tg::pos3i offset; tg::vec3i size } — a texel box. 
 cmd.copy.buffer_bytes_region({.src, .dst, .size_in_bytes, .src_offset_in_bytes=0, .dst_offset_in_bytes=0}) // void — device→device buffer copy (src needs copy_src, dst needs copy_dst); size 0 = no-op
 cmd.copy.buffer_data_region<T>({.src, .dst, .count, .src_offset=0, .dst_offset=0}) // void — typed convenience (count + offsets in elements of T; like a subspan)
 cmd.copy.buffer_to_texture({.src, .dst, .src_row_pitch_in_bytes, .src_offset_in_bytes=0, .subresource={}, .region={}}) // void — buffer rows into one subresource; a BC row is a row of BLOCKS
+cmd.copy.texture_to_buffer({.src, .dst, .dst_row_pitch_in_bytes, .dst_offset_in_bytes=0, .subresource={}, .region={}}) // void — buffer_to_texture's mirror: rows into the buffer, its padding left as it was
 cmd.copy.texture_to_texture({.src, .dst, .src_subresource={}, .dst_subresource={}, .region={}, .dst_offset={}}) // void — a box texel for texel; ONE format both sides, no depth;
                                                    //   region is the source's (none = whole src subresource), dst_offset where it lands; one texture only between two subresources
                                                    //   pitch a multiple of sg::buffer_texture_row_pitch_alignment (256), offset of buffer_texture_offset_alignment (512)

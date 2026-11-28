@@ -166,6 +166,12 @@ private:
                                  raw_texture_handle dst,
                                  subresource_index const& dst_subresource,
                                  tg::pos3i dst_offset) override;
+    void copy_texture_to_buffer(raw_texture_handle src,
+                                subresource_index const& subresource,
+                                texture_region const& region,
+                                raw_buffer_handle dst,
+                                isize dst_offset_in_bytes,
+                                isize dst_row_pitch_in_bytes) override;
 
     void compute_bind_pipeline(compute_pipeline const& pipeline) override;
     void compute_bind_group(int group_index, binding_group const& group) override;

@@ -834,6 +834,50 @@ void dx12_command_list::copy_buffer_to_texture(sg::raw_buffer_handle src,
     _list->CopyTextureRegion(&dst_loc, UINT(fp.x), UINT(fp.y), UINT(fp.z), &src_loc, nullptr);
 }
 
+void dx12_command_list::copy_texture_to_buffer(sg::raw_texture_handle src,
+                                               sg::subresource_index const& subresource,
+                                               sg::texture_region const& region,
+                                               sg::raw_buffer_handle dst,
+                                               isize dst_offset_in_bytes,
+                                               isize dst_row_pitch_in_bytes)
+{
+    auto const s = std::dynamic_pointer_cast<dx12_texture const>(src);
+    auto const d = std::dynamic_pointer_cast<dx12_buffer const>(dst);
+    CC_ASSERT(s != nullptr && d != nullptr, "copy resources are not dx12 resources");
+    CC_ASSERT(!s->is_expired(), "copy source is a transient texture used past its epoch (expired)");
+    CC_ASSERT(!d->is_expired(), "copy target is a transient buffer used past its epoch (expired)");
+
+    dx12_texture_footprint const fp = compute_texture_footprint(s->description(), subresource, region);
+
+    track_texture_access(s, subresource, sg::pipeline_stage_flag::copy, sg::access_flag::copy_read,
+                         sg::texture_layout::copy_src);
+    track_buffer_access(d, sg::pipeline_stage_flag::copy, sg::access_flag::copy_write);
+    flush_barriers();
+
+    D3D12_TEXTURE_COPY_LOCATION src_loc = {};
+    src_loc.pResource = s->_resource.Get();
+    src_loc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+    src_loc.SubresourceIndex = fp.subresource;
+
+    D3D12_TEXTURE_COPY_LOCATION dst_loc = {};
+    dst_loc.pResource = d->_resource.Get();
+    dst_loc.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+    dst_loc.PlacedFootprint.Offset = UINT64(dst_offset_in_bytes);
+    dst_loc.PlacedFootprint.Footprint.Format = fp.format;
+    dst_loc.PlacedFootprint.Footprint.Width = UINT(fp.width);
+    dst_loc.PlacedFootprint.Footprint.Height = UINT(fp.height);
+    dst_loc.PlacedFootprint.Footprint.Depth = UINT(fp.depth);
+    dst_loc.PlacedFootprint.Footprint.RowPitch = UINT(dst_row_pitch_in_bytes);
+
+    auto const box = D3D12_BOX{.left = UINT(fp.x),
+                               .top = UINT(fp.y),
+                               .front = UINT(fp.z),
+                               .right = UINT(fp.x + fp.width),
+                               .bottom = UINT(fp.y + fp.height),
+                               .back = UINT(fp.z + fp.depth)};
+    _list->CopyTextureRegion(&dst_loc, 0, 0, 0, &src_loc, &box);
+}
+
 void dx12_command_list::copy_texture_to_texture(sg::raw_texture_handle src,
                                                 sg::subresource_index const& src_subresource,
                                                 sg::texture_region const& region,

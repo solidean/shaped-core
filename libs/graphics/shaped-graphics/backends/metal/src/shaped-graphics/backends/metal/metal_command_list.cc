@@ -781,6 +781,36 @@ void metal_command_list::copy_buffer_to_texture(raw_buffer_handle src,
         MTL::Origin(NS::UInteger(region.offset[0]), NS::UInteger(region.offset[1]), NS::UInteger(region.offset[2])));
 }
 
+void metal_command_list::copy_texture_to_buffer(raw_texture_handle src,
+                                                subresource_index const& subresource,
+                                                texture_region const& region,
+                                                raw_buffer_handle dst,
+                                                isize dst_offset_in_bytes,
+                                                isize dst_row_pitch_in_bytes)
+{
+    CC_ASSERT(!src->is_expired(), "copy source is a transient texture used past its epoch");
+    CC_ASSERT(!dst->is_expired(), "copy target is a transient buffer used past its epoch");
+
+    suspend_render_encoder("a copy");
+
+    declare_texture(src, sg::pipeline_stage_flag::copy, sg::access_flag::copy_read);
+    declare_buffer(dst, sg::pipeline_stage_flag::copy, sg::access_flag::copy_write);
+    flush_barriers();
+
+    // Metal counts a block-compressed row as a row of blocks, the same unit sg's pitch is in.
+    auto const extent = isize(sg::format_block_extent(src->description().format));
+    auto const rows = (isize(region.size[1]) + extent - 1) / extent;
+
+    auto const& mtl_src = static_cast<metal_texture const&>(*src);
+    auto const& mtl_dst = static_cast<metal_buffer const&>(*dst);
+    compute_encoder()->copyFromTexture(
+        mtl_src.texture(), NS::UInteger(subresource.array_layer), NS::UInteger(subresource.mip_level),
+        MTL::Origin(NS::UInteger(region.offset[0]), NS::UInteger(region.offset[1]), NS::UInteger(region.offset[2])),
+        MTL::Size(NS::UInteger(region.size[0]), NS::UInteger(region.size[1]), NS::UInteger(region.size[2])),
+        mtl_dst.buffer(), NS::UInteger(dst_offset_in_bytes), NS::UInteger(dst_row_pitch_in_bytes),
+        NS::UInteger(dst_row_pitch_in_bytes * rows));
+}
+
 void metal_command_list::copy_texture_to_texture(raw_texture_handle src,
                                                  subresource_index const& src_subresource,
                                                  texture_region const& region,

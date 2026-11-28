@@ -106,8 +106,8 @@ An epoch advance does **not** deliver a download — it drains the GPU, and the 
 `raytracing.is_supported()` and `query.is_supported()` answer what the device offers, so a backend or device without ray tracing or timestamps says so there.
 
 One gap is worth knowing before you rely on it:
-`cmd.copy` copies buffer regions, a buffer into a texture region (`buffer_to_texture`) and a texture box into another (`texture_to_texture`);
-a texture→buffer copy does not exist yet.
+`cmd.copy` copies buffer regions, a buffer into a texture region (`buffer_to_texture`), a texture region into a buffer (`texture_to_buffer`),
+and a texture box into another (`texture_to_texture`).
 
 ## See also
 

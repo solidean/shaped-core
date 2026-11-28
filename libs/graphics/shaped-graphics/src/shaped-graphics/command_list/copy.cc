@@ -52,6 +52,42 @@ void command_list_copy_scope::buffer_to_texture(buffer_texture_copy args)
                                 cc::move(args.dst), args.subresource, box);
 }
 
+void command_list_copy_scope::texture_to_buffer(texture_buffer_copy args)
+{
+    CC_ASSERT(args.src != nullptr, "copy source texture is null");
+    CC_ASSERT(args.dst != nullptr, "copy dest buffer is null");
+    CC_ASSERT(args.src->usage().has(texture_usage::copy_src), "copy source texture must have texture_usage::copy_src");
+    CC_ASSERT(args.dst->usage().has(buffer_usage::copy_dst), "copy target buffer must have buffer_usage::copy_dst");
+    impl::assert_writable_from_bytes(args.src);
+    impl::assert_valid_subresource(args.src, args.subresource);
+    _cmd.check_copy_outside_rendering_targets(args.src.get(), args.subresource, "a copy out of a texture");
+
+    auto const box
+        = args.region.has_value() ? args.region.value() : impl::full_subresource_region(args.src, args.subresource);
+    impl::assert_texture_region_in_bounds(args.src, args.subresource, box);
+    if (box.is_empty())
+        return; // no-op
+
+    CC_ASSERT(args.dst_row_pitch_in_bytes > 0 && args.dst_row_pitch_in_bytes % buffer_texture_row_pitch_alignment == 0,
+              "a buffer's row pitch for a texture copy must be a positive multiple of "
+              "buffer_texture_row_pitch_alignment");
+    CC_ASSERT(args.dst_offset_in_bytes >= 0 && args.dst_offset_in_bytes % buffer_texture_offset_alignment == 0,
+              "a buffer's offset for a texture copy must be a multiple of buffer_texture_offset_alignment");
+
+    // Rows count in blocks, and the last row of the last slice need not be padded out to the pitch.
+    auto const format = args.src->description().format;
+    auto const extent = format_block_extent(format);
+    auto const rows = (isize(box.size[1]) + extent - 1) / extent;
+    auto const row_bytes = (isize(box.size[0]) + extent - 1) / extent * format_block_size(format);
+    CC_ASSERT(args.dst_row_pitch_in_bytes >= row_bytes, "a buffer's row pitch is shorter than one row of the region");
+    auto const needed = args.dst_row_pitch_in_bytes * (rows * isize(box.size[2]) - 1) + row_bytes;
+    CC_ASSERT(args.dst_offset_in_bytes + needed <= args.dst->size_in_bytes(), "the buffer ends before the region's "
+                                                                              "last row");
+
+    _cmd.copy_texture_to_buffer(cc::move(args.src), args.subresource, box, cc::move(args.dst), args.dst_offset_in_bytes,
+                                args.dst_row_pitch_in_bytes);
+}
+
 void command_list_copy_scope::texture_to_texture(texture_texture_copy args)
 {
     CC_ASSERT(args.src != nullptr, "copy source texture is null");

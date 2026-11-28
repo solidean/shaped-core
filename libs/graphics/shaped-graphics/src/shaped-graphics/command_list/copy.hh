@@ -62,6 +62,23 @@ struct sg::buffer_texture_copy
     cc::optional<texture_region> region = {}; ///< the box written; none is the whole subresource
 };
 
+/// Arguments for a GPU copy from one subresource of a texture into a buffer (cmd.copy.texture_to_buffer), buffer_texture_copy's mirror.
+///
+/// The buffer receives the region row after row, `dst_row_pitch_in_bytes` apart, and depth slice after depth slice;
+/// the bytes between one row's end and the next row's start are left as they were.
+/// A row of a block-compressed format is a row of blocks, as it is for buffer_texture_copy.
+/// This is the copy a compute shader reads a texture through as plain words, or a texture's texels take into a buffer another copy writes on.
+/// `src` must not have a depth or depth-stencil format, for buffer_texture_copy's reason; reading depth back goes through `cmd.download`.
+struct sg::texture_buffer_copy
+{
+    raw_texture_handle src;                   ///< copy source; must not be null; needs texture_usage::copy_src
+    raw_buffer_handle dst;                    ///< copy destination; must not be null; needs buffer_usage::copy_dst
+    isize dst_row_pitch_in_bytes;             ///< a multiple of buffer_texture_row_pitch_alignment, at least one row
+    isize dst_offset_in_bytes = 0;            ///< a multiple of buffer_texture_offset_alignment
+    subresource_index subresource = {};       ///< the one subresource read
+    cc::optional<texture_region> region = {}; ///< the box read; none is the whole subresource
+};
+
 /// Arguments for a GPU copy of a box of one texture's subresource into another subresource (cmd.copy.texture_to_texture).
 ///
 /// **Both textures must have the same format**, texel for texel, and the box must fit both; a block-compressed one's is block-aligned.
@@ -78,7 +95,7 @@ struct sg::texture_texture_copy
 };
 
 /// Device→device copy facade for a command list, reached as `cmd.copy`.
-/// Buffer regions, buffer→texture and texture→texture; texture→buffer lands here later.
+/// Buffer regions, and texture boxes into a buffer, out of one, and into another texture.
 /// See libs/graphics/shaped-graphics/docs/concepts/command-recording.md.
 class sg::command_list_copy_scope
 {
@@ -117,6 +134,13 @@ public:
     /// Preconditions: one format on both sides, not a depth one; the box in bounds of both and block-aligned;
     /// two different subresources where the textures are one; and the destination not one an open rendering scope draws into.
     void texture_to_texture(texture_texture_copy args);
+
+    /// Copies a region of one subresource of `args.src` into `args.dst`, laid out row by row: buffer_to_texture's mirror.
+    /// The copy runs on the GPU in order with this list's other commands, and the write is visible to later ones.
+    /// An empty region is a no-op.
+    /// Preconditions: the pitch and offset keep their alignments, the region is in bounds and block-aligned, the buffer
+    /// has room for every row the region gives, and the subresource is not one an open rendering scope draws into.
+    void texture_to_buffer(texture_buffer_copy args);
 
     // Pinned to its owning command list: neither copyable nor movable.
     command_list_copy_scope(command_list_copy_scope const&) = delete;

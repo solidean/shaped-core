@@ -364,3 +364,145 @@ INVOCABLE_TEST("sg - a depth texture is refused as the destination of a copy or 
     CHECK_ASSERTS(stream_upload());
     ctx->submit_command_list(cc::move(cmd));
 }
+
+// ---- texture_to_buffer, buffer_to_texture's mirror
+
+ASYNC_INVOCABLE_TEST("sg - a texture region copied into a buffer lands row by row, the bytes between its rows "
+                     "untouched",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+
+    constexpr int width = 64;
+    constexpr int height = 16;
+    auto const texture = ctx->persistent.create_raw_texture({
+        .format = sg::pixel_format::rgba8_unorm,
+        .dimension = sg::texture_dimension::d2,
+        .width = width,
+        .height = height,
+        .usage = sg::texture_usage::texture | sg::texture_usage::copy_src | sg::texture_usage::copy_dst,
+    });
+    auto const texels = pattern_bytes(width * height * 4);
+
+    // A region off the corner, whose rows of 160 bytes land 256 apart after a 512-byte lead, in a buffer of 0xAB.
+    auto const region = sg::texture_region{.offset = tg::pos3i(8, 4, 0), .size = tg::vec3i(40, 6, 1)};
+    auto const pitch = sg::buffer_texture_row_pitch(sg::pixel_format::rgba8_unorm, region.size[0]);
+    auto const offset = sg::buffer_texture_offset_alignment;
+    auto const size = offset + pitch * isize(region.size[1]);
+    auto const target = make_pattern_source(ctx, size);
+    auto const fill = cc::vector<byte>::create_filled(size, byte(0xAB));
+
+    auto cmd = ctx->create_command_list();
+    cmd->upload.bytes_to_texture(texture, cc::span<byte const>(texels));
+    cmd->upload.bytes_to_buffer(target, cc::span<byte const>(fill));
+    cmd->copy.texture_to_buffer(
+        {.src = texture, .dst = target, .dst_row_pitch_in_bytes = pitch, .dst_offset_in_bytes = offset, .region = region});
+    auto const readback = cmd->download.bytes_from_buffer(target, 0, size);
+    ctx->submit_command_list(cc::move(cmd));
+
+    auto const got = co_await readback.bytes();
+    REQUIRE(got.size() == size);
+    auto wrong_rows = 0;
+    auto wrong_padding = 0;
+    for (auto i = isize(0); i < size; ++i)
+    {
+        auto const in_rows = i >= offset && (i - offset) % pitch < isize(region.size[0]) * 4;
+        if (in_rows)
+        {
+            auto const y = region.offset[1] + int((i - offset) / pitch);
+            auto const x = region.offset[0] + int((i - offset) % pitch / 4);
+            auto const c = (i - offset) % 4;
+            wrong_rows += got[i] != pattern((isize(y) * width + x) * 4 + c) ? 1 : 0;
+        }
+        else
+            wrong_padding += got[i] != byte(0xAB) ? 1 : 0;
+    }
+    CHECK(wrong_rows == 0);
+    CHECK(wrong_padding == 0);
+}
+
+ASYNC_INVOCABLE_TEST("sg - BC7 blocks copied into a texture and out to a buffer come back unchanged",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!ctx->supports(sg::feature::texture_compression_bc))
+        SKIP("this device has no BC textures");
+
+    // Four blocks across and two down, a row of blocks 64 bytes laid 256 apart both ways.
+    auto const texture = ctx->persistent.create_raw_texture({
+        .format = sg::pixel_format::bc7_rgba_unorm,
+        .dimension = sg::texture_dimension::d2,
+        .width = 16,
+        .height = 8,
+        .usage = sg::texture_usage::texture | sg::texture_usage::copy_src | sg::texture_usage::copy_dst,
+    });
+    auto const pitch = sg::buffer_texture_row_pitch(sg::pixel_format::bc7_rgba_unorm, 16);
+    auto const size = pitch * 2;
+    auto const source = make_pattern_source(ctx, size);
+    auto const back = make_pattern_source(ctx, size);
+    auto const bytes = pattern_bytes(size);
+
+    auto cmd = ctx->create_command_list();
+    cmd->upload.bytes_to_buffer(source, cc::span<byte const>(bytes));
+    cmd->copy.buffer_to_texture({.src = source, .dst = texture, .src_row_pitch_in_bytes = pitch});
+    cmd->copy.texture_to_buffer({.src = texture, .dst = back, .dst_row_pitch_in_bytes = pitch});
+    auto const readback = cmd->download.bytes_from_buffer(back, 0, size);
+    ctx->submit_command_list(cc::move(cmd));
+
+    auto const got = co_await readback.bytes();
+    REQUIRE(got.size() == size);
+    auto wrong = 0;
+    for (auto r = isize(0); r < 2; ++r)
+        for (auto i = isize(0); i < 64; ++i)
+            wrong += got[r * pitch + i] != pattern(r * pitch + i) ? 1 : 0;
+    CHECK(wrong == 0);
+}
+
+ASYNC_INVOCABLE_TEST("sg - a 3D texture region copied into a buffer lands slice by slice",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+
+    constexpr int width = 8;
+    constexpr int height = 4;
+    constexpr int depth = 3;
+    auto const texture = ctx->persistent.create_raw_texture({
+        .format = sg::pixel_format::rgba8_unorm,
+        .dimension = sg::texture_dimension::d3,
+        .width = width,
+        .height = height,
+        .depth = depth,
+        .usage = sg::texture_usage::texture | sg::texture_usage::copy_src | sg::texture_usage::copy_dst,
+    });
+    auto const texels = pattern_bytes(width * height * depth * 4);
+
+    // Each slice of the region is `pitch × rows` after the last, its rows `pitch` apart.
+    auto const region = sg::texture_region{.offset = tg::pos3i(2, 1, 1), .size = tg::vec3i(4, 2, 2)};
+    auto const pitch = sg::buffer_texture_row_pitch(sg::pixel_format::rgba8_unorm, region.size[0]);
+    auto const rows = isize(region.size[1]);
+    auto const size = pitch * rows * isize(region.size[2]);
+    auto const target = make_pattern_source(ctx, size);
+
+    auto cmd = ctx->create_command_list();
+    cmd->upload.bytes_to_texture(texture, cc::span<byte const>(texels));
+    cmd->copy.texture_to_buffer({.src = texture, .dst = target, .dst_row_pitch_in_bytes = pitch, .region = region});
+    auto const readback = cmd->download.bytes_from_buffer(target, 0, size);
+    ctx->submit_command_list(cc::move(cmd));
+
+    auto const got = co_await readback.bytes();
+    REQUIRE(got.size() == size);
+    auto wrong = 0;
+    for (auto z = 0; z < region.size[2]; ++z)
+        for (auto y = 0; y < region.size[1]; ++y)
+            for (auto x = 0; x < region.size[0]; ++x)
+                for (auto c = 0; c < 4; ++c)
+                {
+                    auto const at = (isize(z) * rows + y) * pitch + isize(x) * 4 + c;
+                    auto const from = ((isize(z + region.offset[2]) * height + (y + region.offset[1])) * width
+                                       + (x + region.offset[0]))
+                                        * 4
+                                    + c;
+                    wrong += got[at] != pattern(from) ? 1 : 0;
+                }
+    CHECK(wrong == 0);
+}

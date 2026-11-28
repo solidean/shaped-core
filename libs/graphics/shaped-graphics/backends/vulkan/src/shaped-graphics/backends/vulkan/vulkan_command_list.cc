@@ -898,6 +898,40 @@ void vulkan_command_list::copy_buffer_to_texture(sg::raw_buffer_handle src,
     vkCmdCopyBufferToImage(_buffer, s->_buffer, d->_image, vk_layout_from(dst_layout), 1, &copy);
 }
 
+void vulkan_command_list::copy_texture_to_buffer(sg::raw_texture_handle src,
+                                                 sg::subresource_index const& subresource,
+                                                 sg::texture_region const& region,
+                                                 sg::raw_buffer_handle dst,
+                                                 isize dst_offset_in_bytes,
+                                                 isize dst_row_pitch_in_bytes)
+{
+    auto const s = std::dynamic_pointer_cast<vulkan_texture const>(src);
+    auto const d = std::dynamic_pointer_cast<vulkan_buffer const>(dst);
+    CC_ASSERT(s != nullptr && d != nullptr, "copy resources are not vulkan resources");
+    CC_ASSERT(!s->is_expired(), "copy source is a transient texture used past its epoch (expired)");
+    CC_ASSERT(!d->is_expired(), "copy target is a transient buffer used past its epoch (expired)");
+
+    auto const src_layout = track_texture_access(*s, sg::subresource_range(subresource), sg::pipeline_stage_flag::copy,
+                                                 sg::access_flag::copy_read, sg::texture_layout::copy_src);
+    track_buffer_access(*d, sg::pipeline_stage_flag::copy, sg::access_flag::copy_write);
+    suspend_rendering("a copy");
+    flush_barriers();
+
+    // Vulkan counts a buffer row in texels rather than bytes, so the pitch becomes the texels its whole blocks cover.
+    auto const format = s->description().format;
+    auto const extent = isize(sg::format_block_extent(format));
+    auto const row_texels = dst_row_pitch_in_bytes / isize(sg::format_block_size(format)) * extent;
+    auto const copy = VkBufferImageCopy{
+        .bufferOffset = VkDeviceSize(dst_offset_in_bytes),
+        .bufferRowLength = u32(row_texels),
+        .bufferImageHeight = 0, // the region's own height, rounded up to whole blocks
+        .imageSubresource = image_subresource_of(subresource, format),
+        .imageOffset = {region.offset[0], region.offset[1], region.offset[2]},
+        .imageExtent = {u32(region.size[0]), u32(region.size[1]), u32(region.size[2])},
+    };
+    vkCmdCopyImageToBuffer(_buffer, s->_image, vk_layout_from(src_layout), d->_buffer, 1, &copy);
+}
+
 void vulkan_command_list::copy_texture_to_texture(sg::raw_texture_handle src,
                                                   sg::subresource_index const& src_subresource,
                                                   sg::texture_region const& region,

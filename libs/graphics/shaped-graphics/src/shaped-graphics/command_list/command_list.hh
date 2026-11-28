@@ -133,6 +133,14 @@ protected:
                                         subresource_index const& subresource,
                                         texture_region const& region) = 0;
 
+    // The facade has resolved the region and checked the subresource, the alignments and the buffer's extent.
+    virtual void copy_texture_to_buffer(raw_texture_handle src,
+                                        subresource_index const& subresource,
+                                        texture_region const& region,
+                                        raw_buffer_handle dst,
+                                        isize dst_offset_in_bytes,
+                                        isize dst_row_pitch_in_bytes) = 0;
+
     // The facade has resolved the box and checked the formats, the subresources and the bounds on both sides.
     virtual void copy_texture_to_texture(raw_texture_handle src,
                                          subresource_index const& src_subresource,
