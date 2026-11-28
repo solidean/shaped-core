@@ -572,6 +572,13 @@ No edit of the entry point's body could meet it, so an unmet allowance would sen
 An allowance is a claim about the body, and a claim nothing backs any longer is worth saying, as an unmet expectation is.
 Otherwise an `@allow` outlives the `discard` it was written for, and silences the next one, written where it was not meant.
 It is the entry point's own, so it fails that entry point's compile alone, as the warning it allows would have been reported there alone.
+The claim is about the source, not about one compile of it: a cutout written for HLSL alone is meant on every target.
+A compile for SPIR-V that leaves the branch out does not make it untrue.
+Judged per compile, it would fail every compile but the one with the warning, and `describe`, which checks for no target, would fail with it.
+So it is judged across the compiles the file can have, and is unmet only where none raises its warning.
+Those are few for the target, and for an option's `bool` or enum.
+A number has more values than any check could try, so it is judged at the value compiled and at its default, the value its author wrote it for.
+Checking again costs a check of the file per compile tried, so it is paid only by an allowance the compile at hand does not meet, and stops at the first compile that meets them all.
 
 ## CHK-320
 

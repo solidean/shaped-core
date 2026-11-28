@@ -540,7 +540,8 @@ void sgl::test::contain_expected(checked_module const& m, cc::vector<located_dia
             continue;
         for (auto const& x : m.entry_allowances)
         {
-            if (x.function != function || met.values().contains(cc::string_view(x.kind)))
+            // one another compile of the file meets is met (CHK-577)
+            if (x.function != function || x.is_met_elsewhere || met.values().contains(cc::string_view(x.kind)))
                 continue;
             auto unmet = located_diagnostic{
                 .what = {.kind = diagnostic_kind::unmet_expectation,

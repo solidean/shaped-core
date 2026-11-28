@@ -63,12 +63,15 @@ void apply_plan(checker& c, module_plan& plan, i32 prelude_count)
 }
 } // namespace
 
-checked_module sgl::check::check(cc::span<module_file const> prelude,
-                                 cc::span<module_file const> library,
-                                 module_file program,
-                                 builtins::registry const& builtins,
-                                 cc::span<option_value const> options,
-                                 compile_target const& target)
+namespace
+{
+/// One check of the files, for one set of option values and one target.
+checked_module check_files_once(cc::span<module_file const> prelude,
+                                cc::span<module_file const> library,
+                                module_file program,
+                                builtins::registry const& builtins,
+                                cc::span<option_value const> options,
+                                compile_target const& target)
 {
     auto planned = plan_files(prelude, library, program);
     auto c = checker{.files = planned.files, .builtins = builtins};
@@ -78,6 +81,22 @@ checked_module sgl::check::check(cc::span<module_file const> prelude,
     c.compiled_target = target;
     c.run();
     return cc::move(c.out);
+}
+} // namespace
+
+checked_module sgl::check::check(cc::span<module_file const> prelude,
+                                 cc::span<module_file const> library,
+                                 module_file program,
+                                 builtins::registry const& builtins,
+                                 cc::span<option_value const> options,
+                                 compile_target const& target)
+{
+    auto result = check_files_once(prelude, library, program, builtins, options, target);
+    // CHK-577: an allowance this compile does not meet may be met by another
+    judge_allowances_elsewhere(result, options, target,
+                               [&](cc::span<option_value const> given, compile_target const& other)
+                               { return check_files_once(prelude, library, program, builtins, given, other); });
+    return result;
 }
 
 checked_module sgl::check::check(cc::span<module_file const> prelude,
@@ -590,65 +609,83 @@ checked_module sgl::check::check(checked_prelude const& prelude,
                                  cc::span<option_value const> options,
                                  compile_target const& target)
 {
-    CC_ASSERT(layer_serves_options(prelude, options), "a compile that sets a layered module's option checks it itself");
-    if (prelude._is_library)
+    auto const once = [&](cc::span<option_value const> given, compile_target const& for_target) -> checked_module
     {
-        // The layer's modules stay as the layer planned them; the program joins as module 0 and uses them by name.
-        auto plan = plan_modules(library, program);
-        CC_ASSERT(may_layer(plan), "a program continues from a layer of the whole library only where it may layer");
-        auto files = prelude._files;
-        files.push_back(program);
-        auto c = *prelude._state;
-        c.files = files;
-        // the layer dropped its empty program's entries, so the program's are appended where they stood
-        c.modules[0] = plan.modules[0];
-        c.file_module.push_back(0);
-        c.out.file_modules.push_back(plan.modules[0]);
-        auto program_uses = cc::vector<module_use>();
-        for (auto const& u : plan.uses.back())
-            for (auto i = isize(1); i < c.modules.size(); ++i)
-                if (c.modules[i] == plan.modules[u.module])
-                    program_uses.push_back({.name = u.name, .module = i32(i), .where = u.where});
-        c.uses.push_back(cc::move(program_uses));
-        c.out.reached_library_files = plan.library_order;
-        // A name of a module the program does not use is free to take, as it is beside the modules it reaches alone.
-        auto key = cc::string();
-        for (auto const r : plan.library_order)
-            key.appendf("{},", r);
-        c.module_names_below = prelude._names_by_reach->lock(
-            [&](cc::map<cc::string, cc::shared_ptr<cc::set<cc::string>>>& by_reach)
-            {
-                if (auto const* const known = by_reach.get_ptr(key); known != nullptr)
-                    return *known;
-                auto names = cc::make_shared<cc::set<cc::string>>();
-                for (auto i = isize(0); i < c.module_names_below_count; ++i)
+        CC_ASSERT(layer_serves_options(prelude, given), "a compile that sets a layered module's option checks it "
+                                                        "itself");
+        if (prelude._is_library)
+        {
+            // The layer's modules stay as the layer planned them; the program joins as module 0 and uses them by name.
+            auto plan = plan_modules(library, program);
+            CC_ASSERT(may_layer(plan), "a program continues from a layer of the whole library only where it may layer");
+            auto files = prelude._files;
+            files.push_back(program);
+            auto c = *prelude._state;
+            c.files = files;
+            // the layer dropped its empty program's entries, so the program's are appended where they stood
+            c.modules[0] = plan.modules[0];
+            c.file_module.push_back(0);
+            c.out.file_modules.push_back(plan.modules[0]);
+            auto program_uses = cc::vector<module_use>();
+            for (auto const& u : plan.uses.back())
+                for (auto i = isize(1); i < c.modules.size(); ++i)
+                    if (c.modules[i] == plan.modules[u.module])
+                        program_uses.push_back({.name = u.name, .module = i32(i), .where = u.where});
+            c.uses.push_back(cc::move(program_uses));
+            c.out.reached_library_files = plan.library_order;
+            // A name of a module the program does not use is free to take, as it is beside the modules it reaches alone.
+            auto key = cc::string();
+            for (auto const r : plan.library_order)
+                key.appendf("{},", r);
+            c.module_names_below = prelude._names_by_reach->lock(
+                [&](cc::map<cc::string, cc::shared_ptr<cc::set<cc::string>>>& by_reach)
                 {
-                    auto const& s = c.out.symbols[i];
-                    if (!s.name.empty() && !takes_no_emitted_name(s) && c.out.is_reached_file(s.file))
-                        (void)names->insert(s.name);
-                }
-                by_reach[key] = names;
-                return names;
-            });
-        c.options = options;
-        c.compiled_target = target;
+                    if (auto const* const known = by_reach.get_ptr(key); known != nullptr)
+                        return *known;
+                    auto names = cc::make_shared<cc::set<cc::string>>();
+                    for (auto i = isize(0); i < c.module_names_below_count; ++i)
+                    {
+                        auto const& s = c.out.symbols[i];
+                        if (!s.name.empty() && !takes_no_emitted_name(s) && c.out.is_reached_file(s.file))
+                            (void)names->insert(s.name);
+                    }
+                    by_reach[key] = names;
+                    return names;
+                });
+            c.options = given;
+            c.compiled_target = for_target;
+            c.records_interface = false;
+            c.run(prelude._resume);
+            return cc::move(c.out);
+        }
+        auto planned = plan_files(
+            cc::span<module_file const>(prelude._files).subspan({.offset = 0, .size = prelude._prelude_count}), library,
+            program);
+        CC_ASSERT(prelude._library_order.empty() || plan_matches(planned.plan, prelude._library_order, prelude._modules),
+                  "a program continues from a layer of modules only where it reaches exactly those");
+        auto c = *prelude._state;
+        c.files = planned.files;
+        apply_plan(c, planned.plan, prelude._prelude_count);
+        c.options = given;
+        c.compiled_target = for_target;
         c.records_interface = false;
         c.run(prelude._resume);
         return cc::move(c.out);
-    }
-    auto planned
-        = plan_files(cc::span<module_file const>(prelude._files).subspan({.offset = 0, .size = prelude._prelude_count}),
-                     library, program);
-    CC_ASSERT(prelude._library_order.empty() || plan_matches(planned.plan, prelude._library_order, prelude._modules),
-              "a program continues from a layer of modules only where it reaches exactly those");
-    auto c = *prelude._state;
-    c.files = planned.files;
-    apply_plan(c, planned.plan, prelude._prelude_count);
-    c.options = options;
-    c.compiled_target = target;
-    c.records_interface = false;
-    c.run(prelude._resume);
-    return cc::move(c.out);
+    };
+    auto result = once(options, target);
+    // CHK-577: an allowance this compile does not meet may be met by another.
+    // A layer checked its modules at their options' values, so a compile giving one of them another checks the files.
+    auto const prelude_files
+        = cc::span<module_file const>(prelude._files).subspan({.offset = 0, .size = prelude._prelude_count});
+    judge_allowances_elsewhere(result, options, target,
+                               [&](cc::span<option_value const> given, compile_target const& other)
+                               {
+                                   return layer_serves_options(prelude, given)
+                                            ? once(given, other)
+                                            : check_files_once(prelude_files, library, program,
+                                                               prelude._state->builtins, given, other);
+                               });
+    return result;
 }
 
 checked_module sgl::check::check(checked_prelude const& prelude,

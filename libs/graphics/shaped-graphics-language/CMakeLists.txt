@@ -119,6 +119,7 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/check/check_features.cc
     src/shaped-graphics-language/check/check_options.cc
     src/shaped-graphics-language/check/check_footprint.cc
+    src/shaped-graphics-language/check/check_allowances.cc
     src/shaped-graphics-language/check/check_resources.cc
     src/shaped-graphics-language/check/check_stages.cc
     src/shaped-graphics-language/check/check_raytracing.cc

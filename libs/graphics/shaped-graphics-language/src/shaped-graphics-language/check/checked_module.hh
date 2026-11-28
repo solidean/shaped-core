@@ -122,6 +122,9 @@ struct sgl::check::entry_allowance
     cc::string kind;
     /// The argument, which an allowance nothing meets is reported at.
     source_span where;
+    /// Its warning is judged of the entry point in another compile of the file, for another target or other option
+    /// values, though not in this one; so it is met (CHK-577).
+    bool is_met_elsewhere = false;
 
     bool operator==(entry_allowance const&) const = default;
 };

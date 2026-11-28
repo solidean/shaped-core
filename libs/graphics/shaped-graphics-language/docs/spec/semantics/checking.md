@@ -1180,7 +1180,13 @@ fun f() -> float:
   A kind no diagnostic has, an error's kind and a pattern are `invalid-attribute-arguments`, since an error is never intended and a pattern would allow warnings nobody named.
   So are an `@allow` with no argument, a named argument, and an `@allow` on a function that is no entry point.
   An allowed warning is nothing an `@expect` of the entry point meets (CHK-403), which stays a test of diagnostics.
-* **CHK-577** An allowance whose kind no warning judged of its entry point's inlined body has is `unmet-expectation` at its argument ([why](why/checking.md#chk-577)).
+* **CHK-577** An allowance is met where a warning of its kind is judged of its entry point's inlined body in any compile of the file ([why](why/checking.md#chk-577)).
+  Where none is, it is `unmet-expectation` at its argument.
+  So an allowance whose warning stands in a branch on the target or an option is met in every compile, the ones that leave the branch out and `describe` among them.
+  The compiles it is judged across are each target, no target and the four a compile writes for, all with the device of the compile at hand, as a link gives one device to every target it checks for.
+  Each is checked with every combination of the values of the options the entry point reaches (CHK-355): both of a `bool`'s, and every case of an enum the program or a module declares.
+  An option of a number or of an image format has more values than could be tried, so it stays at the compile's value and is tried at its default too.
+  The other compiles are checked only where the compile at hand meets no warning of an allowance, and stop at the first that meets every one.
   It is a diagnostic of that entry point (CHK-402), so a compile of another entry point of the file does not report it.
   An entry point that is never built, or whose own body did not check, has no inlined body judged, and reports none.
 

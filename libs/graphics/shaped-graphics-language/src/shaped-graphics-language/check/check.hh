@@ -168,6 +168,10 @@ namespace sgl::check
 /// A program's own options change nothing a layer of modules checked, since no module sees its program.
 [[nodiscard]] bool layer_serves_options(checked_prelude const& layer, cc::span<option_value const> options);
 
+/// Every target a file is compiled for, each with `device_features`: no target, as `describe` checks, then those
+/// `emit::all_targets` names; what an allowance is judged across (CHK-577).
+[[nodiscard]] cc::vector<compile_target> every_compile_target(feature_set device_features);
+
 /// Whether `program` reaches modules of `library` that `check_modules` may make a layer of: some, cleanly, and none of
 /// them the program's own module.
 [[nodiscard]] bool reaches_modules_to_layer(cc::span<module_file const> library, module_file program);

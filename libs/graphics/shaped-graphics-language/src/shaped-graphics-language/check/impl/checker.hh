@@ -1817,4 +1817,14 @@ struct checker
     /// tables hold where DXR's run an intersection and an any hit apart, or nothing.
     void flatten_metal_traversals();
 };
+
+/// CHK-577: marks each allowance of `m` that its own compile, for `options` and `target`, does not meet and another
+/// compile of the file does: one for each target of `every_compile_target` and each combination of the values of the
+/// options the allowing entry points reach (CHK-355), which `recheck` checks the file for.
+/// Nothing is checked again where every allowance is met, or none is of a built entry point.
+void judge_allowances_elsewhere(
+    checked_module& m,
+    cc::span<option_value const> options,
+    compile_target const& target,
+    cc::function_ref<checked_module(cc::span<option_value const>, compile_target const&)> recheck);
 } // namespace sgl::check::impl

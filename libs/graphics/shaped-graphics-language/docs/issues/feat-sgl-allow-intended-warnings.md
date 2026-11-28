@@ -62,7 +62,7 @@ Once merged, Quest3D's ocean.sgl takes `@allow` and its four bake warnings go.
 
 1. **An allowance is judged across targets and option values.**
    An `@allow` is met when its warning arises for any target or option value the file can be compiled for, and unmet (CHK-577) only when none raises it.
-   Today an allowance whose warning stands in a `const if target_language == .hlsl:` branch is unmet in every compile for another target and in `describe`:
+   Before, an allowance whose warning stands in a `const if target_language == .hlsl:` branch was unmet in every compile for another target and in `describe`:
 
    ```sgl
    @early_depth_test
@@ -74,8 +74,18 @@ Once merged, Quest3D's ocean.sgl takes `@allow` and its four bake warnings go.
        return shade(input)
    ```
 
-   Not implemented yet: options are substituted where their const is compiled, so judging other option values means checking again with them.
-   How options of large domains (an `int`, a `float`, an image format) are enumerated is a choice put to Julius.
+   Options are substituted where their const is compiled, so judging other option values means checking the file again with them.
+   Julius chose how (2026-11-28), and CHK-577 now says it:
+   - Where the compile at hand meets no warning of an allowance, `check::check` checks the file again until a compile meets every allowance, or none is left.
+     An allowance met so is marked `is_met_elsewhere`, and `test::contain_expected` reports nothing for it.
+   - The targets are no target and the four `emit::all_targets` writes for (`check::every_compile_target`), all with the compile's own device, as a link gives one device to every target.
+   - Each with every combination of the values of the `bool` and declared-enum options the allowing entry point reaches (CHK-355), each entry point on its own.
+     A number or image-format option stays at the compile's value and is tried at its default too.
+   - No cap; to revisit if it ever costs too much.
+     A check from a layer that cannot serve another value of a module's option checks the files instead.
+     An allowance is matched across those checks by its entry point's qualified name, place and kind, since file positions differ.
+   Tests in describe-test.cc: the HLSL-branch cutout built on every target and described, and a branch no target takes still unmet.
+   Also a `bool` option, a declared enum with a target, and a number met at its default and unmet where no tried value raises it.
 2. **A warning reported for the whole file is refused where it is allowed** (done, CHK-576).
    Only `early-depth-keeps-discarded`, `nan-test-at-fast`, `needless-nonuniform`, `unroll-too-long` and `workgroup-wastes-lanes` are judged of an inlined body.
    `@allow` of any other warning is `invalid-attribute-arguments`, "'no-effect' is reported for the whole file, a pipeline or a generic, not for an entry point, so no entry point can allow it".

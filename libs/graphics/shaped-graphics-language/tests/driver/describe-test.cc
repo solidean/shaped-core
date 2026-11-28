@@ -1112,6 +1112,166 @@ TEST("sgl describe - an allowance nothing meets fails the description, and the c
         sgl::compile_to_text({.source = source, .source_name = "u.sgl", .entry_point = "mainVS", .target = t}).has_value());
 }
 
+TEST("sgl describe - an allowance one target's branch meets is met on every target and in the description")
+{
+    // CHK-577: the warning stands in the HLSL branch alone, and an allowance is judged across every compile
+    constexpr auto source = cc::string_view("require early_depth_test\n"
+                                            "struct VSOutput:\n"
+                                            "    @position position: hpos4\n"
+                                            "@early_depth_test\n"
+                                            "@allow(\"early-depth-keeps-discarded\")\n"
+                                            "@pixel fun mainPS(input: VSOutput) -> float4:\n"
+                                            "    const if target_language == .hlsl:\n"
+                                            "        if input.position.x < 0.5:\n"
+                                            "            discard\n"
+                                            "    return float4(1.0)\n");
+    auto const d = described(source);
+    REQUIRE(d.entry_points.size() == 1);
+    CHECK(d.entry_points[0].name == "mainPS");
+    for (auto const t : sgl::emit::all_targets())
+    {
+        auto const compiled
+            = sgl::compile_to_text({.source = source, .source_name = "b.sgl", .entry_point = "mainPS", .target = t});
+        REQUIRE(compiled.has_value());
+        CHECK(compiled.value().warnings.empty());
+    }
+    // a branch no target takes raises it nowhere, so the allowance is still unmet
+    constexpr auto never = cc::string_view("require early_depth_test\n"
+                                           "struct VSOutput:\n"
+                                           "    @position position: hpos4\n"
+                                           "@early_depth_test\n"
+                                           "@allow(\"early-depth-keeps-discarded\")\n"
+                                           "@pixel fun mainPS(input: VSOutput) -> float4:\n"
+                                           "    const if target_language == .hlsl and target_api == .metal:\n"
+                                           "        if input.position.x < 0.5:\n"
+                                           "            discard\n"
+                                           "    return float4(1.0)\n");
+    CHECK(error_of(never).contains("unmet-expectation"));
+    for (auto const t : sgl::emit::all_targets())
+    {
+        auto const compiled
+            = sgl::compile_to_text({.source = never, .source_name = "n.sgl", .entry_point = "mainPS", .target = t});
+        REQUIRE(compiled.has_error());
+        CHECK(compiled.error().contains("unmet-expectation"));
+    }
+}
+
+TEST("sgl describe - an allowance met only at another value of a module's option is met behind a library")
+{
+    // CHK-577: the warning needs HLSL and the module's `cuts` on, which is off by default; a layer of the library holds
+    // the modules at their defaults and one more than the program uses, so the other value is checked from the files
+    constexpr auto cutting = cc::string_view("module cutting\n"
+                                             "@option const cuts = false\n"
+                                             "fun cut(x: float):\n"
+                                             "    const if cuts:\n"
+                                             "        if x < 0.5 => discard\n");
+    constexpr auto aside = cc::string_view("module aside\n"
+                                           "fun twice(x: float) -> float => x * 2.0\n");
+    sgl::library_file const library[]
+        = {{.name = "aside.sgl", .source = aside}, {.name = "cutting.sgl", .source = cutting}};
+    constexpr auto program = cc::string_view("use cutting\n"
+                                             "require early_depth_test\n"
+                                             "struct VSOutput:\n"
+                                             "    @position position: hpos4\n"
+                                             "@early_depth_test\n"
+                                             "@allow(\"early-depth-keeps-discarded\")\n"
+                                             "@pixel fun mainPS(input: VSOutput) -> float4:\n"
+                                             "    const if target_language == .hlsl:\n"
+                                             "        cutting.cut(input.position.x)\n"
+                                             "    return float4(1.0)\n");
+    auto const d = sgl::describe({.source = program, .source_name = "program.sgl", .library = library});
+    REQUIRE(d.has_value());
+    CHECK(d.value().entry_points.size() == 1);
+    for (auto const t : sgl::emit::all_targets())
+    {
+        auto const compiled = sgl::compile_to_text(
+            {.source = program, .source_name = "program.sgl", .library = library, .entry_point = "mainPS", .target = t});
+        REQUIRE(compiled.has_value());
+        CHECK(compiled.value().warnings.empty());
+    }
+}
+
+TEST("sgl describe - an allowance is judged for no target and for every target a compile writes for")
+{
+    // CHK-577: the check's list is the emitter's, which the check cannot name
+    auto const device = sgl::check::feature_set(sgl::check::feature::early_depth_test);
+    auto const targets = sgl::check::every_compile_target(device);
+    REQUIRE(targets.size() == 1 + sgl::emit::all_targets().size());
+    CHECK(targets[0] == sgl::check::compile_target{.device_features = device});
+    for (auto i = isize(0); i < sgl::emit::all_targets().size(); ++i)
+        CHECK(targets[i + 1] == sgl::emit::compile_target_of(sgl::emit::all_targets()[i], device));
+}
+
+TEST("sgl describe - an allowance is judged at every value of a bool or enum option, and a number's default")
+{
+    // CHK-577: `cutout` is off by default, and its other value raises the warning
+    constexpr auto cutout = cc::string_view("require early_depth_test\n"
+                                            "@option const cutout = false\n"
+                                            "struct VSOutput:\n"
+                                            "    @position position: hpos4\n"
+                                            "@early_depth_test\n"
+                                            "@allow(\"early-depth-keeps-discarded\")\n"
+                                            "@pixel fun mainPS(input: VSOutput) -> float4:\n"
+                                            "    const if cutout:\n"
+                                            "        if input.position.x < 0.5:\n"
+                                            "            discard\n"
+                                            "    return float4(1.0)\n");
+    CHECK(described(cutout).entry_points.size() == 1);
+    auto const t = sgl::emit::target::hlsl_dx12;
+    for (auto const value : {"false", "true"})
+    {
+        auto const given = cc::vector<sgl::check::option_value>{{.name = "cutout", .value = value}};
+        auto const compiled = sgl::compile_to_text(
+            {.source = cutout, .source_name = "c.sgl", .entry_point = "mainPS", .target = t, .options = given});
+        REQUIRE(compiled.has_value());
+        CHECK(compiled.value().warnings.empty());
+    }
+    // an enum the program declares, together with a target: only metal with `.cut` raises it
+    constexpr auto mode = cc::string_view("require early_depth_test\n"
+                                          "enum shading:\n"
+                                          "    opaque\n"
+                                          "    cut\n"
+                                          "@option const mode = shading.opaque\n"
+                                          "struct VSOutput:\n"
+                                          "    @position position: hpos4\n"
+                                          "@early_depth_test\n"
+                                          "@allow(\"early-depth-keeps-discarded\")\n"
+                                          "@pixel fun mainPS(input: VSOutput) -> float4:\n"
+                                          "    const if mode == .cut and target_api == .metal:\n"
+                                          "        if input.position.x < 0.5:\n"
+                                          "            discard\n"
+                                          "    return float4(1.0)\n");
+    CHECK(described(mode).entry_points.size() == 1);
+    auto const by_mode
+        = sgl::compile_to_text({.source = mode, .source_name = "m.sgl", .entry_point = "mainPS", .target = t});
+    REQUIRE(by_mode.has_value());
+    CHECK(by_mode.value().warnings.empty());
+
+    // a number is judged at the compile's value and at its default: 16 idles lanes, 64 does not
+    auto const sized = [](cc::string_view default_size)
+    {
+        return cc::format("binding work:\n"
+                          "    values: mut buffer[float]\n"
+                          "@option const tile = {}\n"
+                          "@allow(\"workgroup-wastes-lanes\")\n"
+                          "@compute(tile) fun cs(@thread_id id: int3){{work}}:\n"
+                          "    work.values[id.x] = 1.0\n",
+                          default_size);
+    };
+    auto const at_64 = cc::vector<sgl::check::option_value>{{.name = "tile", .value = "64"}};
+    auto const met_by_default = sized("16");
+    auto const by_default = sgl::compile_to_text(
+        {.source = met_by_default, .source_name = "w.sgl", .entry_point = "cs", .target = t, .options = at_64});
+    REQUIRE(by_default.has_value());
+    CHECK(by_default.value().warnings.empty());
+    // nor is any other number tried: at 64 by default and given 64, nothing idles lanes
+    auto const never_met = sized("64");
+    auto const unmet = sgl::compile_to_text(
+        {.source = never_met, .source_name = "w.sgl", .entry_point = "cs", .target = t, .options = at_64});
+    REQUIRE(unmet.has_error());
+    CHECK(unmet.error().contains("unmet-expectation"));
+}
+
 TEST("sgl describe - a helper's warning one built stage allows stays the warning of a built sibling that does not")
 {
     // CHK-576: the allowance is of one entry point's body, so the sibling's compile still reports what it inlines
