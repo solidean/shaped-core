@@ -957,11 +957,6 @@ ASYNC_INVOCABLE_TEST("sg stream - a list recorded before a fresh texture's uploa
     REQUIRE(handle != nullptr);
     auto& c = *handle;
 
-    // dx12 picks a texture's layout from `has_pending_transfer` while the list records.
-    // So a list recorded before the upload was enqueued does not keep the layout the copy needs — issue: bug-sg-dx12-list-strands-transfer-layout.
-    if (c.backend() == sg::backend_kind::dx12)
-        SKIP("dx12 reads has_pending_transfer at record time to pick a texture's layout");
-
     sg::texture_description desc;
     desc.format = sg::pixel_format::rgba8_unorm;
     desc.dimension = sg::texture_dimension::d2;

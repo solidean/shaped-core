@@ -6,6 +6,8 @@ refs:
   - test: sg stream - a list recorded before a fresh texture's upload and submitted after it
   - file: libs/graphics/shaped-graphics/backends/dx12/src/shaped-graphics/backends/dx12/dx12_command_list.cc
   - symbol: has_pending_transfer
+closed: 2026-11-28
+resolution: obsolete
 ---
 
 # A list recorded before a transfer and submitted after it strands that transfer's layout on dx12
@@ -29,9 +31,9 @@ Both backends' `track_texture_access` force a texture to `general` while any tra
 But it is consulted while *recording*, and no transfer was pending then — the enqueue comes afterwards.
 That is not a timing accident.
 sg's happens-before model is the order of calls on the *context*, and recording is none of those events, so a value read there answers a question the model does not pose.
-[concepts/barriers.md](../concepts/barriers.md#what-orders-what-the-calls-on-the-context) is the contract.
+[concepts/barriers.md](../../../../concepts/barriers.md#what-orders-what-the-calls-on-the-context) is the contract.
 
-**The fix is the one [perf-sg-direction-specific-async-layout](perf-sg-direction-specific-async-layout.md) already names.**
+**The fix is the one [perf-sg-direction-specific-async-layout](../../../perf-sg-direction-specific-async-layout.md) already names.**
 Submit the fixup from the transfer actor, immediately before the job it belongs to, so a list submitting in between cannot get underneath it.
 Clamping the entry layout at finalize instead does not work — a vulkan copy command names its layout literally, captured at record, so the body and the entry barrier would disagree.
 Until then the guard is worth neither trusting nor deleting: rewrite it in terms of context-call order, or remove it with the fix.
@@ -44,3 +46,16 @@ The copy then waits on the fixup's direct-queue token, which is behind that list
 So the fixup has to stay ahead of every list that can wait on the copy, which is the enqueue, as now.
 What the layer objects to is call order: its copy-queue submit lands after the list's, though the GPU order is right.
 A fix has to make the copy's submit precede, in call order, any list submit that moves the layout, or have such a list not move it.
+
+## No longer reproduces (2026-11-28)
+
+Measured, not explained: no run reports the layer message any more.
+`sg stream - a list recorded before a fresh texture's upload and submitted after it` runs on dx12 again and passed 10 runs in a row,
+on hardware with the Agility SDK, and on the system runtime and WARP under `--thorough`.
+`sg - a list recorded before an async upload of its texture and submitted after it` is the issue's own reproduction made deterministic, and passes too:
+a 64 MiB upload ahead keeps the actor busy, so the texture's copy is still unsubmitted when the list moves its layout.
+The copy queue records no barrier of its own, and no file of it ever did, so the message must have come from the layer's cross-queue tracking,
+which either a fix in sg since or the runtime's layer no longer trips.
+A fix ordering the list's submit behind the copy's, a CPU wait before the submission lock, was written and set aside:
+it blocks a submit on a stream whose source has nothing yet, to prevent a failure nothing shows.
+Both tests stay as the guard; a layer message there reopens this.

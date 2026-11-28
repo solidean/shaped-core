@@ -35,4 +35,4 @@ An upload and a download of one resource cannot overlap either, since each waits
 So the transitions a transfer needs can be inserted on the direct queue in that same order, which makes call order match queue order and the interleave impossible.
 That is a real piece of work: a direct-queue submit placed against each job rather than at enqueue.
 So it is a quality-of-implementation follow-up rather than part of the change that found it.
-[bug-sg-dx12-list-strands-transfer-layout](bug-sg-dx12-list-strands-transfer-layout.md) wants the same change.
+[bug-sg-dx12-list-strands-transfer-layout](.closed/2026/11/bug-sg-dx12-list-strands-transfer-layout.md) once wanted the same change, and closed without it once it no longer reproduced.

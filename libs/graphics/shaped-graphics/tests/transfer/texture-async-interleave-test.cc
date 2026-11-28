@@ -278,3 +278,32 @@ ASYNC_INVOCABLE_TEST("sg - a list renders into one mip level of a texture while 
     ctx->advance_epoch();
     co_await ctx->idle_completion();
 }
+
+ASYNC_INVOCABLE_TEST("sg - a list recorded before an async upload of its texture and submitted after it",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    auto const tex = make_texture(ctx);
+
+    // The list needs the texture sampled on entry, decided while it records, when no transfer exists yet.
+    // Its submit moves the texture out of the layout the upload's copy needs before that copy is submitted; the GPU order
+    // is right, since the list waits for the upload, and the oracle is that neither the debug layer nor the bytes object.
+    // dx12 once reported the copy layout here (bug-sg-dx12-list-strands-transfer-layout, closed): a message is a regression.
+    // A large upload ahead of it keeps the transfer actor busy, so the texture's copy is still waiting when the list is
+    // submitted, rather than that depending on which thread gets there first.
+    auto const ballast = ctx->persistent.create_raw_buffer(isize(64) << 20, sg::buffer_usage::copy_dst);
+    REQUIRE(ballast != nullptr);
+    ctx->upload.bytes_to_buffer(ballast, cc::make_pinned_data(cc::vector<byte>::create_filled(isize(64) << 20, byte(7))));
+
+    auto cmd = ctx->create_command_list();
+    REQUIRE(cmd != nullptr);
+    cmd->ensure_layout(tex, sg::texture_layout::shader_texture);
+    ctx->upload.bytes_to_texture(tex, pinned_pattern(127));
+    ctx->submit_command_list(cc::move(cmd));
+
+    auto const bytes = co_await read_back(ctx, tex);
+    CHECK(matches(bytes, 127));
+
+    ctx->advance_epoch();
+    co_await ctx->idle_completion();
+}
