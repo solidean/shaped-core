@@ -41,6 +41,7 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     p = sub.add_parser(NAME, help="Run benchmarks, or list them all (defaults to a release preset)")
     a.preset(p)
     a.build_overrides(p)
+    a.server(p)
     a.emsdk(p)
     a.jsruntime(p)
     a.profile(p)
@@ -98,7 +99,7 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
             ctx.die("no *-test targets are configured. Is SC_BUILD_TESTS on?")
         results = dev.build([preset], names, root=ctx.root,
                             auto_configure=not args.no_configure,
-                            mirror=args.mirror_output, verbose=args.verbose)
+                            mirror=args.mirror_output, verbose=args.verbose, server=ctx.build_server(args))
         if not all(r.ok for r in results):
             ctx.fail_build(results, [preset])
 

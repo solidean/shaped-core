@@ -85,6 +85,7 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
                     "flags differ from its own.",
     )
     a.preset(t)
+    a.server(t)
     # Exactly one: a target of this repo (built for you), or any executable on disk.
     what = t.add_mutually_exclusive_group(required=True)
     what.add_argument("--target", metavar="TARGET",
@@ -548,7 +549,8 @@ def _trace(args: argparse.Namespace, ctx: Context) -> None:
     if not args.no_build:
         targets = [TRACER_TARGET] if external else [TRACER_TARGET, args.target]
         results = dev.build([preset], targets, root=ctx.root,
-                            auto_configure=True, mirror=args.mirror_output, verbose=args.verbose)
+                            auto_configure=True, mirror=args.mirror_output, verbose=args.verbose,
+                            server=ctx.build_server(args))
         if not all(r.ok for r in results):
             ctx.fail_build(results, [preset])
 

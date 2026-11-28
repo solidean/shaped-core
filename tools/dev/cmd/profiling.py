@@ -29,6 +29,7 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     )
     a.preset(counters)
     a.build_overrides(counters)
+    a.server(counters)
     a.emsdk(counters)
 
     merge = psub.add_parser(
@@ -100,7 +101,7 @@ def _run_counters(args: argparse.Namespace, ctx: Context) -> None:
     results = dev.build(
         [preset], [target.name], root=ctx.root,
         auto_configure=True, mirror=args.mirror_output, verbose=args.verbose,
-        emsdk_path=args.emsdk_path,
+        emsdk_path=args.emsdk_path, server=ctx.build_server(args),
     )
     if not all(r.ok for r in results):
         ctx.fail_build(results, [preset])

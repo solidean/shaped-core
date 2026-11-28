@@ -366,7 +366,7 @@ Such a project includes it before its own `project()`, which also keeps its `.rc
 
 ## The build server
 
-`build` and `test` hand their build step, and `test` its test runs, to a local build server, which keeps state such as a compile cache and test results between runs.
+Every command that builds hands its build step, and `test` its test runs, to a local build server, which keeps state such as a compile cache and test results between runs.
 **It is on wherever ccs is installed**, at `%LOCALAPPDATA%\ccs\bin\ccs.exe` or on PATH, for shaped-core and every project built on it; it is much faster than a plain build.
 It is never required: where it is not installed, everything builds and tests the plain way, without a warning.
 

@@ -19,6 +19,7 @@ NAME = "test-web"
 def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     p = sub.add_parser(NAME, help="Open the browser test runner (Emscripten); serves + opens via emrun")
     a.preset(p)
+    a.server(p)
     a.emsdk(p)
     p.add_argument("library", nargs="?",
                    help="Library to show alone (e.g. clean-core); omit for the combined page of all libraries")
@@ -48,6 +49,7 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
         results = dev.build(
             presets, [target], root=ctx.root,
             mirror=args.mirror_output, verbose=args.verbose, emsdk_path=args.emsdk_path,
+            server=ctx.build_server(args),
         )
         if not all(r.ok for r in results):
             ctx.fail_build(results, presets)

@@ -270,7 +270,8 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
     def build() -> Path:
         if not args.no_build:
             results = dev.build([preset], [_TARGET], root=ctx.root, auto_configure=True,
-                                mirror=args.mirror_output, verbose=args.verbose, emsdk_path=None, keep_going=False)
+                                mirror=args.mirror_output, verbose=args.verbose, emsdk_path=None, keep_going=False,
+                                server=ctx.build_server(args))
             if not all(r.ok for r in results):
                 ctx.fail_build(results, [preset])
         targets = ctx.discover(preset)
