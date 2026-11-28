@@ -181,6 +181,7 @@ TEST("slib - SGL's DXIL marks each back edge of an @unroll(false) loop as DXC's 
                                                 .native = sgl::emit::native_route::text});
         REQUIRE(text.has_value());
         CHECK(occurrences(text.value().text, "[loop]") == entry.rolled).dump("entry", entry.name);
+#ifdef CC_OS_WINDOWS // DXC compiles DXIL only on Windows, where its reflection is
         auto const built = compiler.value().compile({.source = text.value().text,
                                                      .entry_point = text.value().entry_point,
                                                      .stage = sg::shader_stage::compute,
@@ -194,6 +195,7 @@ TEST("slib - SGL's DXIL marks each back edge of an @unroll(false) loop as DXC's 
             .dump("entry", entry.name)
             .dump("ours", ours.value())
             .dump("theirs", theirs.value());
+#endif
     }
 }
 

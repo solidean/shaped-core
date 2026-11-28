@@ -61,7 +61,24 @@ namespace cc
 /// mimalloc: mi_collect(how == memory_trim::all). The system resource: nothing.
 /// About as costly as walking the thread's pages: meant after a large phase, not per allocation.
 void trim_thread_memory(memory_trim how = memory_trim::all);
+
+/// What the default memory resource holds now, as the allocator behind it counts it; costs the allocating path nothing.
+/// Reading it walks the allocator's heaps: meant for a debug view or a report, not every allocation.
+[[nodiscard]] cc::default_memory_usage query_default_memory_usage();
 } // namespace cc
+
+/// What the default memory resource holds, apart from what a process's private bytes count:
+/// those include every other allocator's, and the blocks the default one keeps freed for reuse.
+/// Both are -1 where the allocator behind it reports none, as the system allocator does (CC_HAS_MIMALLOC=0).
+struct cc::default_memory_usage
+{
+    /// The bytes of the blocks handed out and not taken back, by their size classes.
+    /// mimalloc merges a thread's counts a page at a time, so this runs behind by what threads did since, a few MB at most.
+    /// Memory taken past the default resource is not in it: std containers, another library's allocator, OS mappings.
+    i64 live_bytes = -1;
+    /// What the allocator holds from the OS, the blocks it keeps freed for reuse included.
+    i64 committed_bytes = -1;
+};
 
 /// Polymorphic memory resource interface powering cc::allocation<T>.
 /// Custom allocators implement this interface to provide pluggable allocation strategies.

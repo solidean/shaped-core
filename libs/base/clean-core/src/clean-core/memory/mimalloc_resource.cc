@@ -4,6 +4,8 @@
 #include <clean-core/common/macros.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/memory/large_allocations.hh>
+#include <clean-core/thread/atomic.hh>
+#include <mimalloc-stats.h>
 #include <mimalloc.h>
 
 #if defined(__EMSCRIPTEN__)
@@ -18,6 +20,14 @@ using namespace cc::primitive_defines;
 namespace
 {
 #if defined(__EMSCRIPTEN__)
+/// The bytes of the live blocks emscripten's malloc holds for this resource, which mimalloc's statistics do not see.
+constinit cc::atomic<i64> g_large_live = {0};
+
+[[nodiscard]] i64 large_live_bytes()
+{
+    return g_large_live.load(cc::memory_order_relaxed);
+}
+
 // **On wasm a block is mimalloc's exactly while its size is at most this**, and emscripten's malloc's above it.
 // wasm memory never shrinks and mimalloc never gives an arena back, so a growing vector strands an arena at every step
 // until the heap is gone (bug-cc-mimalloc-wasm-arenas-exhaust-heap); emscripten's malloc merges what is freed.
@@ -38,6 +48,12 @@ isize large_try_allocate_bytes(byte** out_ptr, isize min_bytes, isize alignment)
 }
 #else
 constexpr isize mi_max_bytes = isize(1) << 62;
+
+/// Every block is mimalloc's off wasm, so its statistics see all of them.
+[[nodiscard]] i64 large_live_bytes()
+{
+    return 0;
+}
 #endif
 
 isize mi_try_allocate_bytes(byte** out_ptr, isize min_bytes, isize max_bytes, isize alignment, void* userdata)
@@ -56,7 +72,12 @@ isize mi_try_allocate_bytes(byte** out_ptr, isize min_bytes, isize max_bytes, is
 
 #if defined(__EMSCRIPTEN__)
     if (min_bytes > mi_max_bytes)
-        return large_try_allocate_bytes(out_ptr, min_bytes, alignment);
+    {
+        auto const large = large_try_allocate_bytes(out_ptr, min_bytes, alignment);
+        if (large > 0)
+            g_large_live.fetch_add(large, cc::memory_order_relaxed);
+        return large;
+    }
 #endif
 
     void* p = mi_malloc_aligned(static_cast<size_t>(min_bytes), static_cast<size_t>(alignment));
@@ -92,6 +113,7 @@ void mi_deallocate_bytes(byte* p, isize bytes, isize alignment, void* userdata)
 #if defined(__EMSCRIPTEN__)
     if (bytes > mi_max_bytes)
     {
+        g_large_live.fetch_sub(bytes, cc::memory_order_relaxed);
         std::free(p);
         return;
     }
@@ -138,6 +160,17 @@ constinit cc::memory_resource const mimalloc_memory_resource = {
 } // namespace
 
 constinit cc::memory_resource const* const cc::default_memory_resource = &mimalloc_memory_resource;
+
+cc::default_memory_usage cc::query_default_memory_usage()
+{
+    // mimalloc's own statistics, which it keeps in release builds too: its block counts are merged a page at a time,
+    // its committed bytes as it commits
+    mi_stats_t_decl(stats);
+    if (!mi_stats_get(&stats))
+        return {};
+    return {.live_bytes = stats.malloc_normal.current + stats.malloc_huge.current + large_live_bytes(),
+            .committed_bytes = stats.committed.current};
+}
 
 void cc::trim_thread_memory(memory_trim how)
 {

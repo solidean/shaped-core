@@ -56,6 +56,13 @@ Which allocator backs the default is a build choice, and `CC_HAS_MIMALLOC` is wh
 Pass `&cc::system_memory_resource` as a custom resource to bypass mimalloc for one allocation; that is always well defined, and it is simply a no-op where mimalloc is not in the build.
 `SC_MIMALLOC=OFF` is what selects the second world, and the `sanitize-*` presets set it — [platforms.md](../../../../../docs/platforms.md#default-allocator-sc_mimalloc) is the why.
 
+**What the default resource holds** is `cc::query_default_memory_usage()`: the live bytes of its blocks, and what its allocator holds from the OS.
+It reads mimalloc's own statistics, which it keeps in release builds too, so the allocating path pays nothing for it.
+mimalloc merges a thread's block counts a page at a time, so the live bytes run behind by a few MB at most.
+A process's private bytes are no substitute: they count every other allocator's too, and the blocks mimalloc keeps freed for a thread to reuse.
+A count of our own, a thread-local add on every allocation and free, cost about 5 ns a pair on mimalloc's 60, which is why there is none.
+Without mimalloc both figures are `-1`: the system allocator reports neither.
+
 ## Gotchas
 
 - **The adopt/release escape hatch works today; the convenience API and `retype` do not.**

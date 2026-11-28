@@ -589,6 +589,7 @@ if(SC_BUILD_TESTS)
 
         tests/memory/allocation-test.cc
         tests/memory/large_allocations-test.cc
+        tests/memory/default_memory_usage-test.cc
         tests/memory/node_allocation-test.cc
         tests/memory/node_allocation-default-test.cc
         tests/memory/node_allocation-patterns-test.cc

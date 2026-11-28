@@ -418,6 +418,11 @@ rules:
     files: src/clean-core/memory/mimalloc_resource.cc
 
   - kind: allow-include
+    value: <mimalloc-stats.h>
+    reason: the statistics cc::query_default_memory_usage reads, which mimalloc keeps in every build
+    files: src/clean-core/memory/mimalloc_resource.cc
+
+  - kind: allow-include
     value: <iterator>
     reason: "std::forward_iterator tells which begin/end ranges hand out references that outlive a step; the header is opt-in because <iterator> costs every includer 100 ms or more"
     files: src/clean-core/sequence/iterator_ranges.hh
