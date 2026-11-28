@@ -57,3 +57,29 @@ Julius and Philip Trettner review the branch before it merges.
 Tests: the corpus's early-depth file, with an allowed cutout built for every target with the feature, and a helper's warning allowed by one stage and expected by another.
 Also `sgl allow` in expect-test.cc, and `sgl describe` and `sgl link` tests.
 Once merged, Quest3D's ocean.sgl takes `@allow` and its four bake warnings go.
+
+## Follow-ups decided by Julius (2026-11-28)
+
+1. **An allowance is judged across targets and option values.**
+   An `@allow` is met when its warning arises for any target or option value the file can be compiled for, and unmet (CHK-577) only when none raises it.
+   Today an allowance whose warning stands in a `const if target_language == .hlsl:` branch is unmet in every compile for another target and in `describe`:
+
+   ```sgl
+   @early_depth_test
+   @allow("early-depth-keeps-discarded")
+   @pixel fun mainPS(input: VSOutput) -> float4:
+       const if target_language == .hlsl:
+           if input.coverage < 0.5:
+               discard
+       return shade(input)
+   ```
+
+   Not implemented yet: options are substituted where their const is compiled, so judging other option values means checking again with them.
+   How options of large domains (an `int`, a `float`, an image format) are enumerated is a choice put to Julius.
+2. **A warning reported for the whole file is refused where it is allowed** (done, CHK-576).
+   Only `early-depth-keeps-discarded`, `nan-test-at-fast`, `needless-nonuniform`, `unroll-too-long` and `workgroup-wastes-lanes` are judged of an inlined body.
+   `@allow` of any other warning is `invalid-attribute-arguments`, "'no-effect' is reported for the whole file, a pipeline or a generic, not for an entry point, so no entry point can allow it".
+   Those are the parser's `spaced-attribute-arguments`, the AST pass's `redundant-yield` and `no-effect`, and a body's own `unreachable-code`.
+   So are the file's `unused-require`, a generic's `generic-not-instantiated` and a pipeline's `pixel-stage-ignores-view`.
+   A warning a test's body reaches as well stays the program's (CHK-402), so no allowance meets it; CHK-576 now says so.
+   Tests in expect-test.cc: each of the seven refused, every other warning accepted, each of the five met by an allowance, and a test-reached `unroll-too-long` unmet.

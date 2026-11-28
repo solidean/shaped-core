@@ -18,6 +18,36 @@ constexpr auto k_pin_usage = cc::string_view("on a function, @expect names what 
 constexpr auto k_allow_usage = cc::string_view("@allow names the warnings an entry point intends, each by its kind: "
                                                "@allow(\"early-depth-keeps-discarded\")");
 
+/// CHK-576: whether warning `kind` is judged of an entry point's inlined body, so an `@allow` of that entry point can
+/// meet it; any other is reported for the whole file, a pipeline or a generic, of no entry point.
+/// Every warning is named, so a new one is placed here by whoever adds it.
+bool is_judged_of_entry_point(diagnostic_kind kind)
+{
+    switch (kind)
+    {
+    // the flat tree's (CHK-566, CHK-436, CHK-521, CHK-389) and the uniformity pass's over each entry's copies (CHK-300)
+    case diagnostic_kind::early_depth_keeps_discarded:
+    case diagnostic_kind::nan_test_at_fast:
+    case diagnostic_kind::workgroup_wastes_lanes:
+    case diagnostic_kind::unroll_too_long:
+    case diagnostic_kind::needless_nonuniform:
+        return true;
+    // the parser's and the AST pass's, a body's check on its own (CHK-126, CHK-225), the file's requires once every
+    // entry point is flattened (CHK-265), a generic's (CHK-338) and a pipeline's (CHK-515)
+    case diagnostic_kind::spaced_attribute_arguments:
+    case diagnostic_kind::redundant_yield:
+    case diagnostic_kind::no_effect:
+    case diagnostic_kind::unreachable_code:
+    case diagnostic_kind::unused_require:
+    case diagnostic_kind::generic_not_instantiated:
+    case diagnostic_kind::pixel_stage_ignores_view:
+        return false;
+    default:
+        CC_ASSERT(default_severity_of(kind) != severity::warning, "every warning is placed above");
+        return false;
+    }
+}
+
 /// `text` as its `slot: access` items sorted and spaced one way, so a pin compares whatever order it is written in.
 cc::string normalized(cc::string_view text)
 {
@@ -166,6 +196,15 @@ void checker::read_allowances(symbol_id id, i32 file, ast::range_of<ast::attribu
             {
                 report(diagnostic_kind::invalid_attribute_arguments, file, where,
                        cc::format("'{}' is an error, which no entry point allows", name));
+                continue;
+            }
+            // CHK-576: one reported for the whole file belongs to no entry point, so no allowance could ever meet it
+            if (!is_judged_of_entry_point(kind.value()))
+            {
+                report(diagnostic_kind::invalid_attribute_arguments, file, where,
+                       cc::format("'{}' is reported for the whole file, a pipeline or a generic, not for an entry "
+                                  "point, so no entry point can allow it",
+                                  name));
                 continue;
             }
             out.entry_allowances.push_back({.function = id, .file = file, .kind = cc::string(name), .where = where});

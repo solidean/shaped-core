@@ -564,6 +564,8 @@ So intending a warning and testing for one are two attributes: `@expect` keeps i
 It stands on the entry point because a warning judged of an inlined body belongs to the entry points it was judged of (CHK-402).
 A helper shared by two stages may warn rightly in one and by design in the other.
 It names one exact warning kind: an error is no intent, and a pattern such as `*` would keep silencing warnings added later that nobody read.
+A warning of the whole file, such as `no-effect` or `unused-require`, is refused where the allowance is written rather than left unmet (CHK-577).
+No edit of the entry point's body could meet it, so an unmet allowance would send the author looking in the wrong place; the refusal says at once that the warning belongs to no entry point.
 
 ## CHK-577
 

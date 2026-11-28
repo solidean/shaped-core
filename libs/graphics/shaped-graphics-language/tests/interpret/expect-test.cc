@@ -173,6 +173,102 @@ TEST("sgl allow - an allowance names warning kinds, exactly, on an entry point")
           == "invalid-attribute-arguments user:[allow] only an entry point allows a warning, of its inlined body\n");
 }
 
+TEST("sgl allow - a warning reported for the whole file is refused where it is allowed")
+{
+    // CHK-576: the parser's, the AST pass's, a body's own check, the file's requires, a generic's and a pipeline's
+    constexpr cc::string_view file_level[] = {
+        "spaced-attribute-arguments", "redundant-yield",          "no-effect", "unreachable-code", "unused-require",
+        "generic-not-instantiated",   "pixel-stage-ignores-view",
+    };
+    for (auto const kind : file_level)
+    {
+        auto const outcome = outcome_of(cutout(cc::format("@allow(\"{}\")\n", kind)));
+        CHECK(outcome.contains(cc::format("invalid-attribute-arguments user:[\"{}\"] '{}' is reported for the whole "
+                                          "file, a pipeline or a generic, not for an entry point, so no entry point "
+                                          "can allow it\n",
+                                          kind, kind)));
+        // refused, so never unmet as well
+        CHECK(!outcome.contains("unmet-expectation"));
+    }
+    // every other warning is judged of an inlined body, and an allowance of it is met or unmet (CHK-577)
+    for (auto k = 0; k <= int(sgl::k_last_diagnostic_kind); ++k)
+    {
+        auto const kind = sgl::diagnostic_kind(k);
+        auto const name = sgl::to_string(kind);
+        auto is_file_level = false;
+        for (auto const f : file_level)
+            is_file_level = is_file_level || f == name;
+        if (sgl::default_severity_of(kind) != sgl::severity::warning || is_file_level)
+            continue;
+        auto const outcome = outcome_of(cutout(cc::format("@allow(\"{}\")\n", name)));
+        CHECK(!outcome.contains("invalid-attribute-arguments"));
+        if (kind != sgl::diagnostic_kind::early_depth_keeps_discarded)
+            CHECK(outcome.contains(cc::format("unmet-expectation user:[\"{}\"]", name)));
+    }
+}
+
+TEST("sgl allow - each warning judged of an inlined body is met by an allowance of its entry point")
+{
+    // CHK-576: one case per kind, beside the corpus's early-depth cutout; each is built and reports nothing
+    constexpr auto work = cc::string_view("binding work:\n"
+                                          "    values: mut buffer[float]\n");
+    auto const met = [&](cc::string_view kind, cc::string_view entry)
+    {
+        auto const source = cc::format("{}@allow(\"{}\")\n{}", work, kind, entry);
+        CHECK(outcome_of(cc::format("{}{}", work, entry)).starts_with(kind));
+        CHECK(outcome_of(source) == "");
+        CHECK(check_sources(read_prelude(), source).module.entry_points.size() == 1);
+    };
+    met("nan-test-at-fast", "@compute(64) fun folds(@thread_id id: int3){work}:\n"
+                            "    let v = work.values[id.x]\n"
+                            "    work.values[id.x] = if v != v => 0.0 else v\n");
+    met("workgroup-wastes-lanes", "@compute(16) fun small(@thread_id id: int3){work}:\n"
+                                  "    work.values[id.x] = 1.0\n");
+    met("unroll-too-long", "@compute(64) fun sums(@thread_id id: int3){work}:\n"
+                           "    let mut total = 0\n"
+                           "    @unroll\n"
+                           "    for i in 0 ..< 257:\n"
+                           "        total += i\n"
+                           "    work.values[id.x] = float(total)\n");
+}
+
+TEST("sgl allow - a needless nonuniform mark is met by an allowance of its entry point")
+{
+    // CHK-300, CHK-576
+    constexpr auto header = cc::string_view("require binding_arrays\n"
+                                            "binding textures:\n"
+                                            "    maps: texture_2d[float4][16]\n"
+                                            "    s: sampler\n"
+                                            "binding draw:\n"
+                                            "    slot: int\n"
+                                            "struct varyings:\n"
+                                            "    @position position: hpos4\n"
+                                            "    uv: float2\n");
+    constexpr auto entry = cc::string_view("@pixel fun needless_ps(v: varyings){textures, draw} -> float4:\n"
+                                           "    return textures.maps[nonuniform draw.slot].sample(v.uv, textures.s)\n");
+    CHECK(outcome_of(cc::format("{}{}", header, entry)).starts_with("needless-nonuniform"));
+    CHECK(outcome_of(cc::format("{}@allow(\"needless-nonuniform\")\n{}", header, entry)) == "");
+}
+
+TEST("sgl allow - a warning a test reaches as well stays the program's, and no allowance meets it")
+{
+    // CHK-402, CHK-577: what the test reaches is of every compile, so the entry point's allowance takes nothing
+    auto const outcome = outcome_of("binding work:\n"
+                                    "    values: mut buffer[float]\n"
+                                    "fun sum() -> int:\n"
+                                    "    let mut total = 0\n"
+                                    "    @unroll\n"
+                                    "    for i in 0 ..< 257:\n"
+                                    "        total += i\n"
+                                    "    return total\n"
+                                    "test sum() == 32896\n"
+                                    "@allow(\"unroll-too-long\")\n"
+                                    "@compute(64) fun sums(@thread_id id: int3){work}:\n"
+                                    "    work.values[id.x] = float(sum())\n");
+    CHECK(outcome.contains("unroll-too-long"));
+    CHECK(outcome.contains("unmet-expectation user:[\"unroll-too-long\"]"));
+}
+
 TEST("sgl allow - every diagnostic kind is found by the name it is spelled as")
 {
     for (auto k = 0; k <= int(sgl::k_last_diagnostic_kind); ++k)

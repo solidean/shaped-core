@@ -1173,7 +1173,10 @@ fun f() -> float:
   Such a warning is reported nowhere, and the entry point is built as it is without the attribute.
   Another entry point the same warning was judged of keeps it, since the allowance is of one entry point's body.
   Each argument names one warning by its kind, exactly as its diagnostic spells it, and several arguments or several `@allow`s name several.
-  Only a warning judged of an inlined body can be allowed; one judged of the file, such as `no-effect`, belongs to no entry point, and an allowance of it is unmet (CHK-577).
+  Only a warning judged of an inlined body can be allowed: `early-depth-keeps-discarded`, `nan-test-at-fast`, `needless-nonuniform`, `unroll-too-long` and `workgroup-wastes-lanes`.
+  Every other warning is reported for the whole file, a pipeline or a generic, and belongs to no entry point.
+  So an allowance of it, such as `@allow("no-effect")`, is `invalid-attribute-arguments` where it is written, since nothing could ever meet it.
+  A warning a test's body reaches as well stays the program's (CHK-402), and no allowance meets it.
   A kind no diagnostic has, an error's kind and a pattern are `invalid-attribute-arguments`, since an error is never intended and a pattern would allow warnings nobody named.
   So are an `@allow` with no argument, a named argument, and an `@allow` on a function that is no entry point.
   An allowed warning is nothing an `@expect` of the entry point meets (CHK-403), which stays a test of diagnostics.
