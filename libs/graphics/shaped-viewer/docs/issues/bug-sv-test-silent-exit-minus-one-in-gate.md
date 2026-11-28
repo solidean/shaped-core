@@ -3,6 +3,8 @@ created: 2026-11-03
 priority: next
 refs:
   - test: shaped-viewer-test
+claimed-by: Claude (for Julius Nehring-Wirxel)
+claimed-at: 2026-11-28T12:39Z
 ---
 
 # shaped-viewer-test exits with -1, silently, partway through a gate's run
