@@ -6,6 +6,8 @@ refs:
   - file: libs/graphics/shaped-graphics/backends/dx12/src/shaped-graphics/backends/dx12/dx12_expected_messages.hh
   - file: libs/graphics/shaped-graphics/backends/dx12/src/shaped-graphics/backends/dx12/dx12_context.create.cc:301-316
   - issue: perf-sg-optional-clear-value
+claimed-by: Claude (for Julius Nehring-Wirxel)
+claimed-at: 2026-11-28T15:08Z
 ---
 
 # A shaped-viewer run raises thousands of allowlisted debug-layer warnings
