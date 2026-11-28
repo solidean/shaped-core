@@ -4,6 +4,7 @@
 #include <clean-core/string/string.hh>
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_coroutine.hh>
+#include <clean-core/thread/native_thread.hh>
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
 
@@ -1373,3 +1374,52 @@ TEST("async - a frame that throws AFTER resolving keeps its value", nx::config::
 #endif
     CHECK(a->has_value());
 }
+
+TEST("async - a passive wait on a ready node returns at once")
+{
+    auto const ready = cc::make_async_from_value(3);
+    CHECK(cc::async_wait_passively_for(ready, 0.0));
+    cc::async_wait_passively(ready);
+    CHECK(*ready->try_value() == 3);
+}
+
+TEST("async - a passive wait with no time left reports a pending node as pending")
+{
+    auto const ext = cc::make_async_manual<int>();
+    CHECK(!cc::async_wait_passively_for(ext, 0.0));
+    CHECK(!ext->is_ready());
+    ext->push_value(1);
+    CHECK(cc::async_wait_passively_for(ext, 0.0));
+}
+
+#if CC_HAS_THREADS
+TEST("async - a passive wait sees a node another thread finishes, and runs nothing meanwhile")
+{
+    // Work runnable on this thread's own scheduler must stay where it is: the wait only watches.
+    cc::singlethreaded_scheduler sched;
+    cc::async_worker_scope const scope(sched);
+    auto const bystander = cc::make_async_lazy<int>([] { return 5; });
+    bystander->schedule();
+
+    auto const ext = cc::make_async_manual<int>();
+    auto pusher = cc::native_thread::start([ext] { ext->push_value(42); });
+    cc::async_wait_passively(ext);
+    pusher.join();
+
+    REQUIRE(ext->try_value() != nullptr);
+    CHECK(*ext->try_value() == 42);
+    CHECK(!bystander->is_ready());
+    sched.run_until([&] { return bystander->is_ready(); });
+    CHECK(*bystander->try_value() == 5);
+}
+
+TEST("async - a bounded passive wait returns as soon as the node finishes")
+{
+    auto const ext = cc::make_async_manual<int>();
+    auto pusher = cc::native_thread::start([ext] { ext->push_value(7); });
+    // a bound far past any push, so it passes only by being woken
+    CHECK(cc::async_wait_passively_for(ext, 600.0));
+    pusher.join();
+    CHECK(*ext->try_value() == 7);
+}
+#endif

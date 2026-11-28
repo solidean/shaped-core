@@ -313,6 +313,34 @@ bool cc::impl::async_drive_until_ready_for(async_node_base& root, i64 timeout_ms
     return true;
 }
 
+bool cc::impl::async_wait_passively(async_node_base& root, double max_secs)
+{
+    if (root.is_ready())
+        return true;
+#if CC_HAS_THREADS
+    // No home and no pumps: the latch on the root is the only thing that wakes it, so it runs nothing of anyone's.
+    auto parker = cc::impl::async_parker(root, nullptr, false);
+    auto const deadline = cc::current_time_steady_secs() + max_secs;
+    while (!root.is_ready())
+    {
+        if (max_secs < 0)
+        {
+            parker.park();
+            continue;
+        }
+        auto const left = deadline - cc::current_time_steady_secs();
+        if (left <= 0)
+            return root.is_ready();
+        parker.park_for(left);
+    }
+    return true;
+#else
+    CC_ASSERT(max_secs >= 0, "an unbounded passive wait cannot end without threads: nothing else could finish the "
+                             "node");
+    return false;
+#endif
+}
+
 cc::async_scheduler& cc::ambient_async_scheduler()
 {
     if (auto* const bound = async_scheduler::current_or_null())

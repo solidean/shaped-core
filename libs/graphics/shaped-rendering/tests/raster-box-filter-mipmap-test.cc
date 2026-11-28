@@ -181,3 +181,49 @@ ASYNC_INVOCABLE_TEST("sr - raster box filter mipmap fills a tail of the chain",
     CHECK(level_2_red == int(supplied));
     CHECK(level_3_red == int(supplied));
 }
+
+// An array is filtered slice by slice: each slice's chain is its own, and no slice bleeds into another.
+ASYNC_INVOCABLE_TEST("sr - raster box filter mipmap fills each slice of an sRGB array on its own",
+                     (sg::context_handle const& ctx_h),
+                     exclusive("sg-reload-generation"))
+{
+    REQUIRE(ctx_h != nullptr);
+    sg::context& ctx = *ctx_h;
+    nx::allow_warnings("was closed and reopened around a barrier", "sg");
+
+    auto const tex = ctx.persistent.create_texture_2d_array({.format = sg::pixel_format::rgba8_unorm_srgb,
+                                                             .width = 2,
+                                                             .height = 2,
+                                                             .mip_levels = 2,
+                                                             .array_layers = 2,
+                                                             .usage = raster_mip_usage});
+    CHECK(sr::raster_box_filter_mipmap_routine::level_count(tex) == 1);
+
+    // The same workaround as above: the format's instance is registered before the first execute.
+    sr::raster_box_filter_mipmap_routine::prewarm(ctx, sg::pixel_format::rgba8_unorm_srgb);
+    (void)co_await ctx.routines.idle_completion();
+
+    constexpr u8 sentinel = 77;
+    auto up = ctx.create_command_list();
+    up->upload.bytes_to_texture(tex.raw(), rgba8_half_and_half(0, 255), {.mip_level = 0, .array_layer = 0});
+    up->upload.bytes_to_texture(tex.raw(), rgba8_constant(4, 255), {.mip_level = 0, .array_layer = 1});
+    for (auto layer = 0; layer < 2; ++layer)
+        up->upload.bytes_to_texture(tex.raw(), rgba8_constant(1, sentinel), {.mip_level = 1, .array_layer = layer});
+    REQUIRE(sr::raster_box_filter_mipmap_routine::execute(*up, tex) == sg::routine_outcome::executed);
+    ctx.submit_command_list(cc::move(up));
+    ctx.advance_epoch();
+    co_await ctx.idle_completion();
+
+    auto dl = ctx.create_command_list();
+    auto const first = dl->download.bytes_from_texture(tex.raw(), {.mip_level = 1, .array_layer = 0});
+    auto const second = dl->download.bytes_from_texture(tex.raw(), {.mip_level = 1, .array_layer = 1});
+    ctx.submit_command_list(cc::move(dl));
+    ctx.advance_epoch();
+
+    // The first slice's average of 0 and 255 in linear light, as for a 2D texture.
+    auto const first_value = co_await first_red(first);
+    CHECK(first_value >= 186);
+    CHECK(first_value <= 189);
+    // The second slice is white throughout, so anything of the first one's black in it bled across.
+    CHECK(co_await first_red(second) == 255);
+}

@@ -257,6 +257,12 @@ There is no "not yet" outcome to handle: whatever the ambient scheduler cannot f
 A node awaiting a push that never comes therefore hangs rather than reporting no-progress, which is the honest failure —
 `cc::try_async_blocking_get_for(root, timeout_ms)` is the way out for a caller that cannot afford it, and the one place `cc::optional` survives.
 
+Every one of these drives, so the blocked thread runs other work while it waits.
+A caller that must not, because it holds a lock or a reference that other work could invalidate, waits passively instead:
+`cc::async_wait_passively_for(root, max_secs)` parks on the node's completion, runs no scheduler step, pump or home, and returns whether the node is ready.
+`cc::async_wait_passively(root)` is the same with no bound.
+It only ever sees a node another thread finishes, so without threads the bounded form reports what is ready already, and the unbounded one must not be called.
+
 **This is a bridge between synchronous and asynchronous code, and nothing more.**
 Reaching for it often is the signal to step back: make the surrounding code async, write an `ASYNC_TEST`, hand the async to a caller that can await it.
 In a library's tests it is a `blocking-wait` lint finding, allowed by file only where the wait, or a scheduler the test owns, is the subject.

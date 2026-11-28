@@ -3,8 +3,6 @@ created: 2026-11-22
 refs:
   - file: libs/graphics/shaped-graphics/tests/routine/routine-test.cc:537-556
   - test: sg - an idle registry's idle_completion is ready when asked
-closed: 2026-11-27
-resolution: fixed
 ---
 
 # The idle-registry test fails now and then under a full run
@@ -21,3 +19,8 @@ Two tests in `routine-test.cc` registered routines on the shared context without
 They are `try_acquire hands out a read-only scope…` and `a routine compiles a shader and dispatches it end to end`.
 Either one running beside the idle-registry test leaves the registry pending at its first check, so both now hold the tag.
 Read from the tags rather than caught in the act; the flake was too rare to reproduce on demand.
+
+## Seen again
+
+It failed once more in a full `dev.py ship` run on 2026-11-28, on the hardware dx12 context, after the two tests above took the tag, and passed thirty runs of itself straight after.
+So some other test still registers a routine on the shared context without `sg-reload-generation`, or the hypothesis misses the cause.

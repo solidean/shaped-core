@@ -5,6 +5,8 @@
 #include <shaped-rendering/raster_box_filter_mipmap_routine.hh>
 #include <sr_sgl_shaders.hh>
 
+#include <type_traits>
+
 namespace sr
 {
 cc::shared_async<cc::unit> raster_box_filter_mipmap_routine::init(sg::routine_init_scope scope)
@@ -58,9 +60,31 @@ int raster_box_filter_mipmap_routine::level_count(sg::texture_2d const& texture,
     return first_level >= levels ? 0 : levels - first_level;
 }
 
+int raster_box_filter_mipmap_routine::level_count(sg::texture_2d_array const& texture, int first_level)
+{
+    CC_ASSERT(first_level >= 1, "level 0 is the source of the chain and is never generated");
+    auto const levels = texture.mip_levels();
+    return first_level >= levels ? 0 : levels - first_level;
+}
+
 sg::routine_outcome raster_box_filter_mipmap_routine::execute(sg::command_list& cmd,
                                                               sg::texture_2d const& texture,
                                                               int first_level)
+{
+    return _execute(cmd, texture, first_level);
+}
+
+sg::routine_outcome raster_box_filter_mipmap_routine::execute(sg::command_list& cmd,
+                                                              sg::texture_2d_array const& texture,
+                                                              int first_level)
+{
+    return _execute(cmd, texture, first_level);
+}
+
+template <class Texture>
+sg::routine_outcome raster_box_filter_mipmap_routine::_execute(sg::command_list& cmd,
+                                                               Texture const& texture,
+                                                               int first_level)
 {
     if (level_count(texture, first_level) == 0)
         return sg::routine_outcome::executed; // nothing to generate is not a refusal
@@ -77,27 +101,43 @@ sg::routine_outcome raster_box_filter_mipmap_routine::execute(sg::command_list& 
         return sg::routine_outcome::declined;
 
     auto& ctx = cmd.context();
+    constexpr auto is_array = std::is_same_v<Texture, sg::texture_2d_array>;
+    auto const slices = texture.raw()->array_layers();
 
     auto const levels = texture.mip_levels();
-    for (auto level = first_level; level < levels; ++level)
-    {
-        auto const group = ctx.transient.create_binding_group(
-            cmd, self->_group_layout,
-            sgl_shaders::raster_box_filter_mipmap::raster_mipmap_source{
-                .level = texture.as_texture_view({.mips = {.start = level - 1, .count = 1}})});
+    for (auto slice = 0; slice < slices; ++slice)
+        for (auto level = first_level; level < levels; ++level)
+        {
+            auto const source_mips = sg::view_range{.start = level - 1, .count = 1};
+            auto source = [&]
+            {
+                if constexpr (is_array)
+                    return texture.as_texture_2d_view({.slice = slice, .mips = source_mips});
+                else
+                    return texture.as_texture_view({.mips = source_mips});
+            }();
+            auto const target = [&]
+            {
+                if constexpr (is_array)
+                    return texture.as_render_target_2d_view({.slice = slice, .mip = level});
+                else
+                    return texture.as_render_target_view({.mip = level});
+            }();
+            auto const group = ctx.transient.create_binding_group(
+                cmd, self->_group_layout, sgl_shaders::raster_box_filter_mipmap::raster_mipmap_source{.level = source});
 
-        // Discarded rather than preserved: the pass covers the whole level, so loading what is there costs
-        // bandwidth for texels every one of which is about to be overwritten.
-        //
-        // One scope per level, closed before the next opens.
-        // That is not tidiness: the scope end is what releases the output-merger binding, and level N could not
-        // transition to a sampled read while it is still bound as a target.
-        auto scope = cmd.raster.render_to({.color_targets = {texture.as_render_target_view({.mip = level}).discarded()}});
+            // Discarded rather than preserved: the pass covers the whole level, so loading what is there costs
+            // bandwidth for texels every one of which is about to be overwritten.
+            //
+            // One scope per level, closed before the next opens.
+            // That is not tidiness: the scope end is what releases the output-merger binding, and level N could not
+            // transition to a sampled read while it is still bound as a target.
+            auto scope = cmd.raster.render_to({.color_targets = {target.discarded()}});
 
-        scope.bind_pipeline(**built);
-        scope.bind_group(0, *group);
-        scope.draw({.vertex_range = {.offset = 0, .size = 3}});
-    }
+            scope.bind_pipeline(**built);
+            scope.bind_group(0, *group);
+            scope.draw({.vertex_range = {.offset = 0, .size = 3}});
+        }
     return sg::routine_outcome::executed;
 }
 } // namespace sr

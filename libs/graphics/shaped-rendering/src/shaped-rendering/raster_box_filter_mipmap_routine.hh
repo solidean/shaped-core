@@ -17,9 +17,9 @@
 /// `sg::supports_typed_uav` is the predicate that decides which routine a texture needs, and a caller commits to the
 /// answer at creation time: this one needs `render_target` usage, the compute one `image`.
 ///
-/// 2D non-array textures only.
-/// A render-target view is 2D-shaped, and an array would mean one pass per slice rather than one dispatch across
-/// all of them — so every other shape stays on the compute path, which no sRGB shape reaches today.
+/// 2D textures and 2D arrays.
+/// A render-target view is 2D-shaped, so an array takes one pass per slice and level, each slice read and written as a 2D texture of its own,
+/// where the compute path takes one dispatch across all slices; every other shape stays on the compute path.
 ///
 /// A render routine, **parametrized on the texture's pixel format**: a raster pipeline bakes its color-target format
 /// in, so this is one unit of work per format rather than one holding a map it fills lazily.
@@ -41,14 +41,24 @@ public:
                                                      sg::texture_2d const& texture,
                                                      int first_level = 1);
 
-    /// How many passes `execute` would record — what a caller budgeting GPU work per frame needs to know before it
-    /// commits to the call.
+    /// The same for every slice of a 2D array, averaging within a slice and never across slices.
+    [[nodiscard]] static sg::routine_outcome execute(sg::command_list& cmd,
+                                                     sg::texture_2d_array const& texture,
+                                                     int first_level = 1);
+
+    /// How many levels `execute` would generate — what a caller budgeting GPU work per frame needs to know before it
+    /// commits to the call; an array records that many passes per slice.
     [[nodiscard]] static int level_count(sg::texture_2d const& texture, int first_level = 1);
+    [[nodiscard]] static int level_count(sg::texture_2d_array const& texture, int first_level = 1);
 
 protected:
     cc::shared_async<cc::unit> init(sg::routine_init_scope scope) override;
 
 private:
+    /// Both overloads of execute, for a 2D texture or a 2D array; defined and instantiated in the .cc alone.
+    template <class Texture>
+    [[nodiscard]] static sg::routine_outcome _execute(sg::command_list& cmd, Texture const& texture, int first_level);
+
     sg::binding_group_layout_handle _group_layout;
 
     /// The one pipeline this instance is for — its format is params().

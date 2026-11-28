@@ -127,28 +127,16 @@ cc::mutex<cc::map<cc::hash128, slib::preprocessed_source>>& memory_tier()
 /// A compile may run where its caller holds a lock or a reference that other work could invalidate, so it only waits.
 /// The store answers on its own thread, which is what lets a wait alone see the answer arrive.
 /// Nothing within `patience_secs` is a miss, and nullopt waits for the answer however long it takes.
-///
-/// TEMPORARY(debt-slib-sgl-emit-passive-poll): a hand-rolled poll, standing in for a passive timed wait on a `cc::async` node, which clean-core lacks.
-/// `cc::try_async_blocking_get_for` is the timed wait it has, and that one drives the ambient scheduler, which this must not.
-/// Replace the loop with that wait once it lands; issue: feat-cc-async-passive-timed-wait
 cc::optional<bcache::cache_hit> passive_get(bcache::blob_cache& store, cc::hash128 key, cc::optional<double> patience_secs)
 {
     auto const node = store.get(slib::impl::sgl_emit_persistent_key(key));
-    auto const deadline = cc::current_time_steady_secs() + patience_secs.value_or(0.0);
-    auto yields = 0;
-    while (!node->is_ready())
+    if (patience_secs.has_value())
     {
-        if (patience_secs.has_value() && cc::current_time_steady_secs() > deadline)
+        if (!cc::async_wait_passively_for(node, cc::max(patience_secs.value(), 0.0)))
             return {};
-        // A read is usually answered within a few yields; past those, a short sleep keeps the core free.
-        if (yields < 256)
-        {
-            cc::this_thread_yield();
-            ++yields;
-        }
-        else
-            cc::this_thread_sleep_secs(0.0002);
     }
+    else
+        cc::async_wait_passively(node);
     auto const* const value = node->try_value();
     if (value == nullptr)
         return {};

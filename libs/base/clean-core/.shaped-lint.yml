@@ -482,8 +482,8 @@ rules:
 
   # Blocking waits kept in tests, each where the wait or a scheduler the test drives is what is under test.
   - kind: allow-blocking-wait
-    value: [async_blocking_get, try_async_blocking_get, async_blocking_get_on, try_async_blocking_get_on, try_async_blocking_get_for]
-    reason: the blocking getters, the pool's drive and the pump registry are these files' subject
+    value: [async_blocking_get, try_async_blocking_get, async_blocking_get_on, try_async_blocking_get_on, try_async_blocking_get_for, async_wait_passively, async_wait_passively_for]
+    reason: the blocking getters and the passive waits, the pool's drive and the pump registry are these files' subject
     files:
       - tests/thread/async-test.cc
       - tests/thread/async-pool-test.cc
