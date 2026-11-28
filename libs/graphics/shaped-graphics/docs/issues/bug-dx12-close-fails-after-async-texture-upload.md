@@ -3,6 +3,8 @@ created: 2026-11-28
 tags: [dx12]
 refs:
   - file: libs/graphics/shaped-graphics/backends/dx12/src/shaped-graphics/backends/dx12/dx12_command_list.cc
+claimed-by: Claude (for Philip Trettner)
+claimed-at: 2026-11-28T18:50Z
 ---
 
 # A direct list writing a texture the context's upload filled in part sometimes fails to close on dx12
