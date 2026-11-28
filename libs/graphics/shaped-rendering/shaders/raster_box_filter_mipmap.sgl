@@ -4,7 +4,7 @@
 // This is the path for a format that cannot be a storage image, which in practice means an sRGB one.
 // Loading decodes the transfer function and a render-target write encodes it again, so the average is taken over linear values.
 //
-// 2D non-array textures only: a render target is 2D-shaped, and every other shape stays on the compute path.
+// 2D textures, and each slice of a 2D array read and written as a 2D texture of its own, since a render target is 2D-shaped.
 // The routine binds the source as a single-mip view of level N and renders into level N+1, so no level is read and written by one pass.
 
 binding raster_mipmap_source:

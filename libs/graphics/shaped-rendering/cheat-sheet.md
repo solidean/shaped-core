@@ -469,6 +469,7 @@ The same box filter through the raster pipeline — one rendering scope per gene
 ```cpp
 #include <shaped-rendering/raster_box_filter_mipmap_routine.hh>
 sr::raster_box_filter_mipmap_routine::execute(cmd, texture_2d, first_level = 1);  // generates first_level..end from the level below each
+sr::raster_box_filter_mipmap_routine::execute(cmd, texture_2d_array, first_level = 1);  // the same per slice: a pass per slice and level
 sr::raster_box_filter_mipmap_routine::level_count(texture_2d, first_level = 1);   // -> int — passes it WOULD record, for a work budget
 // FOR the formats the compute routine cannot touch: a typed UAV over an sRGB format is refused, and D3D12 refuses it by REMOVING THE DEVICE
 //   `sg::supports_typed_uav(format)` is the predicate that picks between the two, and the caller commits at creation time:
