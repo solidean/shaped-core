@@ -83,7 +83,7 @@ Deliberately **not** here yet:
 
 - **Placed / transient-bump textures** — the transient scope allocates *dedicated* for now; a
   texture-capable transient `memory_heap` is the missing piece.
-- **Texture→texture and texture→buffer copies on the device** — the one device-side copy into a texture is `cmd.copy.buffer_to_texture`.
+- **Texture→buffer copies on the device** — a texture is copied into another with `cmd.copy.texture_to_texture`, and read back to the host with `cmd.download`.
 - **Mip generation / format conversion** — belongs in shaped-rendering (sr), on top of these copies.
 
 ## See also

@@ -781,6 +781,32 @@ void metal_command_list::copy_buffer_to_texture(raw_buffer_handle src,
         MTL::Origin(NS::UInteger(region.offset[0]), NS::UInteger(region.offset[1]), NS::UInteger(region.offset[2])));
 }
 
+void metal_command_list::copy_texture_to_texture(raw_texture_handle src,
+                                                 subresource_index const& src_subresource,
+                                                 texture_region const& region,
+                                                 raw_texture_handle dst,
+                                                 subresource_index const& dst_subresource,
+                                                 tg::pos3i dst_offset)
+{
+    CC_ASSERT(!src->is_expired(), "copy source is a transient texture used past its epoch");
+    CC_ASSERT(!dst->is_expired(), "copy target is a transient texture used past its epoch");
+
+    suspend_render_encoder("a copy");
+
+    declare_texture(src, sg::pipeline_stage_flag::copy, sg::access_flag::copy_read);
+    declare_texture(dst, sg::pipeline_stage_flag::copy, sg::access_flag::copy_write);
+    flush_barriers();
+
+    auto const& mtl_src = static_cast<metal_texture const&>(*src);
+    auto const& mtl_dst = static_cast<metal_texture const&>(*dst);
+    compute_encoder()->copyFromTexture(
+        mtl_src.texture(), NS::UInteger(src_subresource.array_layer), NS::UInteger(src_subresource.mip_level),
+        MTL::Origin(NS::UInteger(region.offset[0]), NS::UInteger(region.offset[1]), NS::UInteger(region.offset[2])),
+        MTL::Size(NS::UInteger(region.size[0]), NS::UInteger(region.size[1]), NS::UInteger(region.size[2])),
+        mtl_dst.texture(), NS::UInteger(dst_subresource.array_layer), NS::UInteger(dst_subresource.mip_level),
+        MTL::Origin(NS::UInteger(dst_offset[0]), NS::UInteger(dst_offset[1]), NS::UInteger(dst_offset[2])));
+}
+
 void metal_command_list::compute_bind_pipeline(compute_pipeline const& pipeline)
 {
     auto const& mtl_pipeline = static_cast<metal_compute_pipeline const&>(pipeline);

@@ -133,6 +133,14 @@ protected:
                                         subresource_index const& subresource,
                                         texture_region const& region) = 0;
 
+    // The facade has resolved the box and checked the formats, the subresources and the bounds on both sides.
+    virtual void copy_texture_to_texture(raw_texture_handle src,
+                                         subresource_index const& src_subresource,
+                                         texture_region const& region,
+                                         raw_texture_handle dst,
+                                         subresource_index const& dst_subresource,
+                                         tg::pos3i dst_offset) = 0;
+
     virtual void compute_bind_pipeline(compute_pipeline const& pipeline) = 0;
     virtual void compute_bind_group(int group_index, binding_group const& group) = 0;
     virtual void compute_dispatch(int x, int y, int z) = 0;

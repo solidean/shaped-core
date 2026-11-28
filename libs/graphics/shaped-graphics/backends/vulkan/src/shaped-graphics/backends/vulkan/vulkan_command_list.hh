@@ -328,6 +328,12 @@ protected:
                                 sg::raw_texture_handle dst,
                                 sg::subresource_index const& subresource,
                                 sg::texture_region const& region) override;
+    void copy_texture_to_texture(sg::raw_texture_handle src,
+                                 sg::subresource_index const& src_subresource,
+                                 sg::texture_region const& region,
+                                 sg::raw_texture_handle dst,
+                                 sg::subresource_index const& dst_subresource,
+                                 tg::pos3i dst_offset) override;
 
     // Compute recording (reached through cmd.compute). Bodies in vulkan_command_list.compute.cc.
     void compute_bind_pipeline(sg::compute_pipeline const& pipeline) override;

@@ -834,6 +834,47 @@ void dx12_command_list::copy_buffer_to_texture(sg::raw_buffer_handle src,
     _list->CopyTextureRegion(&dst_loc, UINT(fp.x), UINT(fp.y), UINT(fp.z), &src_loc, nullptr);
 }
 
+void dx12_command_list::copy_texture_to_texture(sg::raw_texture_handle src,
+                                                sg::subresource_index const& src_subresource,
+                                                sg::texture_region const& region,
+                                                sg::raw_texture_handle dst,
+                                                sg::subresource_index const& dst_subresource,
+                                                tg::pos3i dst_offset)
+{
+    auto const s = std::dynamic_pointer_cast<dx12_texture const>(src);
+    auto const d = std::dynamic_pointer_cast<dx12_texture const>(dst);
+    CC_ASSERT(s != nullptr && d != nullptr, "copy resources are not dx12 resources");
+    CC_ASSERT(!s->is_expired(), "copy source is a transient texture used past its epoch (expired)");
+    CC_ASSERT(!d->is_expired(), "copy target is a transient texture used past its epoch (expired)");
+
+    // The footprints give each side's subresource index and box in D3D12's terms: a 3D texture's z is a box coordinate, not a slice.
+    auto const from = compute_texture_footprint(s->description(), src_subresource, region);
+    auto const to = compute_texture_footprint(d->description(), dst_subresource,
+                                              sg::texture_region{.offset = dst_offset, .size = region.size});
+
+    track_texture_access(s, src_subresource, sg::pipeline_stage_flag::copy, sg::access_flag::copy_read,
+                         sg::texture_layout::copy_src);
+    track_texture_access(d, dst_subresource, sg::pipeline_stage_flag::copy, sg::access_flag::copy_write,
+                         sg::texture_layout::copy_dst);
+    flush_barriers();
+
+    D3D12_TEXTURE_COPY_LOCATION src_loc = {};
+    src_loc.pResource = s->_resource.Get();
+    src_loc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+    src_loc.SubresourceIndex = from.subresource;
+    D3D12_TEXTURE_COPY_LOCATION dst_loc = {};
+    dst_loc.pResource = d->_resource.Get();
+    dst_loc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+    dst_loc.SubresourceIndex = to.subresource;
+    auto const box = D3D12_BOX{.left = UINT(from.x),
+                               .top = UINT(from.y),
+                               .front = UINT(from.z),
+                               .right = UINT(from.x + from.width),
+                               .bottom = UINT(from.y + from.height),
+                               .back = UINT(from.z + from.depth)};
+    _list->CopyTextureRegion(&dst_loc, UINT(to.x), UINT(to.y), UINT(to.z), &src_loc, &box);
+}
+
 cc::result<std::unique_ptr<dx12_command_list>> dx12_context::create_dx12_command_list()
 {
     // Single DIRECT queue for now; the pool is per-queue-ready for the copy/compute/video queues to come.

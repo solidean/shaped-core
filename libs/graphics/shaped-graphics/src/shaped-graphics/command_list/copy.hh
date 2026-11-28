@@ -62,8 +62,23 @@ struct sg::buffer_texture_copy
     cc::optional<texture_region> region = {}; ///< the box written; none is the whole subresource
 };
 
+/// Arguments for a GPU copy of a box of one texture's subresource into another subresource (cmd.copy.texture_to_texture).
+///
+/// **Both textures must have the same format**, texel for texel, and the box must fit both; a block-compressed one's is block-aligned.
+/// They may be one texture, between two different subresources, such as a mip into the next.
+/// Neither may have a depth or depth-stencil format: WebGPU copies those only whole, and the copy is kept to what every backend takes.
+struct sg::texture_texture_copy
+{
+    raw_texture_handle src;                    ///< copy source; must not be null; needs texture_usage::copy_src
+    raw_texture_handle dst;                    ///< copy destination; must not be null; needs texture_usage::copy_dst
+    subresource_index src_subresource = {};    ///< the one subresource read
+    subresource_index dst_subresource = {};    ///< the one subresource written
+    cc::optional<texture_region> region = {};  ///< the box read; none is the whole source subresource
+    tg::pos3i dst_offset = tg::pos3i(0, 0, 0); ///< where the box's corner lands in the destination
+};
+
 /// Device→device copy facade for a command list, reached as `cmd.copy`.
-/// Buffer regions and buffer→texture today; the rest of the texture copies land here later.
+/// Buffer regions, buffer→texture and texture→texture; texture→buffer lands here later.
 /// See libs/graphics/shaped-graphics/docs/concepts/command-recording.md.
 class sg::command_list_copy_scope
 {
@@ -95,6 +110,13 @@ public:
     /// Preconditions: the pitch and offset keep their alignments, the region is in bounds and block-aligned, the buffer
     /// holds every row the region needs, and the subresource is not one an open rendering scope draws into.
     void buffer_to_texture(buffer_texture_copy args);
+
+    /// Copies a box of one subresource of `args.src` into one subresource of `args.dst`, texel for texel.
+    /// The copy runs on the GPU in order with this list's other commands, and the write is visible to later ones.
+    /// An empty box is a no-op.
+    /// Preconditions: one format on both sides, not a depth one; the box in bounds of both and block-aligned;
+    /// two different subresources where the textures are one; and the destination not one an open rendering scope draws into.
+    void texture_to_texture(texture_texture_copy args);
 
     // Pinned to its owning command list: neither copyable nor movable.
     command_list_copy_scope(command_list_copy_scope const&) = delete;

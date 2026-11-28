@@ -52,6 +52,34 @@ void command_list_copy_scope::buffer_to_texture(buffer_texture_copy args)
                                 cc::move(args.dst), args.subresource, box);
 }
 
+void command_list_copy_scope::texture_to_texture(texture_texture_copy args)
+{
+    CC_ASSERT(args.src != nullptr, "copy source texture is null");
+    CC_ASSERT(args.dst != nullptr, "copy dest texture is null");
+    CC_ASSERT(args.src->usage().has(texture_usage::copy_src), "copy source texture must have texture_usage::copy_src");
+    CC_ASSERT(args.dst->usage().has(texture_usage::copy_dst), "copy target texture must have texture_usage::copy_dst");
+    CC_ASSERT(args.src->description().format == args.dst->description().format,
+              "a texture copy's source and destination must have the same format");
+    impl::assert_writable_from_bytes(args.dst);
+    impl::assert_valid_subresource(args.src, args.src_subresource);
+    impl::assert_valid_subresource(args.dst, args.dst_subresource);
+    CC_ASSERT(args.src.get() != args.dst.get() || args.src_subresource != args.dst_subresource,
+              "a texture copy within one texture must be between two different subresources");
+    _cmd.check_copy_outside_rendering_targets(args.dst.get(), args.dst_subresource, "a copy into a texture");
+    _cmd.check_copy_outside_rendering_targets(args.src.get(), args.src_subresource, "a copy out of a texture");
+
+    auto const box
+        = args.region.has_value() ? args.region.value() : impl::full_subresource_region(args.src, args.src_subresource);
+    impl::assert_texture_region_in_bounds(args.src, args.src_subresource, box);
+    impl::assert_texture_region_in_bounds(args.dst, args.dst_subresource,
+                                          texture_region{.offset = args.dst_offset, .size = box.size});
+    if (box.is_empty())
+        return; // no-op
+
+    _cmd.copy_texture_to_texture(cc::move(args.src), args.src_subresource, box, cc::move(args.dst),
+                                 args.dst_subresource, args.dst_offset);
+}
+
 void command_list_copy_scope::buffer_bytes_region(buffer_bytes_copy args)
 {
     _cmd.copy_buffer_region(cc::move(args.src), cc::move(args.dst), args.src_offset_in_bytes, args.dst_offset_in_bytes,

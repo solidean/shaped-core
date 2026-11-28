@@ -7,5 +7,5 @@ refs:
 
 # Device-to-device copies out of a texture
 
-`cmd.copy` does buffer regions and buffer→texture.
-Texture→buffer and texture→texture are open.
+`cmd.copy` does buffer regions, buffer→texture and texture→texture.
+Texture→buffer is open.

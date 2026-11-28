@@ -65,7 +65,7 @@ src/shaped-graphics/
     command_list.hh/.cc           [in progress] abstract, single-use recorder; owns the seven scopes below and the backend seams they call
     upload.hh/.cc                 [done]        cmd.upload: inline host→device buffer + texture writes (both backends real)
     download.hh/.cc               [done]        cmd.download: inline readback of buffers + textures -> bytes_future (both backends real)
-    copy.hh/.cc                   [in progress] cmd.copy: buffer regions, and a buffer into a texture region; texture→buffer and texture→texture pending
+    copy.hh/.cc                   [in progress] cmd.copy: buffer regions, a buffer into a texture region, a texture box into another; texture→buffer pending
     compute.hh/.cc                [done]        cmd.compute: bind_pipeline / bind_group / dispatch (both backends real)
     raster.hh/.cc                 [done]        cmd.raster: rendering scope, bindings, viewport/scissor state, draws (both backends real)
     raytracing.hh/.cc             [done]        cmd.raytracing: build_blas / build_tlas / dispatch_rays (dx12, vulkan, metal; webgpu builds only)
@@ -210,7 +210,7 @@ Placement is live for buffers on dx12, vulkan and metal and for textures on dx12
 ```text
 buffer transfer      [in progress]  command_list inline upload / download / copy
 texture transfer     [in progress]  inline + async host↔device texture copies, region- and subresource-scoped;
-                                  buffer→texture copy exists, texture→buffer and texture→texture are open
+                                  buffer→texture and texture→texture copies exist, texture→buffer is open
 barriers             [in progress]  inferred access + state tracking + concurrent-list slot model; dx12 enhanced
                                   barriers real for buffers + textures (subresource-range layout transitions,
                                   entry-layout revert), driven by texture transfer and the rendering scope

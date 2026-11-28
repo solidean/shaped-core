@@ -421,11 +421,13 @@ cmd.ensure_layout(tex, layout, range={})                      // void — leave 
 cmd.prepare_for_async(tex, direction, range={})               // void — ensure_layout with the layout the BACKEND picks for ctx.upload/download/stream. sg::async_direction::{upload,download,both}
                                                               //   only needed after a list MOVED the texture: skip it then and the transfer submits a one-transition list itself and WARNS once per texture. general on all three backends today (see perf-sg-direction-specific-async-layout)
                                                               //   a FRESH texture needs nothing: its first async upload runs the one-time UNDEFINED transition on the transfer queue (vulkan), and dx12 starts in COMMON
-sg::subresource_index  // { int mip_level=0; int array_layer=0; texture_aspect aspect=color }  — addresses one subresource (point analog of subresource_range); <shaped-graphics/resource/subresource.hh>
+sg::subresource_index  // { int mip_level=0; int array_layer=0; texture_aspect aspect=color }, == — addresses one subresource (point analog of subresource_range); <shaped-graphics/resource/subresource.hh>
 sg::texture_region     // { tg::pos3i offset; tg::vec3i size } — a texel box. the copy APIs take cc::optional<texture_region>: none = whole subresource, empty (size<=0) = no-op, else bounds-checked. block-aligned for BC. host bytes TIGHTLY packed (row = width-in-blocks × block-bytes); <shaped-graphics/resource/texture_region.hh>
 cmd.copy.buffer_bytes_region({.src, .dst, .size_in_bytes, .src_offset_in_bytes=0, .dst_offset_in_bytes=0}) // void — device→device buffer copy (src needs copy_src, dst needs copy_dst); size 0 = no-op
 cmd.copy.buffer_data_region<T>({.src, .dst, .count, .src_offset=0, .dst_offset=0}) // void — typed convenience (count + offsets in elements of T; like a subspan)
 cmd.copy.buffer_to_texture({.src, .dst, .src_row_pitch_in_bytes, .src_offset_in_bytes=0, .subresource={}, .region={}}) // void — buffer rows into one subresource; a BC row is a row of BLOCKS
+cmd.copy.texture_to_texture({.src, .dst, .src_subresource={}, .dst_subresource={}, .region={}, .dst_offset={}}) // void — a box texel for texel; ONE format both sides, no depth;
+                                                   //   region is the source's (none = whole src subresource), dst_offset where it lands; one texture only between two subresources
                                                    //   pitch a multiple of sg::buffer_texture_row_pitch_alignment (256), offset of buffer_texture_offset_alignment (512)
 sg::buffer_texture_row_pitch(format, width)        // isize — the smallest legal pitch for `width` texels; how a compute shader writing blocks lays out its buffer
 // cmd.upload/download = INLINE (recorded in this list); ctx.upload/download = ASYNC (copy queue, off the

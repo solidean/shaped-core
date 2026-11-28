@@ -470,4 +470,35 @@ void webgpu_command_list::copy_buffer_to_texture(sg::raw_buffer_handle src,
     touch(src);
     touch(dst);
 }
+void webgpu_command_list::copy_texture_to_texture(sg::raw_texture_handle src,
+                                                  sg::subresource_index const& src_subresource,
+                                                  sg::texture_region const& region,
+                                                  sg::raw_texture_handle dst,
+                                                  sg::subresource_index const& dst_subresource,
+                                                  tg::pos3i dst_offset)
+{
+    auto const& s = as_webgpu_texture(src);
+    auto const& d = as_webgpu_texture(dst);
+    // WebGPU names an array layer by the origin's z, where a 3D texture's z is a depth coordinate.
+    auto const layer_or_z = [](auto const& texture, int z, sg::subresource_index const& sub)
+    { return texture.dimension() == sg::texture_dimension::d3 ? u32(z) : u32(sub.array_layer); };
+    auto const source = WGPUTexelCopyTextureInfo{
+        .texture = s.raw(),
+        .mipLevel = u32(src_subresource.mip_level),
+        .origin = {u32(region.offset[0]), u32(region.offset[1]), layer_or_z(s, region.offset[2], src_subresource)},
+        .aspect = to_wgpu_copy_aspect(s.format(), src_subresource.aspect),
+    };
+    auto const destination = WGPUTexelCopyTextureInfo{
+        .texture = d.raw(),
+        .mipLevel = u32(dst_subresource.mip_level),
+        .origin = {u32(dst_offset[0]), u32(dst_offset[1]), layer_or_z(d, dst_offset[2], dst_subresource)},
+        .aspect = to_wgpu_copy_aspect(d.format(), dst_subresource.aspect),
+    };
+    auto const copy_extent = copy_extent_of(s.format(), region.size);
+
+    end_open_pass("a copy");
+    wgpuCommandEncoderCopyTextureToTexture(encoder(), &source, &destination, &copy_extent);
+    touch(src);
+    touch(dst);
+}
 } // namespace sg::backend::webgpu

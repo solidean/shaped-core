@@ -351,6 +351,7 @@ if(SC_BUILD_TESTS)
             tests/transfer/stream-test.cc
             tests/copy/buffer-texture-copy-test.cc
             tests/copy/copy-test.cc
+            tests/copy/texture-texture-copy-test.cc
             tests/transient/transient-test.cc
             tests/binding/binding-group-array-test.cc
             tests/binding/staging-binding-group-test.cc

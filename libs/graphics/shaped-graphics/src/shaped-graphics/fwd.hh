@@ -102,6 +102,7 @@ struct buffer_bytes_copy;
 template <class T>
 struct buffer_data_copy;
 struct buffer_texture_copy;
+struct texture_texture_copy;
 struct array_buffer_access;
 struct array_texture_access;
 class array_access_declaration; // a live array declaration, ended when it dies (see command_list/array_access_declaration.hh)

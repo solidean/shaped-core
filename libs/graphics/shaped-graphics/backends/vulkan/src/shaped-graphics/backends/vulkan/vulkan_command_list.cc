@@ -898,6 +898,39 @@ void vulkan_command_list::copy_buffer_to_texture(sg::raw_buffer_handle src,
     vkCmdCopyBufferToImage(_buffer, s->_buffer, d->_image, vk_layout_from(dst_layout), 1, &copy);
 }
 
+void vulkan_command_list::copy_texture_to_texture(sg::raw_texture_handle src,
+                                                  sg::subresource_index const& src_subresource,
+                                                  sg::texture_region const& region,
+                                                  sg::raw_texture_handle dst,
+                                                  sg::subresource_index const& dst_subresource,
+                                                  tg::pos3i dst_offset)
+{
+    auto const s = std::dynamic_pointer_cast<vulkan_texture const>(src);
+    auto const d = std::dynamic_pointer_cast<vulkan_texture const>(dst);
+    CC_ASSERT(s != nullptr && d != nullptr, "copy resources are not vulkan resources");
+    CC_ASSERT(!s->is_expired(), "copy source is a transient texture used past its epoch (expired)");
+    CC_ASSERT(!d->is_expired(), "copy target is a transient texture used past its epoch (expired)");
+
+    auto const src_layout
+        = track_texture_access(*s, sg::subresource_range(src_subresource), sg::pipeline_stage_flag::copy,
+                               sg::access_flag::copy_read, sg::texture_layout::copy_src);
+    auto const dst_layout
+        = track_texture_access(*d, sg::subresource_range(dst_subresource), sg::pipeline_stage_flag::copy,
+                               sg::access_flag::copy_write, sg::texture_layout::copy_dst);
+    suspend_rendering("a copy");
+    flush_barriers();
+
+    auto const format = s->description().format;
+    auto const copy = VkImageCopy{
+        .srcSubresource = image_subresource_of(src_subresource, format),
+        .srcOffset = {region.offset[0], region.offset[1], region.offset[2]},
+        .dstSubresource = image_subresource_of(dst_subresource, format),
+        .dstOffset = {dst_offset[0], dst_offset[1], dst_offset[2]},
+        .extent = {u32(region.size[0]), u32(region.size[1]), u32(region.size[2])},
+    };
+    vkCmdCopyImage(_buffer, s->_image, vk_layout_from(src_layout), d->_image, vk_layout_from(dst_layout), 1, &copy);
+}
+
 // Now the device's own answer, since every build and dispatch seam is real.
 // The question this asks is whether THIS command list can trace rays rather than whether the GPU could — which is why
 // it reported false while the seams were stubs, and why it can stop doing so only now.

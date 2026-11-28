@@ -59,6 +59,8 @@ struct sg::subresource_index
     int mip_level = 0;
     int array_layer = 0;
     texture_aspect aspect = texture_aspect::color;
+
+    [[nodiscard]] friend bool operator==(subresource_index const&, subresource_index const&) = default;
 };
 
 /// A half-open box in the subresource grid: a `[start, end)` range on each of the mip, array-slice and aspect-plane axes.
