@@ -1104,6 +1104,10 @@ void async_drive_until_ready(async_node_base& root);
 /// async_drive_until_ready, giving up after `timeout_ms`.
 /// True if `root` is ready.
 [[nodiscard]] bool async_drive_until_ready_for(async_node_base& root, i64 timeout_ms);
+
+/// Waits until `root` is ready, running nothing on this thread, for at most `max_secs`, or for good where it is negative.
+/// True if `root` is ready.
+[[nodiscard]] bool async_wait_passively(async_node_base& root, double max_secs);
 } // namespace impl
 
 /// Drive `root` to completion on the ambient scheduler and return its outcome.
@@ -1185,5 +1189,29 @@ template <class T, class E = async_error>
     if (root->has_error())
         return result_t(cc::error(root->propagate_error()));
     return result_t(root->value()); // copy out
+}
+
+/// Waits until `root` is ready or `max_secs` have passed, and drives NOTHING: no scheduler step, no pump, not this thread's home.
+/// True if `root` is ready; read its outcome through try_value() / try_error() then.
+///
+/// For a caller that may hold a lock, or a reference that other work could invalidate, and so must not run that work:
+/// it only ever sees a node another thread finishes, woken by the node's completion rather than by polling.
+/// A cold node nobody else schedules never finishes here; start it first, or hand it to something that will.
+/// Without threads nothing else could finish it, so this returns whether it is ready already.
+template <class T, class E>
+[[nodiscard]] bool async_wait_passively_for(shared_async<T, E> const& root, double max_secs)
+{
+    CC_ASSERT(root != nullptr, "cannot wait on a null async");
+    CC_ASSERT(max_secs >= 0, "a passive wait's bound must be >= 0; async_wait_passively waits for good");
+    return impl::async_wait_passively(*root, max_secs);
+}
+
+/// async_wait_passively_for with no bound: returns once `root` is ready, however long that takes.
+/// Requires threads, since nothing else could finish the node without them.
+template <class T, class E>
+void async_wait_passively(shared_async<T, E> const& root)
+{
+    CC_ASSERT(root != nullptr, "cannot wait on a null async");
+    (void)impl::async_wait_passively(*root, -1.0);
 }
 } // namespace cc

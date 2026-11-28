@@ -957,6 +957,8 @@ int v = cc::async_blocking_get(a);                                   // -> T (as
 cc::result<int, cc::async_error> r = cc::try_async_blocking_get(a);  // fallible; no "not yet" to handle
 cc::try_async_blocking_get_for(a, 50);                               // -> cc::optional<result>, the only "not yet"
 int v2 = cc::async_blocking_get_on(pool, a);                         // drive on THIS scheduler, not the ambient one
+cc::async_wait_passively_for(a, 0.5);                                // -> bool; drives NOTHING, woken by a's completion on another thread
+cc::async_wait_passively(a);                                         // same, unbounded: for a caller that must not run other work
 cc::result<int, cc::async_error> r2 = cc::into_result(cc::move(a)); // CONSUME a ready handle: MOVES value/error out
 a->is_ready();  a->has_value();  a->has_error();
 int const* pv = a->try_value();   // zero-copy, non-owning; null unless ready with a value

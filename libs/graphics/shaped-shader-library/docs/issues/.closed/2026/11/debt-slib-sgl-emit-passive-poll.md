@@ -5,6 +5,8 @@ refs:
   - file: libs/graphics/shaped-shader-library/src/shaped-shader-library/impl/sgl_emit_cache.cc
   - symbol: passive_get
   - symbol: cc::try_async_blocking_get_for
+closed: 2026-11-28
+resolution: fixed
 ---
 
 # The SGL emit cache polls its store by hand

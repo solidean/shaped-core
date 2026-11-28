@@ -5,6 +5,8 @@ refs:
   - file: libs/base/clean-core/src/clean-core/thread/async.hh
   - symbol: cc::try_async_blocking_get_for
   - file: libs/graphics/shaped-shader-library/src/shaped-shader-library/impl/sgl_emit_cache.cc
+closed: 2026-11-28
+resolution: fixed
 ---
 
 # A passive timed wait on a `cc::async` node
