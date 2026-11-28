@@ -119,6 +119,11 @@ constinit cc::memory_resource const cc::system_memory_resource = {
 /// So the opt-out and the default are the same object here, and code that compares the two must ask CC_HAS_MIMALLOC.
 constinit cc::memory_resource const* const cc::default_memory_resource = &cc::system_memory_resource;
 
+cc::default_memory_usage cc::query_default_memory_usage()
+{
+    return {}; // the platform's malloc reports neither
+}
+
 void cc::trim_thread_memory(memory_trim)
 {
     // the platform's malloc decides for itself what it returns
