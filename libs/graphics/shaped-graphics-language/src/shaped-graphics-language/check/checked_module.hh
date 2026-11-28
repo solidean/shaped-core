@@ -565,9 +565,8 @@ struct sgl::check::checked_module
             && is_equal(target_type_branches, rhs.target_type_branches) && is_equal(files, rhs.files)
             && is_equal(entry_points, rhs.entry_points) && is_equal(tests, rhs.tests)
             && is_equal(test_units, rhs.test_units) && is_equal(internal_entry_points, rhs.internal_entry_points)
-            && is_equal(entry_expectations, rhs.entry_expectations)
-            && is_equal(entry_allowances, rhs.entry_allowances) && is_equal(diagnostics, rhs.diagnostics)
-            && builtins == rhs.builtins;
+            && is_equal(entry_expectations, rhs.entry_expectations) && is_equal(entry_allowances, rhs.entry_allowances)
+            && is_equal(diagnostics, rhs.diagnostics) && builtins == rhs.builtins;
     }
 };
 

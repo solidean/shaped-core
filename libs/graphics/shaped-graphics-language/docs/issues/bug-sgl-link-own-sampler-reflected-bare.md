@@ -21,6 +21,7 @@ Decided by Julius (Quest3D's sgl-migration-readiness plan, D110 item 3): under a
 
 Julius reviews the branch before it merges.
 
-LINK-6 gained the sentence: an entry's interface names each sampler by its LINK-2 name, as the map does, a sampler of the entry's own file too, while the text spells it as the file compiled alone does.
+LINK-6 gained the sentence: an entry's interface names each sampler by its LINK-2 name, as the map does, a sampler of the entry's own file too.
+The text spells it as the file compiled alone does.
 `emit::numbering` carries each number's LINK-2 name, and the interface of a linked emit takes it; the text, the binary and an unlinked compile are unchanged.
 Tests: the deck's water hit on dx12, vulkan and metal text and SGL's own DXIL and SPIR-V, a file naming no module on every target, each against the map.

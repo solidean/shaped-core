@@ -1165,7 +1165,8 @@ fun f() -> float:
   It takes them as a test's expectation takes those inside the test (CHK-232), and one none of them meets is `unmet-expectation`.
   Such an entry point is judged by them alone and never built, as such a test is never run.
   So a declaration that names one is `invalid-pipeline` at the name: a pipeline's stage, a hit group's shader, a ray-tracing pipeline's `raygen` or `miss`, and a callables table's entry.
-  It is still the file's entry point: `describe` lists it apart, as one that expects a diagnostic, so it is never built, and a compile or a link that names it is refused in those words, never as a name the file does not hold.
+  It is still the file's entry point: `describe` lists it apart, as one that expects a diagnostic, so it is never built.
+  A compile or a link that names it is refused in those words, never as a name the file does not hold.
   An entry point that is built and means a warning says so with `@allow` (CHK-576), never with `@expect`.
   On a function that is no entry point it is `invalid-attribute-arguments`.
 * **CHK-576** `@allow("kind")` on an entry point, of any stage, says that a warning of that kind judged of its inlined body (CHK-402) is intended ([why](why/checking.md#chk-576)).

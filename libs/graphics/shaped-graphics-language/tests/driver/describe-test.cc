@@ -1073,19 +1073,21 @@ TEST("sgl describe - an entry point that expects a diagnostic is described as ne
 
     for (auto const t : {sgl::emit::target::hlsl_dx12, sgl::emit::target::hlsl_vulkan, sgl::emit::target::msl})
     {
-        auto const asked
-            = sgl::compile_to_text({.source = k_expecting, .source_name = "edt.sgl", .entry_point = "withExpect", .target = t});
+        auto const asked = sgl::compile_to_text(
+            {.source = k_expecting, .source_name = "edt.sgl", .entry_point = "withExpect", .target = t});
         REQUIRE(asked.has_error());
         CHECK(asked.error() == "edt.sgl: error: entry point 'withExpect' expects a diagnostic, so it is never built\n");
         // CHK-576: the allowing one is built, and warns nothing
-        auto const allowed
-            = sgl::compile_to_text({.source = k_expecting, .source_name = "edt.sgl", .entry_point = "withAllow", .target = t});
+        auto const allowed = sgl::compile_to_text(
+            {.source = k_expecting, .source_name = "edt.sgl", .entry_point = "withAllow", .target = t});
         REQUIRE(allowed.has_value());
         CHECK(allowed.value().warnings.empty());
     }
     // a name the file does not hold is still told apart
-    auto const missing = sgl::compile_to_text(
-        {.source = k_expecting, .source_name = "edt.sgl", .entry_point = "nothing", .target = sgl::emit::target::hlsl_dx12});
+    auto const missing = sgl::compile_to_text({.source = k_expecting,
+                                               .source_name = "edt.sgl",
+                                               .entry_point = "nothing",
+                                               .target = sgl::emit::target::hlsl_dx12});
     REQUIRE(missing.has_error());
     CHECK(missing.error().contains("no entry point named 'nothing'"));
 }
@@ -1102,11 +1104,12 @@ TEST("sgl describe - an allowance nothing meets fails the description, and the c
                                             "@pixel fun whole(input: VSOutput) -> float4 => float4(1.0)\n");
     CHECK(error_of(source).contains("unmet-expectation"));
     auto const t = sgl::emit::target::hlsl_dx12;
-    auto const pixel = sgl::compile_to_text({.source = source, .source_name = "u.sgl", .entry_point = "whole", .target = t});
+    auto const pixel
+        = sgl::compile_to_text({.source = source, .source_name = "u.sgl", .entry_point = "whole", .target = t});
     REQUIRE(pixel.has_error());
     CHECK(pixel.error().contains("unmet-expectation"));
-    CHECK(sgl::compile_to_text({.source = source, .source_name = "u.sgl", .entry_point = "mainVS", .target = t})
-              .has_value());
+    CHECK(
+        sgl::compile_to_text({.source = source, .source_name = "u.sgl", .entry_point = "mainVS", .target = t}).has_value());
 }
 
 TEST("sgl describe - a helper's warning one built stage allows stays the warning of a built sibling that does not")

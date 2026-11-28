@@ -790,11 +790,12 @@ TEST("sgl describe - the JSON lists an entry point that expects a diagnostic apa
                                            "    @position position: hpos4\n"
                                            "@early_depth_test\n"
                                            "@pixel fun shade(p: varyings) -> float4 => float4(1.0)\n");
-    auto const source = cc::string(plain) + "@expect(error = \"feature-not-declared\")\n"
-                                            "@early_depth_test\n"
-                                            "@pixel fun cut(p: varyings) -> float4:\n"
-                                            "    if p.position.x < 0.5 => discard\n"
-                                            "    return float4(1.0)\n";
+    auto const source = cc::string(plain)
+                      + "@expect(error = \"feature-not-declared\")\n"
+                        "@early_depth_test\n"
+                        "@pixel fun cut(p: varyings) -> float4:\n"
+                        "    if p.position.x < 0.5 => discard\n"
+                        "    return float4(1.0)\n";
     auto const described = sgl::describe({.source = source, .source_name = "t.sgl"});
     REQUIRE(described.has_value());
     auto const json = to_json(described.value());

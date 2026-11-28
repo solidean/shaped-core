@@ -105,8 +105,7 @@ TEST("sgl allow - an entry point that allows a warning of its body reports it no
     // CHK-576
     CHECK(outcome_of(cutout("@allow(\"early-depth-keeps-discarded\")\n")) == "");
     // an allowance written twice allows as one
-    CHECK(outcome_of(cutout("@allow(\"early-depth-keeps-discarded\")\n@allow(\"early-depth-keeps-discarded\")\n"))
-          == "");
+    CHECK(outcome_of(cutout("@allow(\"early-depth-keeps-discarded\")\n@allow(\"early-depth-keeps-discarded\")\n")) == "");
     auto const checked = check_sources(read_prelude(), cutout("@allow(\"early-depth-keeps-discarded\")\n"));
     CHECK(checked.module.entry_points.size() == 1);
 }
@@ -120,7 +119,8 @@ TEST("sgl allow - an allowance nothing meets is unmet, a diagnostic of its entry
                                            "@early_depth_test\n"
                                            "@pixel fun whole_ps(p: varyings) -> float4 => float4(1.0)\n");
     CHECK(outcome_of(whole)
-          == "unmet-expectation user:[\"early-depth-keeps-discarded\"] no warning of kind early-depth-keeps-discarded is "
+          == "unmet-expectation user:[\"early-depth-keeps-discarded\"] no warning of kind early-depth-keeps-discarded "
+             "is "
              "judged of this entry point, so it allows nothing\n");
     auto checked = check_sources(read_prelude(), whole);
     auto shown = checked.module.diagnostics;

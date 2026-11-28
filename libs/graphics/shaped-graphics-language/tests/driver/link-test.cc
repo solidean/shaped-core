@@ -1023,8 +1023,8 @@ TEST("sgl link - a sampler of a file that names no module is reflected by the fi
     for (auto const t : {sgl::emit::target::hlsl_dx12, sgl::emit::target::hlsl_vulkan})
         CHECK(reflected_samplers(r.map(), emitted(r, 0, t, sgl::emit::native_route::require)) == "x/own.sgl:gBorder@0");
     auto names = cc::vector<cc::string>();
-    for (auto const& b : alone("x/own.sgl", "cs", sgl::emit::target::hlsl_dx12, sgl::emit::native_route::text, library)
-                             .bindings)
+    for (auto const& b :
+         alone("x/own.sgl", "cs", sgl::emit::target::hlsl_dx12, sgl::emit::native_route::text, library).bindings)
         if (b.is_file_sampler)
             names.push_back(cc::format("{}@{}", b.name, b.slot));
     CHECK(joined(names) == "gBorder@0");
@@ -1047,6 +1047,6 @@ TEST("sgl link - an entry that expects a diagnostic is refused as never built, n
     sgl::link_entry const group[] = {{.source_name = "e.sgl", .entry_point = "bad"}};
     auto const r = sgl::link({.name = "deck", .entries = group, .library = library, .targets = k_all});
     REQUIRE(r.has_error());
-    CHECK(r.error().starts_with(
-        "deck: error: link-no-entry-point: 'bad' of e.sgl expects a diagnostic, so it is never built"));
+    CHECK(r.error().starts_with("deck: error: link-no-entry-point: 'bad' of e.sgl expects a diagnostic, so it is never "
+                                "built"));
 }

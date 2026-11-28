@@ -561,7 +561,8 @@ A warning says that code is legal and likely not what was meant, and some code m
 Before `@allow`, the only way to say so was `@expect`, which makes an entry point a test of its diagnostics and never builds it (CHK-403).
 Following the warning's own advice then removed the shader, and a host asking for it was told the file held no such entry point.
 So intending a warning and testing for one are two attributes: `@expect` keeps its meaning, and `@allow` changes nothing of what is built.
-It stands on the entry point because a warning judged of an inlined body belongs to the entry points it was judged of (CHK-402), and a helper shared by two stages may warn rightly in one and by design in the other.
+It stands on the entry point because a warning judged of an inlined body belongs to the entry points it was judged of (CHK-402).
+A helper shared by two stages may warn rightly in one and by design in the other.
 It names one exact warning kind: an error is no intent, and a pattern such as `*` would keep silencing warnings added later that nobody read.
 
 ## CHK-577

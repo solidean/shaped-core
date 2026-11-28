@@ -44,13 +44,16 @@ Decided by Julius (Quest3D's sgl-migration-readiness plan, D110 item 1): `@expec
 
 Julius and Philip Trettner review the branch before it merges.
 
-- **CHK-576** `@allow("kind")` on an entry point, of any stage, takes the warnings of that kind judged of its inlined body (CHK-402), which are then reported nowhere; the entry point is built as without it.
+- **CHK-576** `@allow("kind")` on an entry point, of any stage, takes the warnings of that kind judged of its inlined body (CHK-402), which are then reported nowhere.
+  The entry point is built as without it.
   Another entry point the same warning was judged of, through a shared helper, keeps it.
   A kind no diagnostic has, an error's kind, a pattern, no argument, a named argument and an `@allow` on a non-entry function are `invalid-attribute-arguments`.
   An allowed warning is nothing an `@expect` meets.
 - **CHK-577** An allowance no warning meets is `unmet-expectation`, a diagnostic of its entry point alone; an entry point never built or whose body did not check reports none.
 - **CHK-566** now points to `@allow`.
-- **CHK-403** gained: such an entry point is still the file's, `describe` lists it in `unbuilt_entry_points` (`expects a diagnostic, so it is never built`), and a compile or a link naming it is refused in those words.
+- **CHK-403** gained: such an entry point is still the file's, and `describe` lists it in `unbuilt_entry_points` (`expects a diagnostic, so it is never built`).
+  A compile or a link naming it is refused in those words.
 
-Tests: the corpus's early-depth file (an allowed cutout built for every target with the feature, a helper's warning allowed by one stage and expected by another), `sgl allow` in expect-test.cc, `sgl describe` and `sgl link` tests.
+Tests: the corpus's early-depth file, with an allowed cutout built for every target with the feature, and a helper's warning allowed by one stage and expected by another.
+Also `sgl allow` in expect-test.cc, and `sgl describe` and `sgl link` tests.
 Once merged, Quest3D's ocean.sgl takes `@allow` and its four bake warnings go.
