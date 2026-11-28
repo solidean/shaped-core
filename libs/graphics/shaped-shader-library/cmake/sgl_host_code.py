@@ -441,7 +441,8 @@ def includes(entries: SglEntries) -> list[str]:
     # A layout built per set of values, from a group whose formats name options.
     if any(format_options(b) for _, b in entries.bindings):
         out += ["<shaped-graphics/binding/pipeline_layout.hh>"]
-    if not entries.bindings and not entries.vertex_inputs and not entries.render_targets:
+    # a module may generate structs alone, ones another module's binding places, whose members' types need their headers
+    if not entries.bindings and not entries.vertex_inputs and not entries.render_targets and not entries.memory_structs:
         return out
     out += ["<clean-core/container/span.hh>", "<clean-core/container/vector.hh>",
            "<shaped-graphics/binding/binding.hh>", "<shaped-graphics/binding/binding_group.hh>"]
